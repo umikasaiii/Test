@@ -34,9 +34,37 @@ body {
   background: #94a3b8;
 }
 
-/* Print styles */
+/* Print styles — report professionale */
 @media print {
-  .no-print {
-    display: none !important;
+  body * { visibility: hidden; }
+  #report-content, #report-content * { visibility: visible; }
+  #report-content { position: fixed; top: 0; left: 0; width: 100%; padding: 20px; }
+
+  /* Hide everything that's not the report */
+  .no-print { display: none !important; }
+
+  /* Page setup */
+  @page {
+    size: A4 portrait;
+    margin: 15mm 12mm;
   }
+
+  /* Reset colors for print */
+  #report-content .bg-gradient-to-r,
+  #report-content .bg-gray-900,
+  #report-content .bg-gray-800 {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color-adjust: exact;
+  }
+
+  /* Avoid page breaks inside photos */
+  #report-content img { break-inside: avoid; }
+  #report-content table { break-inside: avoid; }
+}
+
+/* Safe area handling for standalone PWA */
+@supports (padding: env(safe-area-inset-top)) {
+  .safe-top { padding-top: env(safe-area-inset-top); }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 }

@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import BottomNav from './BottomNav'
+import InstallPrompt from '../ui/InstallPrompt'
 
 const pageTitles: Record<string, string> = {
   '/': 'Dashboard',
@@ -15,6 +17,8 @@ const pageTitles: Record<string, string> = {
   '/spese': 'Spese',
   '/documenti': 'Documenti',
   '/report': 'Report & Analisi',
+  '/calendario': 'Calendario',
+  '/rendering': 'Prima & Dopo',
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -25,12 +29,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <Header onMenuClick={() => setSidebarOpen(true)} title={title} />
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+
+        {/* Extra padding bottom on mobile for BottomNav */}
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6 pb-20 lg:pb-6">
           {children}
         </main>
       </div>
+
+      <BottomNav onMenuClick={() => setSidebarOpen(true)} />
+      <InstallPrompt />
     </div>
   )
 }
