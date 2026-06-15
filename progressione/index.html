@@ -516,9 +516,15 @@ function suggest(ex, check) {
       why: `maiCedimento: S4 con RIR 0–1 non è permesso. Mantieni RIR ≥ 1.` };
 
   // ── S1: stabilize C1 ──────────────────────────────────
-  if (w === 1 && (reps < repMax || rir > rirMax))
-    return { tipo:'stabilizza', carico, reps: Math.min(reps+1, repMax),
-      why: `S1: stabilizza C1 → porta a ${repMax} reps a RIR ${rirMin}–${rirMax}.` };
+  if (w === 1) {
+    if (reps < repMax || rir > rirMax)
+      return { tipo:'stabilizza', carico, reps: Math.min(reps+1, repMax),
+        why: `S1: stabilizza C1. Porta a ${repMax} reps a RIR ${rirMin}–${rirMax}.` };
+    // C1 confirmed — hold for S2
+    const cStr = ex.famiglia === 'corpo_libero_puro' ? `lv ${carico}` : carico > 0 ? `${carico} kg` : '—';
+    return { tipo:'c1ok', carico, reps,
+      why: `C1 stabilizzato (${cStr}). In S2 tieni il carico e spingi le reps.` };
+  }
 
   // ── S2: reps priority ─────────────────────────────────
   if (w === 2) {
@@ -616,6 +622,8 @@ function fmtSug(sug, ex) {
                                          : `${sug.carico} kg · ${sug.reps} reps`;
   if (sug.tipo === 'reps' || sug.tipo === 'stabilizza')
     return `${fmtCar(sug.carico, ex)} · ${sug.reps} reps`;
+  if (sug.tipo === 'c1ok')
+    return `✅ C1 ok · ${fmtCar(sug.carico, ex)} · ${sug.reps} reps`;
   if (sug.tipo === 'tieni')
     return `${fmtCar(sug.carico, ex)} · ${sug.reps} reps (tieni)`;
   if (sug.tipo === 'salto' || sug.tipo === 'salto_guad') {
