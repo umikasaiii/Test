@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { HashRouter as Router, Routes, Route } from 'react-router-dom'
 import { AppProvider } from './context/AppContext'
 import Layout from './components/layout/Layout'
 import Dashboard from './pages/Dashboard'
@@ -18,7 +18,7 @@ import Rendering from './pages/Rendering'
 export default function App() {
   return (
     <AppProvider>
-      <BrowserRouter>
+      <Router>
         <Layout>
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -36,7 +36,7 @@ export default function App() {
             <Route path="/rendering" element={<Rendering />} />
           </Routes>
         </Layout>
-      </BrowserRouter>
+      </Router>
     </AppProvider>
   )
 }
