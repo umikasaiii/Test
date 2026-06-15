@@ -1,5 +1,6 @@
 import { Menu, Bell, HardHat } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
+import { InstallButton } from '../ui/InstallPrompt'
 
 interface Props {
   onMenuClick: () => void
@@ -25,11 +26,14 @@ export default function Header({ onMenuClick, title }: Props) {
         <h1 className="text-lg font-semibold text-gray-800">{title}</h1>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        {/* Pulsante installa app — visibile solo se il browser supporta l'installazione */}
+        <InstallButton />
+
         {alerts > 0 && (
-          <div className="relative">
+          <div className="relative p-2">
             <Bell size={20} className="text-gray-500" />
-            <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
+            <span className="absolute top-0.5 right-0.5 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
               {alerts}
             </span>
           </div>
