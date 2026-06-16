@@ -14,6 +14,7 @@ import Documenti from './pages/Documenti'
 import Report from './pages/Report'
 import Calendario from './pages/Calendario'
 import Rendering from './pages/Rendering'
+import Impostazioni from './pages/Impostazioni'
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="/report" element={<Report />} />
             <Route path="/calendario" element={<Calendario />} />
             <Route path="/rendering" element={<Rendering />} />
+            <Route path="/impostazioni" element={<Impostazioni />} />
           </Routes>
         </Layout>
       </Router>
