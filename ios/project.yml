@@ -50,3 +50,5 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/DSLink.app/DSLink"
         BUNDLE_LOADER: "$(TEST_HOST)"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../dslink/include"
+        SWIFT_OBJC_BRIDGING_HEADER: DSLink/DSLink-Bridging-Header.h
