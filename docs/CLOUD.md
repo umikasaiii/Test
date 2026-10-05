@@ -8,7 +8,8 @@ Status scale: **CODED · BUILD VERIFIED · LOCAL TESTED · CLOUD DEPLOYED · BRO
 | Emulator 1 with ROM (Netplay host) / emulator 2 with **no cartridge** (Netplay client), connected over loopback inside the environment | LOCAL TESTED (joins and starts the core's multiplayer layer; DS menu itself needs the user's firmware → not yet) |
 | Per-slot video (VP8) + audio (Opus) → WebRTC, per-browser input → its own emulator only (buttons + touch screen) | LOCAL TESTED / BROWSER VERIFIED (two headless Chromium, localhost) |
 | Web UI: CREA PARTITA (upload .nds → room code/link), ENTRA (code) | BROWSER VERIFIED (headless Chromium driving the real UI) |
-| Container image (`cloud/Dockerfile`) and CI e2e against it | CODED; BUILD/e2e status = see `cloud` workflow |
+| Container image (`cloud/Dockerfile`: pinned RetroArch+core, gateway, Xvfb, Pulse, ffmpeg) | BUILD VERIFIED (GitHub Actions `cloud` run 37298639235, ~3.5 min) |
+| Both browser suites against the **container** (Playwright Chromium on the runner) | BROWSER VERIFIED in CI (13/13 UI flow + 16/16 independence), same run |
 | Cloudflare Realtime SFU/TURN/Containers integration | **NOT DONE — API unverified** (developers.cloudflare.com blocked in the build environment) |
 | CLOUD DEPLOYED | NO |
 | DEVICE VERIFIED (real phones) | NO |
