@@ -30,7 +30,8 @@ jobs:
           echo "simulator: $SIM"
           xcodebuild -project ios/DSLink.xcodeproj -scheme DSLink -configuration Debug \
             -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath build/ios-sim \
-            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test | tee /tmp/xctest.log | tail -15
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test > /tmp/xctest.log 2>&1 || { grep -E "error:|failed" /tmp/xctest.log | head -40; exit 1; }
+          tail -8 /tmp/xctest.log
           grep -E "Executed [0-9]+ tests, with 0 failures" /tmp/xctest.log
       - name: Package unsigned .app (zip)
         run: |
