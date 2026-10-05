@@ -178,7 +178,11 @@ export class GameSession extends DurableObject<Env> {
     if (!this.env.CONTAINER) return;
     try {
       const { getContainer } = await import("@cloudflare/containers");
-      await getContainer(this.env.CONTAINER as any, (await this.st())!.id).destroy();
+      const c = getContainer(this.env.CONTAINER as any, (await this.st())!.id);
+      try {   // graceful: the gateway flushes the host's SRAM back to private storage and wipes the room before the container dies
+        await c.fetch(new Request("http://container/api/internal/end", { method: "POST", headers: { authorization: `Bearer ${this.env.INTERNAL_TOKEN}` }, signal: AbortSignal.timeout(15_000) }));
+      } catch { /* container already stopped */ }
+      await c.destroy();
     } catch { /* already gone */ }
   }
 

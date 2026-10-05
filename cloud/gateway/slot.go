@@ -18,15 +18,16 @@ import (
 
 // Env describes where the container's tools live (all overridable for tests).
 type Env struct {
-	RetroArch   string // patched RetroArch with X11 + GL + Pulse
-	Core        string // melondsds_libretro.so
-	CfgTool     string // dslink_cfgtool (C++ DSLink layer: identity, MAC, RetroArch config)
-	RomCheck    string // dslink_romcheck
-	FirmwareDir string // optional: directory with the user's bios7.bin / bios9.bin / firmware.bin (private)
-	WorkDir     string
-	RuntimeDir  string // XDG_RUNTIME_DIR for PulseAudio
-	Runtime     string // dslink-runtime (production backend)
-	Backend     string // "runtime" (default) or "retroarch" (reference implementation)
+	RetroArch     string // patched RetroArch with X11 + GL + Pulse
+	Core          string // melondsds_libretro.so
+	CfgTool       string // dslink_cfgtool (C++ DSLink layer: identity, MAC, RetroArch config)
+	RomCheck      string // dslink_romcheck
+	InternalToken string // shared secret with the Worker (enables /api/internal/*)
+	FirmwareDir   string // optional: directory with the user's bios7.bin / bios9.bin / firmware.bin (private)
+	WorkDir       string
+	RuntimeDir    string // XDG_RUNTIME_DIR for PulseAudio
+	Runtime       string // dslink-runtime (production backend)
+	Backend       string // "runtime" (default) or "retroarch" (reference implementation)
 }
 
 const (
@@ -49,6 +50,7 @@ type SlotSpec struct {
 }
 
 type Slot struct {
+	FirmwareDir string // per-slot override of Env.FirmwareDir (cloud sessions)
 	Spec        SlotSpec
 	env         Env
 	dir         string

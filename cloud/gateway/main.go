@@ -25,14 +25,17 @@ import (
 )
 
 type Room struct {
-	Code    string
-	Slots   [2]*Slot
-	Tokens  [2]string
-	Title   string
-	SHA256  string
-	Created time.Time
-	Compat  bool // test-only "Multi-ROM compatibility mode": slot 2 also gets a cartridge
-	peers   [2]*Peer
+	Code         string
+	Slots        [2]*Slot
+	Tokens       [2]string
+	Title        string
+	SHA256       string
+	Created      time.Time
+	FirmwareDirs [2]string // cloud sessions: each slot's own firmware
+	ContentBase  string    // cloud sessions: where to persist saves
+	Ticket       string
+	Compat       bool // test-only "Multi-ROM compatibility mode": slot 2 also gets a cartridge
+	peers        [2]*Peer
 }
 
 type Server struct {
@@ -170,7 +173,7 @@ func (s *Server) startSlots(room *Room, rom1, rom2 string) error {
 		{ID: 2, Display: ":102", Sink: "dslink_s2", Host: false, ROM: rom2, NetPort: 56200, VideoPort: 5008, AudioPort: 5010, Name: "Player2", DeviceID: d2},
 	}
 	for i := range specs {
-		sl := &Slot{Spec: specs[i], env: s.env}
+		sl := &Slot{Spec: specs[i], env: s.env, FirmwareDir: room.FirmwareDirs[i]}
 		if runtimeBackend {
 			sl.Backend = "runtime"
 			v, err := newVideoTrack(fmt.Sprintf("slot%d", i+1))
@@ -286,15 +289,16 @@ func main() {
 	web := flag.String("web", "../web", "static web UI directory")
 	flag.Parse()
 	env := Env{
-		RetroArch:   getenv("DSLINK_RETROARCH", "/opt/dslink/bin/retroarch"),
-		Core:        getenv("DSLINK_CORE", "/opt/dslink/lib/melondsds_libretro.so"),
-		CfgTool:     getenv("DSLINK_CFGTOOL", "/opt/dslink/bin/dslink_cfgtool"),
-		RomCheck:    getenv("DSLINK_ROMCHECK", "/opt/dslink/bin/dslink_romcheck"),
-		FirmwareDir: os.Getenv("DSLINK_FIRMWARE_DIR"),
-		WorkDir:     getenv("DSLINK_WORKDIR", "/tmp/dslink-cloud"),
-		RuntimeDir:  getenv("XDG_RUNTIME_DIR", "/tmp/dslink-xdg"),
-		Runtime:     getenv("DSLINK_RUNTIME", "/opt/dslink/bin/dslink-runtime"),
-		Backend:     getenv("DSLINK_BACKEND", "runtime"),
+		RetroArch:     getenv("DSLINK_RETROARCH", "/opt/dslink/bin/retroarch"),
+		Core:          getenv("DSLINK_CORE", "/opt/dslink/lib/melondsds_libretro.so"),
+		CfgTool:       getenv("DSLINK_CFGTOOL", "/opt/dslink/bin/dslink_cfgtool"),
+		RomCheck:      getenv("DSLINK_ROMCHECK", "/opt/dslink/bin/dslink_romcheck"),
+		FirmwareDir:   os.Getenv("DSLINK_FIRMWARE_DIR"),
+		WorkDir:       getenv("DSLINK_WORKDIR", "/tmp/dslink-cloud"),
+		RuntimeDir:    getenv("XDG_RUNTIME_DIR", "/tmp/dslink-xdg"),
+		Runtime:       getenv("DSLINK_RUNTIME", "/opt/dslink/bin/dslink-runtime"),
+		Backend:       getenv("DSLINK_BACKEND", "runtime"),
+		InternalToken: os.Getenv("DSLINK_INTERNAL_TOKEN"),
 	}
 	os.MkdirAll(env.WorkDir, 0o755)
 	s := &Server{env: env, up: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}}
@@ -313,6 +317,8 @@ func main() {
 			http.Error(w, "method", 405)
 		}
 	})
+	mux.HandleFunc("/api/internal/session", s.internalSession)
+	mux.HandleFunc("/api/internal/end", s.internalEnd)
 	mux.HandleFunc("/api/join", s.joinRoom)
 	mux.HandleFunc("/api/status", s.status)
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {

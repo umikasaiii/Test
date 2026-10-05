@@ -196,9 +196,13 @@ func (s *Slot) StartRuntime(mpPath string) error {
 	for _, d := range []string{"system/melonDS DS", "saves", "config"} {
 		os.MkdirAll(filepath.Join(s.dir, d), 0o755)
 	}
-	if env.FirmwareDir != "" { // private firmware: copied per slot at runtime, never in the image or repo
+	fwDir := env.FirmwareDir
+	if s.FirmwareDir != "" { // cloud sessions: this slot's OWN firmware, streamed from the owner's private storage
+		fwDir = s.FirmwareDir
+	}
+	if fwDir != "" { // private firmware: copied per slot at runtime, never in the image or repo
 		for _, f := range []string{"bios7.bin", "bios9.bin", "firmware.bin"} {
-			if b, err := os.ReadFile(filepath.Join(env.FirmwareDir, f)); err == nil {
+			if b, err := os.ReadFile(filepath.Join(fwDir, f)); err == nil {
 				os.WriteFile(filepath.Join(s.dir, "system/melonDS DS", f), b, 0o600)
 			}
 		}
