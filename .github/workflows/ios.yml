@@ -1,0 +1,36 @@
+name: ios
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: cd ios && xcodegen generate
+      - name: Build for device (arm64, unsigned)
+        run: |
+          xcodebuild -project ios/DSLink.xcodeproj -scheme DSLink -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build/ios-device \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -40
+      - name: Unit tests on the simulator
+        run: |
+          SIM=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone [0-9]+[^(]*' | sed 's/ *$//')
+          echo "simulator: $SIM"
+          xcodebuild -project ios/DSLink.xcodeproj -scheme DSLink -configuration Debug \
+            -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath build/ios-sim \
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test | tail -60
+      - name: Package unsigned .app (zip)
+        run: |
+          cd build/ios-device/Build/Products/Release-iphoneos && zip -qr "$GITHUB_WORKSPACE/DSLink-unsigned-iphoneos.app.zip" DSLink.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DSLink-ios-unsigned
+          path: DSLink-unsigned-iphoneos.app.zip
