@@ -17,3 +17,5 @@ bios*.bin
 firmware*.bin
 *.sav
 *.dsv
+node_modules/
+cloud/gateway/dslink-gateway

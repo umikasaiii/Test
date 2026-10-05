@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>DSLink Cloud</title>
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --fg:#f2f4f8; --muted:#9aa3b2; --accent:#4f8cff; --err:#ff5c5c; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:16px system-ui, sans-serif; }
+  main { max-width:520px; margin:0 auto; padding:28px 20px; }
+  h1 { font-size:36px; margin:0 0 4px; } .muted { color:var(--muted); }
+  button, .btn { display:block; width:100%; min-height:56px; margin:12px 0; border:0; border-radius:16px; background:var(--card);
+    color:var(--fg); font-size:18px; font-weight:600; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; }
+  input[type=text] { width:100%; min-height:56px; border-radius:14px; border:1px solid #2a2f3a; background:var(--card); color:var(--fg);
+    font-size:24px; letter-spacing:6px; text-transform:uppercase; text-align:center; }
+  .err { color:var(--err); margin:10px 0; } .code { font-size:44px; letter-spacing:8px; font-weight:800; color:var(--accent); }
+  #player { display:none; position:fixed; inset:0; background:#000; flex-direction:column; align-items:center; }
+  #player.on { display:flex; }
+  #screen { flex:1; min-height:0; max-width:100%; aspect-ratio:512/768; background:#000; touch-action:none; object-fit:contain; }
+  #pad { width:100%; max-width:520px; padding:8px 12px calc(12px + env(safe-area-inset-bottom)); display:grid;
+    grid-template-columns:1fr 1fr 1fr; gap:6px; user-select:none; }
+  #pad .grp { display:grid; gap:6px; } .dp { grid-template-columns:repeat(3,1fr); } .ab { grid-template-columns:repeat(3,1fr); }
+  .k { min-height:46px; margin:0; font-size:16px; border-radius:12px; background:#262b36; touch-action:none; }
+  .k.on { background:var(--accent); }
+  #hud { position:absolute; top:6px; left:8px; font:12px monospace; color:#9fe; text-shadow:0 0 3px #000; pointer-events:none; }
+</style>
+</head>
+<body>
+<main id="home">
+  <h1>DSLink Cloud</h1>
+  <div class="muted">Nintendo DS nel browser</div>
+  <div id="menu">
+    <button class="primary" id="btnCreate">CREA PARTITA</button>
+    <button id="btnJoin">ENTRA</button>
+  </div>
+  <div id="create" hidden>
+    <p>Scegli la ROM <b>.nds</b> (resta sul server solo finché la stanza è aperta).</p>
+    <input type="file" id="rom" accept=".nds">
+    <button class="primary" id="btnUpload">Crea stanza</button>
+    <div id="createMsg"></div>
+  </div>
+  <div id="join" hidden>
+    <p>Inserisci il codice stanza.</p>
+    <input type="text" id="code" maxlength="5" autocomplete="off" autocapitalize="characters">
+    <button class="primary" id="btnEnter">Entra</button>
+    <div id="joinMsg"></div>
+  </div>
+  <div id="lobby" hidden>
+    <p class="muted">Codice stanza</p><div class="code" id="roomCode"></div>
+    <p class="muted">Link per l'altro giocatore:</p><p id="roomLink" style="word-break:break-all"></p>
+    <button class="primary" id="btnStart">Avvia schermo</button>
+  </div>
+</main>
+<section id="player">
+  <video id="screen" autoplay playsinline></video>
+  <div id="hud"></div>
+  <div id="pad">
+    <div class="grp"><button class="k" data-k="l">L</button><button class="k" data-k="select">Select</button></div>
+    <div class="grp dp">
+      <span></span><button class="k" data-k="up">▲</button><span></span>
+      <button class="k" data-k="left">◀</button><span></span><button class="k" data-k="right">▶</button>
+      <span></span><button class="k" data-k="down">▼</button><span></span>
+    </div>
+    <div class="grp"><button class="k" data-k="r">R</button><button class="k" data-k="start">Start</button></div>
+    <div></div>
+    <div class="grp ab">
+      <span></span><button class="k" data-k="x">X</button><span></span>
+      <button class="k" data-k="y">Y</button><span></span><button class="k" data-k="a">A</button>
+      <span></span><button class="k" data-k="b">B</button><span></span>
+    </div>
+    <div></div>
+  </div>
+</section>
+<script src="app.js"></script>
+</body>
+</html>

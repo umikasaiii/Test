@@ -23,6 +23,8 @@ target_link_libraries(dslink PUBLIC Threads::Threads)
 
 add_executable(dslink_cfgtool tools/cfgtool.cpp)
 target_link_libraries(dslink_cfgtool PRIVATE dslink)
+add_executable(dslink_romcheck tools/romcheck.cpp)
+target_link_libraries(dslink_romcheck PRIVATE dslink)
 
 if(DSLINK_BUILD_TESTS)
   enable_testing()
