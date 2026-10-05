@@ -8,7 +8,7 @@ typedef unsigned short u16; typedef unsigned int u32; typedef unsigned char u8;
 #ifndef TEST_ID
 #define TEST_ID 1
 #endif
-#define SHARED ((volatile u32 *)0x023FE000) /* ARM7 -> ARM9: [0]=magic [1]=x raw [2]=y raw [3]=pen [4]=X btn [5]=Y btn [6]=frame */
+#define SHARED ((volatile u32 *)0x023FE000) /* ARM7 -> ARM9: [0]=magic [1]=x raw [2]=y raw [3]=pen [4]=X btn [5]=Y btn [6]=frame [8]=wifi up [9]=frames sent [10]=frames received [11]=sender id of last frame */
 #define VRAM ((volatile u16 *)0x06800000)
 static u16 FB[256 * 192]; /* back buffer in main RAM, copied during vblank (no tearing in captures) */
 #define RGB(r,g,b) ((u16)((r) | ((g) << 5) | ((b) << 10) | 0x8000))
@@ -53,6 +53,12 @@ int main(void) {
             rect(px, py - 10, 1, 21, RGB(31, 31, 31));
         }
         rect(0, 188, (SHARED[6] & 63) * 4, 4, RGB(8, 31, 8)); /* ARM7 heartbeat bar */
+        /* wireless: yellow bar = frames this console broadcast, cyan bar = frames received from the other console,
+         * square colour = who sent the last one (1 blue, 2 red); grey strip = wifi hardware did not come up */
+        rect(0, 170, 4 * (SHARED[9] > 60 ? 60 : SHARED[9]), 4, RGB(31, 31, 8));
+        rect(0, 176, 4 * (SHARED[10] > 60 ? 60 : SHARED[10]), 4, RGB(8, 31, 31));
+        if (SHARED[10]) rect(236, 170, 14, 14, SHARED[11] == 1 ? RGB(8, 8, 31) : RGB(31, 8, 8));
+        if (!SHARED[8]) rect(0, 164, 256, 2, RGB(16, 16, 16));
         while (R16(0x04000006) < 192) {}   /* wait for vblank */
         for (int i = 0; i < 256 * 192; i++) VRAM[i] = FB[i];
         while (R16(0x04000006) >= 192) {}

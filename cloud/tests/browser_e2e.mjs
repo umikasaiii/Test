@@ -108,6 +108,17 @@ check('touch in browser B shows the stylus crosshair on emulator 2 (ARM7 read th
 check('...and not on emulator 1', tA < 30, `white px on A: ${tA}`);
 await B.evaluate(() => window.dslink.touch(0.5, 0.7, false, false)); await sleep(300);
 
+// ---- 4b. real DS wireless frames between the two emulators (the homebrew ROMs drive the DS Wi-Fi hardware from ARM7)
+// yellow bar (DS y~172) = frames this console broadcast, cyan bar (DS y~178) = frames received from the other console,
+// square colour at DS (243,177) = id of the sender (blue = console 1, red = console 2). Video is 2x the DS resolution.
+const wifiPts = [[8, 344], [8, 356], [486, 354]];
+let wA, wB;
+for (let i = 0; i < 40; i++) { [wA, wB] = [await sample(A, wifiPts), await sample(B, wifiPts)]; if (wA.px[1][2] > 200 && wB.px[1][2] > 200) break; await sleep(500); }
+const yellow = (p) => p[0] > 180 && p[1] > 180 && p[2] < 140, cyan = (p) => p[0] < 140 && p[1] > 180 && p[2] > 180;
+check('DS wireless: both consoles transmit 802.11 frames from ARM7 (yellow bar)', yellow(wA.px[0]) && yellow(wB.px[0]), `A:${wA.px[0]} B:${wB.px[0]}`);
+check('DS wireless: each console RECEIVES the other console\'s frames (cyan bar)', cyan(wA.px[1]) && cyan(wB.px[1]), `A:${wA.px[1]} B:${wB.px[1]}`);
+check('DS wireless: sender ids are crossed (A sees console 2 = red, B sees console 1 = blue)', wA.px[2][0] > 180 && wA.px[2][2] < 120 && wB.px[2][2] > 180 && wB.px[2][0] < 120, `A:${wA.px[2]} B:${wB.px[2]}`);
+
 // ---- 5. DS multiplayer link is internal: status from the container
 const stAll = await waitStatus((r) => r.slots.every((x) => x.netplay_joined && x.core_multiplayer));
 const st = { room: stAll };

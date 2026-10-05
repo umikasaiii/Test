@@ -89,7 +89,7 @@
       return [nx, ny, ny >= 0.5]; // whole-frame coordinates; only the lower half (touch screen) starts a touch
     };
     video.addEventListener('pointerdown', (e) => { const [x, y, ok] = pos(e); if (!ok) return; touching = true; video.setPointerCapture(e.pointerId); api.touch(x, y, false, true); api.touch(x, y, true, false); });
-    video.addEventListener('pointermove', (e) => { if (!touching) return; const [x, y] = pos(e); api.touch(x, Math.max(0, y), true, true); });
+    video.addEventListener('pointermove', (e) => { if (!touching) return; const [x, y] = pos(e); api.touch(x, Math.max(0.5, y), true, true); });
     const end = (e) => { if (!touching) return; touching = false; const [x, y] = pos(e); api.touch(x, Math.max(0.5, y), false, false); };
     video.addEventListener('pointerup', end); video.addEventListener('pointercancel', end);
   }

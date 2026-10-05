@@ -36,8 +36,68 @@ jobs:
           cmake -S runtime -B build/rt -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/rt
       - name: Runtime single instance (video/audio/input/touch/SRAM/MAC/no-content/stop)
         run: python3 tests/runtime/test_single.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/rom/dslink_test_1.nds build/dslink/dslink_cfgtool
+      - name: Real DS wireless frames over the Multiplayer Bridge (ARM7 Wi-Fi homebrew, no RetroArch)
+        run: python3 tests/runtime/test_wifi_bridge.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/rom/dslink_test_1.nds build/rom/dslink_test_2.nds build/dslink/dslink_cfgtool
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - name: Gateway session provisioning contract (ticketed private content, per-slot firmware, SRAM persistence)
+        run: |
+          (cd cloud/gateway && go build -o ../../build/dslink-gateway .)
+          DSLINK_INTERNAL_TOKEN=internal-secret DSLINK_BACKEND=runtime DSLINK_VIDEO_CODEC=vp8 DSLINK_RUNTIME=$PWD/build/rt/dslink-runtime DSLINK_CORE=$PWD/build/core/src/libretro/melondsds_libretro.so \
+          DSLINK_CFGTOOL=$PWD/build/dslink/dslink_cfgtool DSLINK_ROMCHECK=$PWD/build/dslink/dslink_romcheck DSLINK_WORKDIR=/tmp/dslink-cloud DSLINK_LOOPBACK=1 \
+            build/dslink-gateway -addr :8080 -web cloud/web > /tmp/gw.log 2>&1 &
+          sleep 3; python3 cloud/tests/internal_session.py http://localhost:8080 build/rom/dslink_test_1.nds
       - name: Two simultaneous DS instances
         run: python3 tests/runtime/test_two_ds.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/rom/dslink_test_1.nds build/rom/dslink_test_2.nds build/dslink/dslink_cfgtool
+
+  worker:
+    # Accounts, passkeys, friends, presence, private library, invites, sessions: Workers runtime (workerd) with real D1 / R2 / Durable Objects, locally.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: cd cloud/worker && npm ci --legacy-peer-deps && npx tsc --noEmit && npx vitest run
+
+  pwa-e2e:
+    # PWA in real Chrome (mobile emulation, virtual passkey authenticator): Worker (wrangler dev) -> gateway -> DSLink Runtime -> melonDS -> WebRTC H.264.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3 libavcodec-dev libavutil-dev libswscale-dev libswresample-dev gcc-arm-none-eabi binutils-arm-none-eabi
+          cd cloud/worker && npm ci --legacy-peer-deps
+          cd ../tests && npm install && npx playwright install --with-deps chrome
+      - name: Build everything
+        run: |
+          mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
+          cmake -S dslink -B build/dslink -G Ninja -DCMAKE_BUILD_TYPE=Release -DDSLINK_BUILD_TESTS=OFF && cmake --build build/dslink
+          . upstream/versions.env && cmake -S upstream/melonds-ds -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_OPENGL=OFF -DENABLE_OGLRENDERER=OFF -DMELONDS_REPOSITORY_TAG="$MELONDS_COMMIT" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && cmake --build build/core --parallel
+          cmake -S runtime -B build/rt -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/rt
+          (cd cloud/gateway && go build -o ../../build/dslink-gateway .)
+      - name: Start gateway (stands in for the Container) and Worker
+        run: |
+          DSLINK_INTERNAL_TOKEN=internal-secret DSLINK_BACKEND=runtime DSLINK_RUNTIME=$PWD/build/rt/dslink-runtime DSLINK_CORE=$PWD/build/core/src/libretro/melondsds_libretro.so \
+          DSLINK_CFGTOOL=$PWD/build/dslink/dslink_cfgtool DSLINK_ROMCHECK=$PWD/build/dslink/dslink_romcheck DSLINK_WORKDIR=/tmp/dslink-cloud DSLINK_LOOPBACK=1 \
+            build/dslink-gateway -addr :8080 -web cloud/web > /tmp/gw.log 2>&1 &
+          cd cloud/worker && npx wrangler d1 migrations apply dslink --local -c wrangler.dev.jsonc && (npx wrangler dev -c wrangler.dev.jsonc --port 8787 --local > /tmp/wrangler.log 2>&1 &)
+          for i in $(seq 1 40); do curl -sf localhost:8787/api/health && break; sleep 1; done
+      - name: PWA end-to-end
+        env: { CHROME: /opt/google/chrome/chrome }
+        run: cd cloud/tests && node pwa_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
+      - if: always()
+        run: tail -60 /tmp/gw.log /tmp/wrangler.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: pwa-e2e-screenshots, path: "/tmp/pwa_*_game.png" }
 
   retroarch-parity:
     # RetroArch is REFERENCE ONLY: built here solely to compare behaviour (bridge routing, A/B frontend parity).
