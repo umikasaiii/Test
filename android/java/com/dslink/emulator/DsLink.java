@@ -1,6 +1,5 @@
 package com.dslink.emulator;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /** Thin bridge to the portable C++ DSLink library (dslink/). All structured data is "key=value\n" text. */
@@ -45,29 +44,14 @@ final class DsLink {
 
     /** Parses "k=v\n" text. Never returns null. */
     static Map<String, String> kv(String text) {
-        Map<String, String> m = new HashMap<>();
-        if (text == null) return m;
-        for (String line : text.split("\n")) {
-            int eq = line.indexOf('=');
-            if (eq > 0) m.put(line.substring(0, eq), line.substring(eq + 1));
-        }
-        return m;
+        return Kv.parse(text);
     }
 
     static String encode(Map<String, String> m) {
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, String> e : m.entrySet()) {
-            String v = e.getValue() == null ? "" : e.getValue().replace('\n', ' ').replace('\r', ' ');
-            sb.append(e.getKey()).append('=').append(v).append('\n');
-        }
-        return sb.toString();
+        return Kv.encode(m);
     }
 
     static int parseInt(String s, int def) {
-        try {
-            return Integer.parseInt(s);
-        } catch (Exception e) {
-            return def;
-        }
+        return Kv.parseInt(s, def);
     }
 }

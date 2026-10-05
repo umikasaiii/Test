@@ -30,3 +30,39 @@ jobs:
         run: cmake --build build -j4
       - name: Unit + loopback integration tests
         run: ./build/dslink_tests
+
+  integration-linux:
+    # Real RetroArch (patched) + real melonDS DS core, two processes, LAN Netplay on localhost, configured only by DSLink.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake zlib1g-dev
+      - name: Verify pins
+        run: scripts/check_pins.sh
+      - name: Build DSLink tools
+        run: cmake -S dslink -B build/dslink -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/dslink
+      - name: Build melonDS DS core
+        run: |
+          . upstream/versions.env
+          cmake -S upstream/melonds-ds -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_OPENGL=OFF \
+            -DENABLE_OGLRENDERER=OFF -DMELONDS_REPOSITORY_TAG="$MELONDS_COMMIT" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build build/core --parallel 4
+      - name: Build patched RetroArch (headless)
+        run: |
+          rsync -a --exclude .git upstream/retroarch/ build/retroarch/
+          for p in patches/retroarch/*.patch; do patch -p1 -d build/retroarch < "$p"; done
+          cd build/retroarch
+          ./configure --disable-x11 --disable-wayland --disable-egl --disable-opengl --disable-opengl_core --disable-opengl1 \
+            --disable-alsa --disable-pulse --disable-oss --disable-qt --disable-sdl2 --disable-udev --disable-vulkan \
+            --disable-vulkan_display --disable-ffmpeg --disable-cg --disable-glsl --disable-glslang --disable-jack \
+            --disable-kms --disable-materialui --disable-xmb --disable-ozone --enable-networking --disable-cheevos \
+            --disable-discord --disable-v4l2 --disable-libusb
+          make -j4
+      - name: Netplay integration test
+        run: |
+          tests/integration/linux_netplay_smoke.sh "$PWD/build/retroarch/retroarch" \
+            "$(find build/core -name 'melondsds_libretro.so' | head -n1 | xargs realpath)" "$PWD/build/dslink/dslink_cfgtool"

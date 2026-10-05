@@ -117,7 +117,7 @@ public class JoinActivity extends Activity implements Discovery.Listener {
                 .setPositiveButton("Connetti", (d, w) -> {
                     String addr = ip.getText().toString().trim();
                     int pt = DsLink.parseInt(port.getText().toString().trim(), 0);
-                    if (!addr.matches("(\\d{1,3}\\.){3}\\d{1,3}") || pt < 1024 || pt > 65535) {
+                    if (!Names.isValidIPv4(addr) || !Names.isValidPort(pt)) {
                         info("Dati non validi", "Inserisci un indirizzo IPv4 valido e una porta tra 1024 e 65535.");
                         return;
                     }

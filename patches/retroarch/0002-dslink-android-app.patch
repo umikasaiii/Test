@@ -1,0 +1,116 @@
+diff --git a/pkg/android/phoenix-common/jni/Android.mk b/pkg/android/phoenix-common/jni/Android.mk
+index 8d9c779c2d..fd9dc4e7b2 100644
+--- a/pkg/android/phoenix-common/jni/Android.mk
++++ b/pkg/android/phoenix-common/jni/Android.mk
+@@ -226,3 +226,6 @@ ifneq ($(SANITIZER),)
+ endif
+ 
+ include $(BUILD_SHARED_LIBRARY)
++
++# DSLink native module (portable C++ library + JNI bridge), see /android/jni and /dslink in the DSLink repository.
++include $(LOCAL_PATH)/../../../../../../android/jni/dslink.mk
+diff --git a/pkg/android/phoenix/AndroidManifest.xml b/pkg/android/phoenix/AndroidManifest.xml
+index ba4201e8a0..d8a0937873 100644
+--- a/pkg/android/phoenix/AndroidManifest.xml
++++ b/pkg/android/phoenix/AndroidManifest.xml
+@@ -14,6 +14,12 @@
+     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.VIBRATE" />
++    <!-- DSLink: LAN discovery / multiplayer -->
++    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
++    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
++    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
++    <uses-permission android:name="android.permission.RECORD_AUDIO" />
++    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+ 
+     <application
+         android:name="com.retroarch.playcore.RetroArchApplication"
+@@ -27,15 +33,20 @@
+         android:extractNativeLibs="true"
+         android:requestLegacyExternalStorage="true"
+         tools:ignore="UnusedAttribute">
+-        <activity android:name="com.retroarch.browser.mainmenu.MainMenuActivity" android:exported="true" android:launchMode="singleInstance">
++        <activity android:name="com.dslink.emulator.HomeActivity" android:exported="true" android:screenOrientation="portrait" android:theme="@android:style/Theme.Material.NoActionBar">
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+                 <category android:name="android.intent.category.LAUNCHER" />
+-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+-                <category android:name="tv.ouya.intent.category.GAME" />
+             </intent-filter>
+         </activity>
+-        <activity android:name="com.retroarch.browser.retroactivity.RetroActivityFuture" android:exported="true" android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|fontScale" android:theme="@android:style/Theme.NoTitleBar.Fullscreen" android:launchMode="singleInstance">
++        <activity android:name="com.dslink.emulator.HostActivity" android:exported="false" android:screenOrientation="portrait" android:theme="@android:style/Theme.Material.NoActionBar" />
++        <activity android:name="com.dslink.emulator.JoinActivity" android:exported="false" android:screenOrientation="portrait" android:theme="@android:style/Theme.Material.NoActionBar" />
++        <activity android:name="com.dslink.emulator.SettingsActivity" android:exported="false" android:screenOrientation="portrait" android:theme="@android:style/Theme.Material.NoActionBar" />
++        <activity android:name="com.dslink.emulator.DiagnosticsActivity" android:exported="false" android:screenOrientation="portrait" android:theme="@android:style/Theme.Material.NoActionBar" />
++        <activity android:name="com.retroarch.browser.mainmenu.MainMenuActivity" android:exported="false" android:launchMode="singleInstance" />
++        <!-- DSLink: the emulator runs in its own process so each game starts from a clean RetroArch state while the
++             DSLink session (host control server, discovery) lives on in the main process. -->
++        <activity android:name="com.retroarch.browser.retroactivity.RetroActivityFuture" android:process=":ra" android:exported="true" android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|fontScale" android:theme="@android:style/Theme.NoTitleBar.Fullscreen" android:launchMode="singleInstance">
+             <meta-data android:name="android.app.lib_name" android:value="retroarch-activity" />
+             <meta-data android:name="android.app.func_name" android:value="ANativeActivity_onCreate" />
+         </activity>
+diff --git a/pkg/android/phoenix/build.gradle b/pkg/android/phoenix/build.gradle
+index 6b0660c6cd..6d3a576e6a 100644
+--- a/pkg/android/phoenix/build.gradle
++++ b/pkg/android/phoenix/build.gradle
+@@ -44,6 +44,20 @@ android {
+   }
+ 
+   productFlavors {
++    dslink {
++      applicationId "com.dslink.emulator"
++      minSdkVersion 29
++      targetSdkVersion 29
++      versionCode 1
++      versionName "1.0.0"
++      resValue "string", "app_name", "DSLink"
++      buildConfigField "boolean", "PLAY_STORE_BUILD", "false"
++
++      dimension "variant"
++      ndk {
++        abiFilters 'arm64-v8a'
++      }
++    }
+     normal {
+       resValue "string", "app_name", "RetroArch"
+       buildConfigField "boolean", "PLAY_STORE_BUILD", "false"
+@@ -104,6 +118,16 @@ android {
+       jni.srcDirs = []
+       res.srcDirs = ['res', '../phoenix-common/res']
+     }
++    dslink {
++      // DSLink app (Java UI + JNI) lives outside the upstream tree: see /android in the DSLink repository.
++      java.srcDirs += ['../play-core-stub', '../../../../../android/java']
++      assets.srcDirs += ['../../../../../android/assets']
++      jniLibs.srcDirs += ['../../../../../android/jniLibs']
++      res.srcDirs += ['../../../../../android/res']
++    }
++    testDslink {
++      java.srcDirs += ['../../../../../android/test/java']
++    }
+     normal {
+       java.srcDirs += ['../play-core-stub']
+     }
+@@ -128,6 +152,12 @@ android {
+     }
+   }
+ 
++  lintOptions {
++    // DSLink CI publishes the lint report; upstream RetroArch code is not ours to fix.
++    abortOnError false
++    checkReleaseBuilds false
++  }
++
+   signingConfigs {
+     if (project.hasProperty("RELEASE_STORE_FILE")) {
+       release {
+@@ -156,6 +186,7 @@ android {
+ def playCore = 'com.google.android.play:core:1.10.3'
+ 
+ dependencies {
++  testImplementation 'junit:junit:4.13.2'
+   playStoreNormalImplementation playCore
+   playStorePlusImplementation playCore
+ }

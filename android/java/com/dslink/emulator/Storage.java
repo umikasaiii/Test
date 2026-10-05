@@ -62,8 +62,7 @@ final class Storage {
     }
 
     static String safeName(String n) {
-        String s = n.replaceAll("[^A-Za-z0-9._ \\-()]", "_");
-        return s.isEmpty() ? "file" : s;
+        return Names.safeName(n);
     }
 
     /** Copies a SAF document into 'dest' (atomically via a temp file). Returns false on any I/O error. */
@@ -164,19 +163,11 @@ final class Storage {
 
     // ---- system files ---------------------------------------------------------------------------------------
 
-    /** Chooses the canonical file name from the size alone (bios7 16 KiB, bios9 4 KiB, firmware 128/256/512 KiB). */
-    static String systemFileNameForSize(long size) {
-        if (size == 0x4000) return "bios7.bin";
-        if (size == 0x1000) return "bios9.bin";
-        if (size == 0x20000 || size == 0x40000 || size == 0x80000) return "firmware.bin";
-        return null;
-    }
-
     /** Imports one picked file; returns a human-readable result line. */
     String importSystemFile(Uri uri) {
         File tmp = new File(systemDir(), "import.tmp");
         if (!copyUri(uri, tmp)) return "Impossibile leggere " + displayName(ctx, uri);
-        String target = systemFileNameForSize(tmp.length());
+        String target = Names.systemFileNameForSize(tmp.length());
         if (target == null) {
             //noinspection ResultOfMethodCallIgnored
             tmp.delete();
