@@ -1,0 +1,36 @@
+# DSLink Cloud PRODUCTION image: DSLink Runtime (own minimal Libretro frontend) + melonDS DS core + WebRTC gateway.
+# RetroArch is NOT built, NOT copied and NOT present in this image (it is the reference build: cloud/Dockerfile).
+# Build context = repository root:  docker build -f cloud/Dockerfile.runtime -t dslink-runtime .
+# No ROM / BIOS / firmware is ever baked in: the user's private files are mounted/streamed at run time.
+
+FROM ubuntu:24.04 AS build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake ninja-build git ca-certificates pkg-config python3 curl golang-go \
+    libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . /src
+RUN cmake -S dslink -B /build/dslink -G Ninja -DCMAKE_BUILD_TYPE=Release -DDSLINK_BUILD_TESTS=OFF && cmake --build /build/dslink
+RUN . upstream/versions.env && cmake -S upstream/melonds-ds -B /build/core -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DENABLE_OPENGL=OFF -DENABLE_OGLRENDERER=OFF -DMELONDS_REPOSITORY_TAG="$MELONDS_COMMIT" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+ && cmake --build /build/core --parallel
+# only the libretro.h header is taken from upstream/retroarch (libretro-common); no RetroArch code is compiled
+RUN cmake -S runtime -B /build/rt -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build /build/rt --target dslink-runtime
+RUN cd cloud/gateway && CGO_ENABLED=0 go build -o /build/dslink-gateway .
+
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends libavcodec60 libavutil58 libswscale7 libswresample4 procps ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /opt/dslink/bin /opt/dslink/lib /opt/dslink/web /var/lib/dslink
+COPY --from=build /build/rt/dslink-runtime /opt/dslink/bin/dslink-runtime
+COPY --from=build /build/core/src/libretro/melondsds_libretro.so /opt/dslink/lib/melondsds_libretro.so
+COPY --from=build /build/dslink/dslink_cfgtool /build/dslink/dslink_romcheck /opt/dslink/bin/
+COPY --from=build /build/dslink-gateway /opt/dslink/bin/dslink-gateway
+COPY cloud/web /opt/dslink/web
+COPY LICENSE /opt/dslink/LICENSE
+ENV DSLINK_BACKEND=runtime DSLINK_RUNTIME=/opt/dslink/bin/dslink-runtime DSLINK_WORKDIR=/var/lib/dslink
+ENV DSLINK_UDP_MIN=50000 DSLINK_UDP_MAX=50100
+EXPOSE 8080/tcp 50000-50100/udp
+ENTRYPOINT ["/opt/dslink/bin/dslink-gateway", "-addr", ":8080", "-web", "/opt/dslink/web"]

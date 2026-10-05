@@ -15,8 +15,69 @@ jobs:
       - name: vet + build
         run: cd cloud/gateway && go vet ./... && go build ./...
 
+  runtime-tests:
+    # DSLink Runtime process-level tests (no RetroArch involved): single DS, bridge parity, two simultaneous DS instances.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3 ffmpeg \
+            libavcodec-dev libavutil-dev libswscale-dev libswresample-dev gcc-arm-none-eabi binutils-arm-none-eabi
+      - name: Homebrew test ROMs
+        run: mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
+      - name: Build dslink tools, melonDS DS core, DSLink Runtime
+        run: |
+          cmake -S dslink -B build/dslink -G Ninja -DCMAKE_BUILD_TYPE=Release -DDSLINK_BUILD_TESTS=OFF && cmake --build build/dslink
+          . upstream/versions.env && cmake -S upstream/melonds-ds -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_OPENGL=OFF -DENABLE_OGLRENDERER=OFF -DMELONDS_REPOSITORY_TAG="$MELONDS_COMMIT" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && cmake --build build/core --parallel
+          cmake -S runtime -B build/rt -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/rt
+      - name: Runtime single instance (video/audio/input/touch/SRAM/MAC/no-content/stop)
+        run: python3 tests/runtime/test_single.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/rom/dslink_test_1.nds build/dslink/dslink_cfgtool
+      - name: Two simultaneous DS instances
+        run: python3 tests/runtime/test_two_ds.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/rom/dslink_test_1.nds build/rom/dslink_test_2.nds build/dslink/dslink_cfgtool
+
+  retroarch-parity:
+    # RetroArch is REFERENCE ONLY: built here solely to compare behaviour (bridge routing, A/B frontend parity).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3 ffmpeg xvfb xdotool pulseaudio \
+            build-essential libavcodec-dev libavutil-dev libswscale-dev libswresample-dev gcc-arm-none-eabi binutils-arm-none-eabi \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxxf86vm-dev libxkbcommon-dev libxkbcommon-x11-dev libpulse-dev libgl1-mesa-dev libx11-xcb-dev libxcb1-dev libxcb-xkb-dev libxi-dev zlib1g-dev
+      - name: Homebrew test ROMs
+        run: mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
+      - name: Build tools, core, runtime
+        run: |
+          cmake -S dslink -B build/dslink -G Ninja -DCMAKE_BUILD_TYPE=Release -DDSLINK_BUILD_TESTS=OFF && cmake --build build/dslink
+          . upstream/versions.env && cmake -S upstream/melonds-ds -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_OPENGL=OFF -DENABLE_OGLRENDERER=OFF -DMELONDS_REPOSITORY_TAG="$MELONDS_COMMIT" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && cmake --build build/core --parallel
+          cmake -S runtime -B build/rt -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/rt
+      - name: Build RetroArch (reference, patched as in the baseline)
+        run: |
+          mkdir -p build/ra && cp -r upstream/retroarch/. build/ra/ && rm -rf build/ra/.git
+          for p in patches/retroarch/*.patch; do patch -p1 -d build/ra < "$p"; done
+          cd build/ra && ./configure --enable-x11 --enable-opengl --disable-opengl_core --disable-opengl1 --disable-xvideo --enable-pulse \
+            --disable-wayland --disable-egl --disable-alsa --disable-oss --disable-qt --disable-sdl2 --disable-udev --disable-vulkan \
+            --disable-vulkan_display --disable-ffmpeg --disable-cg --enable-glsl --disable-glslang --disable-jack --disable-kms \
+            --disable-materialui --disable-xmb --disable-ozone --enable-networking --disable-cheevos --disable-discord --disable-v4l2 --disable-libusb
+          make -j"$(nproc)"
+      - name: Bridge parity (same core under RetroArch Netplay vs Runtime bridge)
+        run: python3 tests/runtime/test_bridge_parity.py build/rt/dslink-runtime build/rt/dslink_npt_libretro.so build/ra/retroarch
+      - name: A/B frontend parity (RetroArch vs Runtime, same core/ROM)
+        run: |
+          pulseaudio --start --exit-idle-time=-1 || true
+          pactl load-module module-null-sink sink_name=parity_ra || true
+          python3 tests/parity/ab_parity.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/ra/retroarch build/rom/dslink_test_1.nds build/dslink/dslink_cfgtool
+
   container-e2e:
-    # Builds the container image and drives it with two real Chromium browsers (WebRTC).
+    # Builds the PRODUCTION image (DSLink Runtime, no RetroArch) and drives it with two real Chrome browsers (WebRTC, H.264).
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
@@ -27,7 +88,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi
           mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
       - name: Build the container
-        run: docker build -f cloud/Dockerfile -t dslink-cloud .
+        run: docker build -f cloud/Dockerfile.runtime -t dslink-cloud .
       - name: Start the container
         run: |
           docker run -d --name dslink -p 8080:8080 -e DSLINK_DEBUG=1 dslink-cloud
@@ -35,10 +96,12 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - name: Install Playwright + Chromium
-        run: cd cloud/tests && npm install && npx playwright install --with-deps chromium
+        run: cd cloud/tests && npm install && npx playwright install --with-deps chrome
       - name: Product flow through the UI (emulator 2 has no cartridge)
+        env: { CHROME: /opt/google/chrome/chrome }
         run: cd cloud/tests && node browser_ui_nocart.mjs http://localhost:8080 "$PWD/../../build/rom/dslink_test_1.nds"
       - name: Independent audio/video/input/touch (compatibility mode, both emulators have a test ROM)
+        env: { CHROME: /opt/google/chrome/chrome }
         run: cd cloud/tests && node browser_e2e.mjs http://localhost:8080 "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds"
       - name: Container logs
         if: always()

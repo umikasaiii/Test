@@ -1,4 +1,4 @@
-# DSLink Cloud container: RetroArch(+melonDS DS) x2, Xvfb x2, PulseAudio, ffmpeg capture, WebRTC gateway.
+# REFERENCE image (not production): RetroArch(+melonDS DS) x2 capture path, kept for A/B parity and diagnostics. Production = cloud/Dockerfile.runtime.
 # Build context = repository root (needs the pinned submodules): docker build -f cloud/Dockerfile -t dslink-cloud .
 # The user's DS firmware (bios7.bin / bios9.bin / firmware.bin) is NEVER baked in: mount it and set DSLINK_FIRMWARE_DIR.
 
@@ -45,7 +45,7 @@ COPY --from=build /build/dslink/dslink_cfgtool /build/dslink/dslink_romcheck /op
 COPY --from=build /build/dslink-gateway /opt/dslink/bin/dslink-gateway
 COPY cloud/web /opt/dslink/web
 COPY LICENSE /opt/dslink/LICENSE
-ENV DSLINK_WORKDIR=/var/lib/dslink XDG_RUNTIME_DIR=/tmp/dslink-xdg LIBGL_ALWAYS_SOFTWARE=1
+ENV DSLINK_BACKEND=retroarch DSLINK_WORKDIR=/var/lib/dslink XDG_RUNTIME_DIR=/tmp/dslink-xdg LIBGL_ALWAYS_SOFTWARE=1
 # WebRTC media: UDP range is configurable; publish it and set DSLINK_PUBLIC_IP (or use a TURN service via DSLINK_ICE)
 ENV DSLINK_UDP_MIN=50000 DSLINK_UDP_MAX=50100
 EXPOSE 8080/tcp 50000-50100/udp
