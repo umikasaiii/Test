@@ -17,6 +17,7 @@
 #include "link.hpp"
 #include "libretro_host.hpp"
 #include "mp_bridge.hpp"
+#include "dlplay_diag.hpp"
 
 using namespace dsrt;
 using Clock = std::chrono::steady_clock;
@@ -134,6 +135,9 @@ int main(int argc, char** argv) {
     }
 
     MpBridge mp;
+    DlDiag dl;
+    dl.logFn = [&](const std::string& s) { log(s); };
+    mp.setDiag(&dl);
     if (args.get("mp-role") == "host") {
         if (!mp.startHost(host, args.get("mp-path"), err)) { log("FATAL: " + err); return 6; }
         log("multiplayer bridge: host");
@@ -215,6 +219,7 @@ int main(int argc, char** argv) {
             host.metrics.fps = double(host.metrics.frames - lastFrames) / secs;
             lastFrames = host.metrics.frames;
             lastStatus = Clock::now();
+            dl.tick(std::chrono::duration<double, std::milli>(Clock::now().time_since_epoch()).count());
             std::ostringstream js;
             js << "{\"name\":\"" << jsonEscape(name) << "\",\"frames\":" << host.metrics.frames.load() << ",\"fps\":" << host.metrics.fps.load()
                << ",\"width\":" << host.metrics.width.load() << ",\"height\":" << host.metrics.height.load()
@@ -222,7 +227,7 @@ int main(int argc, char** argv) {
                << ",\"mp_role\":\"" << (mp.role() == MpBridge::Role::Host ? "host" : mp.role() == MpBridge::Role::Client ? "client" : "none")
                << "\",\"mp_peers\":" << mp.peers() << ",\"mp_in\":" << mp.packetsIn() << ",\"mp_out\":" << mp.packetsOut()
                << ",\"video_frames\":" << av.videoFrames() << ",\"video_bytes\":" << av.videoBytes() << ",\"audio_packets\":" << av.audioPackets()
-               << ",\"env_unhandled\":" << host.metrics.envUnhandled.load() << "}";
+               << ",\"env_unhandled\":" << host.metrics.envUnhandled.load() << "," << dl.json() << "}";
             std::string s = js.str();
             link.send(L_STATUS, 0, s.data(), s.size());
             slowest = 0;

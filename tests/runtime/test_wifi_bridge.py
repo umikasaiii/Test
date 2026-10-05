@@ -49,6 +49,10 @@ t.check("each console received the OTHER console's frames (sender id: #1 sees re
         b1["sq"][0] > 200 and b1["sq"][2] < 100 and b2["sq"][2] > 200 and b2["sq"][0] < 100, f"{b1['sq']} / {b2['sq']}")
 s1, s2 = r1.status, r2.status
 t.check("bridge counters: frames flowed both ways", all(s.get("mp_in", 0) >= 3 and s.get("mp_out", 0) >= 3 for s in (s1, s2)), f"P1 in/out {s1.get('mp_in')}/{s1.get('mp_out')}  P2 in/out {s2.get('mp_in')}/{s2.get('mp_out')}")
+d1, d2 = r1.status.get("dl_counters", {}), r2.status.get("dl_counters", {})
+t.check("Download Play diagnostics classify the real traffic: radio on, data frames seen in both directions on both consoles, state machine exposed",
+        r1.status.get("dl_state") == "RADIO_ON" and r2.status.get("dl_state") == "RADIO_ON" and all(d.get("data_tx", 0) > 2 and d.get("data_rx", 0) > 2 for d in (d1, d2)),
+        f"{r1.status.get('dl_state')}/{r2.status.get('dl_state')} tx/rx {d1.get('data_tx')}/{d1.get('data_rx')} {d2.get('data_tx')}/{d2.get('data_rx')}")
 n1a, n2a = frames_in(r1), frames_in(r2)
 time.sleep(4)
 n1b, n2b = frames_in(r1), frames_in(r2)

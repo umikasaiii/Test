@@ -21,6 +21,7 @@ constexpr size_t kMaxPacket = 65536 + 16;
 void RETRO_CALLCONV c_send(int flags, const void* b, size_t n, uint16_t d) { if (g_mp) g_mp->send(flags, b, n, d); }
 void RETRO_CALLCONV c_poll() { if (g_mp) g_mp->pollReceive(); }
 
+double nowMs() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 bool setNonblock(int fd) { int f = fcntl(fd, F_GETFL, 0); return f >= 0 && fcntl(fd, F_SETFL, f | O_NONBLOCK) == 0; }
 
 sockaddr_un addrFor(const std::string& p) {
@@ -120,6 +121,7 @@ void MpBridge::writeFrame(int fd, uint16_t dest, uint16_t src, const void* p, si
 
 void MpBridge::send(int, const void* buf, size_t len, uint16_t dest) {
     if (!active_ || (len && !buf) || len > kMaxPacket) return;
+    if (diag_ && len) diag_->observe(true, static_cast<const uint8_t*>(buf), len, nowMs());
     if (role_ == Role::Client) {
         if (!conns_.empty() && len) writeFrame(conns_[0].fd, dest, myId_, buf, len);  // the host routes it
         return;
@@ -171,12 +173,13 @@ void MpBridge::handleFrame(Conn* from, uint16_t dest, uint16_t src, const uint8_
     ++in_;
     const auto& cb = host_->netpacket();
     if (role_ == Role::Client) {  // packets arriving at a client are always for it; 'src' is the original sender
+        if (diag_) diag_->observe(false, p, n, nowMs());
         if (cb.receive) cb.receive(p, n, src);
         return;
     }
     uint16_t incoming = from->id;
     bool bcast = dest == kBroadcast;
-    if ((bcast || dest == 0) && cb.receive) cb.receive(p, n, incoming);
+    if ((bcast || dest == 0) && cb.receive) { if (diag_) diag_->observe(false, p, n, nowMs()); cb.receive(p, n, incoming); }
     if (bcast) {
         for (auto& c : conns_) if (c.id != incoming) writeFrame(c.fd, kBroadcast, incoming, p, n);
     } else if (dest && dest != incoming) {

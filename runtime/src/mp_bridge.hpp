@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "dlplay_diag.hpp"
 #include "libretro_host.hpp"
 
 namespace dsrt {
@@ -22,6 +23,7 @@ public:
     void pump();
     void stop();
 
+    void setDiag(DlDiag* d) { diag_ = d; }  // passive observer of the wireless frames (Download Play diagnostics)
     Role role() const { return role_; }
     uint16_t clientId() const { return myId_; }
     size_t peers() const { return conns_.size(); }
@@ -50,6 +52,7 @@ private:
     uint16_t myId_ = 0;
     bool active_ = false;
     uint64_t in_ = 0, out_ = 0;
+    DlDiag* diag_ = nullptr;
 };
 
 }  // namespace dsrt
