@@ -26,6 +26,7 @@ static int fails = 0;
 #define CHECK(c, msg) do { if (!(c)) { std::printf("FAIL  %s\n", msg); ++fails; } else std::printf("PASS  %s\n", msg); } while (0)
 
 int main() {
+    DlState st;
     // ---- host: radio on, non-Nintendo beacons do not count as advertising, Nintendo beacons do
     DlDiag h; double t = 0;
     h.logFn = [](const std::string& s) { std::printf("   %s\n", s.c_str()); };
@@ -35,7 +36,7 @@ int main() {
     CHECK(h.state() == DlState::HOST_ADVERTISING, "Nintendo vendor-IE beacons transmitted -> HOST_ADVERTISING");
     CHECK(h.counters().lastGameId == 0x1234 * 0x100 + 0x00 || h.counters().lastGameId != 0, "game id read from the vendor IE");
 
-    // ---- client: scanning, discovery, handshake, transfer, verify, boot, second handshake, lobby, in game
+    // ---- client, with the frame-size signatures captured from a real Mario Party DS Download Play session
     DlDiag c; t = 0;
     c.logFn = [](const std::string& s) { std::printf("   %s\n", s.c_str()); };
     auto probe = frame(0, 0x0040, 0);
@@ -48,25 +49,29 @@ int main() {
     c.observe(true, auth.data(), auth.size(), t += 100);
     CHECK(c.state() == DlState::DOWNLOAD_HANDSHAKE, "authentication -> DOWNLOAD_HANDSHAKE");
     c.observe(true, areq.data(), areq.size(), t += 10); c.observe(false, aresp.data(), aresp.size(), t += 10);
-    auto data = frame(0, 0x0008, 1000);
-    for (int i = 0; i < 20; i++) c.observe(false, data.data(), data.size(), t += 5);
-    CHECK(c.state() == DlState::DOWNLOAD_TRANSFER, "bulk data -> DOWNLOAD_TRANSFER");
-    for (int i = 0; i < 100; i++) c.observe(false, data.data(), data.size(), t += 5);
-    c.tick(t += 2000);
-    CHECK(c.state() == DlState::DOWNLOAD_VERIFY, "traffic stops -> DOWNLOAD_VERIFY");
-    c.tick(t += 3000);
-    CHECK(c.state() == DlState::CLIENT_GAME_BOOT, "radio silent -> CLIENT_GAME_BOOT");
-    c.observe(true, auth.data(), auth.size(), t += 500);
-    CHECK(c.state() == DlState::GAME_HANDSHAKE, "association after the download -> GAME_HANDSHAKE");
-    auto cmd = frame(2, 0x0008, 20), rep = frame(1, 0x0008, 20);
+    auto poll = frame(2, 0x0228, 18), pollReply = frame(1, 0x0118, 14);           // keep-alive polling: small frames never count as the download
+    for (int i = 0; i < 50; i++) { c.observe(false, poll.data(), poll.size(), t += 5); c.observe(true, pollReply.data(), pollReply.size(), t += 1); }
+    CHECK(c.state() == DlState::DOWNLOAD_HANDSHAKE, "small keep-alive frames alone do not look like a download");
+    auto bulk = frame(2, 0x0228, 268);                                               // flen = 292, as captured
+    for (int i = 0; i < 30; i++) c.observe(false, bulk.data(), bulk.size(), t += 5);
+    CHECK(c.state() == DlState::DOWNLOAD_TRANSFER, "292-byte command frames -> DOWNLOAD_TRANSFER");
+    c.tick(t += 200); c.tick(t += 2000);
+    CHECK(c.state() == DlState::DOWNLOAD_VERIFY, "payload burst ended while polling continues -> DOWNLOAD_VERIFY");
+    auto blank = frame(1, 0x0158, 4);                                                 // flen = 28: blank replies while the downloaded game boots
     c.tick(t += 10);
-    for (int i = 0; i < 10; i++) { c.observe(false, cmd.data(), cmd.size(), t += 100); c.observe(true, rep.data(), rep.size(), t += 5); }
+    for (int i = 0; i < 60; i++) { c.observe(false, poll.data(), poll.size(), t += 20); c.observe(true, blank.data(), blank.size(), t += 1); }
     c.tick(t += 2100);
-    CHECK(c.state() == DlState::LOBBY, "low-rate command/reply -> LOBBY");
-    for (int i = 0; i < 60; i++) { c.observe(false, cmd.data(), cmd.size(), t += 16); c.observe(true, rep.data(), rep.size(), t += 1); }
-    c.tick(t += 100);
+    CHECK(c.state() == DlState::CLIENT_GAME_BOOT, "burst of blank replies -> CLIENT_GAME_BOOT");
+    auto gcmd = frame(2, 0x0228, 178), greply = frame(1, 0x0118, 46);
+    for (int i = 0; i < 80; i++) { c.observe(false, gcmd.data(), gcmd.size(), t += 16); c.observe(true, greply.data(), greply.size(), t += 1); }
     c.tick(t += 2100);
-    CHECK(c.state() == DlState::IN_GAME, "sustained command/reply cadence -> IN_GAME");
+    CHECK(c.state() == DlState::GAME_HANDSHAKE, "regular replies resume -> GAME_HANDSHAKE");
+    for (int i = 0; i < 80; i++) { c.observe(false, gcmd.data(), gcmd.size(), t += 16); c.observe(true, greply.data(), greply.size(), t += 1); }
+    c.tick(t += 2100);
+    CHECK(c.state() == DlState::LOBBY, "sustained game-level cadence -> LOBBY");
+    c.mark(DlState::IN_GAME, "screen: a match is running", t);
+    CHECK(c.state() == DlState::IN_GAME, "IN_GAME is set by the driver from the screen (lobby and game are identical on the wire)");
+    CHECK(DlDiag::parse("DOWNLOAD_VERIFY", &st) && st == DlState::DOWNLOAD_VERIFY, "state names parse (for the DIAG_MARK link command)");
 
     // ---- history carries timestamps and durations; JSON is well formed enough to contain them
     CHECK(c.history().size() >= 8, "every transition recorded");

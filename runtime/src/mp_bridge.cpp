@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <cstdio>
 #include "mp_bridge.hpp"
 
 #include <fcntl.h>
@@ -21,6 +23,18 @@ constexpr size_t kMaxPacket = 65536 + 16;
 void RETRO_CALLCONV c_send(int flags, const void* b, size_t n, uint16_t d) { if (g_mp) g_mp->send(flags, b, n, d); }
 void RETRO_CALLCONV c_poll() { if (g_mp) g_mp->pollReceive(); }
 
+FILE* g_trace = nullptr;
+uint32_t crc32b(const uint8_t* p, size_t n) { uint32_t c = 0xFFFFFFFFu; for (size_t i = 0; i < n; i++) { c ^= p[i]; for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u))); } return ~c; }
+// DSLINK_MP_TRACE=<file>: one line per netpacket (direction, MP type, lengths, 802.11 frame control, sequence control, CRC-32 of the body). Never the body itself.
+void trace(bool tx, const uint8_t* p, size_t n, double t) {
+    if (!g_trace) { const char* e = std::getenv("DSLINK_MP_TRACE"); if (!e) return; g_trace = std::fopen(e, "a"); if (!g_trace) return; }
+    if (n < 10) return;
+    const uint8_t* f = p + 22;
+    uint16_t fc = n >= 24 ? uint16_t(f[0] | f[1] << 8) : 0, sc = n >= 46 ? uint16_t(f[22] | f[23] << 8) : 0;
+    uint16_t flen = n >= 22 ? uint16_t(p[20] | p[21] << 8) : 0;
+    std::fprintf(g_trace, "%.1f %s type=%u aid=%u len=%zu flen=%u fc=%04x sc=%04x crc=%08x\n", t, tx ? "TX" : "RX", p[9], p[8], n, flen, fc, sc, n > 22 ? crc32b(p + 22, n - 22) : 0);
+    std::fflush(g_trace);
+}
 double nowMs() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 bool setNonblock(int fd) { int f = fcntl(fd, F_GETFL, 0); return f >= 0 && fcntl(fd, F_SETFL, f | O_NONBLOCK) == 0; }
 
@@ -122,6 +136,7 @@ void MpBridge::writeFrame(int fd, uint16_t dest, uint16_t src, const void* p, si
 void MpBridge::send(int, const void* buf, size_t len, uint16_t dest) {
     if (!active_ || (len && !buf) || len > kMaxPacket) return;
     if (diag_ && len) diag_->observe(true, static_cast<const uint8_t*>(buf), len, nowMs());
+    if (len) trace(true, static_cast<const uint8_t*>(buf), len, nowMs());
     if (role_ == Role::Client) {
         if (!conns_.empty() && len) writeFrame(conns_[0].fd, dest, myId_, buf, len);  // the host routes it
         return;
@@ -174,12 +189,13 @@ void MpBridge::handleFrame(Conn* from, uint16_t dest, uint16_t src, const uint8_
     const auto& cb = host_->netpacket();
     if (role_ == Role::Client) {  // packets arriving at a client are always for it; 'src' is the original sender
         if (diag_) diag_->observe(false, p, n, nowMs());
+        trace(false, p, n, nowMs());
         if (cb.receive) cb.receive(p, n, src);
         return;
     }
     uint16_t incoming = from->id;
     bool bcast = dest == kBroadcast;
-    if ((bcast || dest == 0) && cb.receive) { if (diag_) diag_->observe(false, p, n, nowMs()); cb.receive(p, n, incoming); }
+    if ((bcast || dest == 0) && cb.receive) { if (diag_) diag_->observe(false, p, n, nowMs()); trace(false, p, n, nowMs()); cb.receive(p, n, incoming); }
     if (bcast) {
         for (auto& c : conns_) if (c.id != incoming) writeFrame(c.fd, kBroadcast, incoming, p, n);
     } else if (dest && dest != incoming) {

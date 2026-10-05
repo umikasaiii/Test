@@ -24,10 +24,14 @@ const char* dlStateName(DlState s) {
     return "?";
 }
 
+bool DlDiag::parse(const std::string& n, DlState* out) {
+    for (int i = 0; i <= int(DlState::ERROR); i++) if (n == dlStateName(DlState(i))) { *out = DlState(i); return true; }
+    return false;
+}
+
 namespace {
 constexpr size_t kPk = 10, kTxHdr = 12, kFrame = kPk + kTxHdr, kMgmtHdr = 24;
-constexpr double kTransferQuietMs = 1500, kHandshakeTimeoutMs = 15000, kBootSilenceMs = 2500, kCadenceMs = 2000;
-constexpr uint64_t kTransferBytes = 8 * 1024;       // a Download Play image is far larger than this
+constexpr double kTransferQuietMs = 1500, kHandshakeTimeoutMs = 15000, kCadenceMs = 2000;
 constexpr uint64_t kInGameCadence = 40;             // cmd/reply frames per 2 s window
 
 // Nintendo's vendor IE (OUI 00:09:BF) inside a beacon: returns true and the first four bytes after the OUI (+type byte) as an id
@@ -104,18 +108,21 @@ void DlDiag::observe(bool tx, const uint8_t* p, size_t n, double now) {
             handshakeAt_ = now;
             if (state_ == DlState::GAME_DISCOVERED || state_ == DlState::RADIO_ON || state_ == DlState::CLIENT_SCANNING || state_ == DlState::HOST_ADVERTISING)
                 go(DlState::DOWNLOAD_HANDSHAKE, "authentication/association frames", now);
-            else if (transferDone_ && (state_ == DlState::CLIENT_GAME_BOOT || state_ == DlState::DOWNLOAD_VERIFY || state_ == DlState::DOWNLOAD_HANDSHAKE))
-                go(DlState::GAME_HANDSHAKE, "second association after the download", now);
             if (sub == 1) associated_ = true;
         }
-        if ((sub == 10 || sub == 12) && state_ == DlState::DOWNLOAD_TRANSFER) go(DlState::DOWNLOAD_VERIFY, "disassociation after transfer", now);
     } else if (type == 2) {  // data
         if (tx) { ++c_.dataTx; c_.dataBytesTx += flen; } else { ++c_.dataRx; c_.dataBytesRx += flen; }
-        if (state_ == DlState::DOWNLOAD_HANDSHAKE || state_ == DlState::DOWNLOAD_TRANSFER) {
+        // Real Mario Party DS traffic (captured): the download is a burst of ~290-byte MP command frames; waiting for the host is keep-alive polling
+        // (32/42-byte commands, ~38-byte replies); the downloaded game boots while the client answers with blank 28-byte replies; the running game then
+        // exchanges ~200-byte commands / ~70-byte replies at ~60 Hz (lobby and game look the same on the wire - the screen decides, see mark()).
+        const unsigned frameLen = unsigned(p[20] | p[21] << 8);
+        if (mpType == 2 && frameLen >= 200 && (state_ == DlState::DOWNLOAD_HANDSHAKE || state_ == DlState::DOWNLOAD_TRANSFER)) {
+            ++bulkFrames_;
+            lastBulkAt_ = now;
             transferBytes_ += flen;
-            lastTransferBytesAt_ = now;
-            if (state_ == DlState::DOWNLOAD_HANDSHAKE && transferBytes_ >= kTransferBytes) go(DlState::DOWNLOAD_TRANSFER, "bulk data frames", now);
+            if (state_ == DlState::DOWNLOAD_HANDSHAKE && bulkFrames_ >= 20) go(DlState::DOWNLOAD_TRANSFER, "bulk command frames (download payload)", now);
         }
+        if (mpType == 1) { if (frameLen <= 28) ++blankReplies_; else ++realReplies_; }
     } else {
         ++c_.other;
     }
@@ -126,18 +133,18 @@ void DlDiag::tick(double now) {
     now -= base_;
     if (cadenceWin_ == 0) cadenceWin_ = now;
     if (now - cadenceWin_ >= kCadenceMs) {
-        const uint64_t n = windowCmdReply_;
-        windowCmdReply_ = 0;
+        const uint64_t n = windowCmdReply_, blank = blankReplies_, real = realReplies_;
+        windowCmdReply_ = 0; blankReplies_ = 0; realReplies_ = 0;
         cadenceWin_ = now;
-        if (n >= kInGameCadence && (state_ == DlState::LOBBY || state_ == DlState::GAME_HANDSHAKE)) go(DlState::IN_GAME, "sustained MP command/reply cadence", now);
-        else if (n > 0 && state_ == DlState::GAME_HANDSHAKE) go(DlState::LOBBY, "MP command/reply traffic started", now);
+        if (state_ == DlState::DOWNLOAD_VERIFY && blank >= 20) go(DlState::CLIENT_GAME_BOOT, "replies became blank: the client is booting the downloaded software", now);
+        else if (state_ == DlState::CLIENT_GAME_BOOT && blank < 20 && real >= 20) go(DlState::GAME_HANDSHAKE, "regular replies resumed from the freshly booted game", now);
+        else if (state_ == DlState::GAME_HANDSHAKE && n >= kInGameCadence && real >= 20) go(DlState::LOBBY, "sustained game-level command/reply cadence (lobby or game: the screen tells which)", now);
     }
-    if (state_ == DlState::DOWNLOAD_TRANSFER && now - lastTransferBytesAt_ > kTransferQuietMs) {
+    if (state_ == DlState::DOWNLOAD_TRANSFER && now - lastBulkAt_ > kTransferQuietMs) {
         transferDone_ = true;
-        go(DlState::DOWNLOAD_VERIFY, "transfer traffic stopped", now);
+        go(DlState::DOWNLOAD_VERIFY, "download payload complete; keep-alive polling until the host starts", now);
     }
-    if (state_ == DlState::DOWNLOAD_VERIFY && lastFrame_ > 0 && now - lastFrame_ > kBootSilenceMs) go(DlState::CLIENT_GAME_BOOT, "radio silent: client is rebooting into the downloaded software", now);
-    if (state_ == DlState::DOWNLOAD_HANDSHAKE && now - handshakeAt_ > kHandshakeTimeoutMs && transferBytes_ < kTransferBytes) go(DlState::ERROR, "handshake did not progress to a transfer", now);
+    if (state_ == DlState::DOWNLOAD_HANDSHAKE && now - handshakeAt_ > kHandshakeTimeoutMs && bulkFrames_ < 20) go(DlState::ERROR, "handshake did not progress to a transfer", now);
 }
 
 std::string DlDiag::json() const {

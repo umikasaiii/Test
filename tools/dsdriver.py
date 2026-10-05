@@ -28,6 +28,7 @@ def serve(a):
             for f in ("bios7.bin", "bios9.bin", "firmware.bin"):
                 if os.path.exists(os.path.join(a.fw, f)): shutil.copy(os.path.join(a.fw, f), f"{d}/system/melonDS DS/{f}")   # copies; originals untouched
         nick, mac = ident(role, name, rom)
+        if a.trace: os.environ["DSLINK_MP_TRACE"] = os.path.join(a.out, f"trace_{role}.log")
         return Runtime(a.rt, a.core, rom, d, name=name, username=nick, opts=f"{work}/{name}.opts", mp=(role, mp), av=True), mac
     R = {}
     R["host"], hm = spawn("host", "HOST", a.rom)
@@ -88,7 +89,7 @@ def cmd(args, sock):
 if __name__ == "__main__":
     p = argparse.ArgumentParser(); p.add_argument("mode"); p.add_argument("rest", nargs="*")
     for k in ("rt", "core", "cfgtool", "rom", "fw", "out", "dual-rom"): p.add_argument("--" + k, default="")
-    p.add_argument("--sock", default="/tmp/dsdriver.sock")
+    p.add_argument("--sock", default="/tmp/dsdriver.sock"); p.add_argument("--trace", action="store_true")
     a, extra = p.parse_known_args()
     a.dual_rom = getattr(a, "dual_rom", "")
     if a.mode == "serve": serve(a)

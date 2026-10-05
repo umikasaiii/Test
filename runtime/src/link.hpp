@@ -2,7 +2,7 @@
 // Frame: u8 type | u8 flags | u16 reserved | u32 length | payload   (little endian)
 //   runtime -> peer: 1 VIDEO(flags&1=key; u64 pts_us + H.264 Annex-B AU)  2 AUDIO(u64 pts_us + Opus packet)  3 LOG(text)  4 STATUS(JSON)
 //   peer -> runtime: 10 BUTTON(u8 port,u8 retropad id,u8 down)  11 TOUCH(f32 x,f32 y,u8 down; x,y in 0..1 over the whole frame)
-//                    12 SNAPSHOT(path)  13 QUIT  14 KEYFRAME  15 AUDIO_DUMP(f32 seconds, path)  16 SAVE
+//                    12 SNAPSHOT(path)  13 QUIT  14 KEYFRAME  15 AUDIO_DUMP(f32 seconds, path)  16 SAVE  17 DIAG_MARK(\"STATE|reason\": a driver that looked at the screen annotates the Download Play state machine)
 #pragma once
 #include <cstdint>
 #include <functional>
@@ -11,7 +11,7 @@
 
 namespace dsrt {
 
-enum LinkType : uint8_t { L_VIDEO = 1, L_AUDIO = 2, L_LOG = 3, L_STATUS = 4, L_BUTTON = 10, L_TOUCH = 11, L_SNAPSHOT = 12, L_QUIT = 13, L_KEYFRAME = 14, L_AUDIO_DUMP = 15, L_SAVE = 16 };
+enum LinkType : uint8_t { L_VIDEO = 1, L_AUDIO = 2, L_LOG = 3, L_STATUS = 4, L_BUTTON = 10, L_TOUCH = 11, L_SNAPSHOT = 12, L_QUIT = 13, L_KEYFRAME = 14, L_AUDIO_DUMP = 15, L_SAVE = 16, L_DIAG_MARK = 17 };
 
 class Link {
 public:

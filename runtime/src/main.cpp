@@ -187,6 +187,13 @@ int main(int argc, char** argv) {
             }
             case L_KEYFRAME: av.requestKeyframe(); break;
             case L_SAVE: host.saveSram(); break;
+            case L_DIAG_MARK: {
+                std::string s(reinterpret_cast<const char*>(p), n);
+                auto bar = s.find('|');
+                DlState st;
+                if (DlDiag::parse(s.substr(0, bar), &st)) dl.mark(st, bar == std::string::npos ? "screen" : "screen: " + s.substr(bar + 1), std::chrono::duration<double, std::milli>(Clock::now().time_since_epoch()).count() - dl.baseMs());
+                break;
+            }
             case L_AUDIO_DUMP:
                 if (n > 4) {
                     float sec; std::memcpy(&sec, p, 4);

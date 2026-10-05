@@ -36,11 +36,13 @@ public:
     // pkt = one netpacket payload, tx = true for frames this console sends, nowMs = monotonic milliseconds
     void observe(bool tx, const uint8_t* pkt, size_t len, double nowMs);
     void tick(double nowMs);                 // call about once a second: timeouts and silence detection
+    double baseMs() const { return base_ < 0 ? 0 : base_; }
     DlState state() const { return state_; }
     const DlCounters& counters() const { return c_; }
     const std::vector<DlTransition>& history() const { return hist_; }
     std::string json() const;                // {"dl_state":...,"dl_counters":{...},"dl_hist":[...]}
     // optional external annotation (a driver that looked at the screen); recorded like any transition
+    static bool parse(const std::string& name, DlState* out);
     void mark(DlState s, const std::string& why, double nowMs) { go(s, why, nowMs); }
     std::function<void(const std::string&)> logFn;
 
@@ -51,8 +53,8 @@ private:
     std::vector<DlTransition> hist_;
     double base_ = -1;                       // times are reported relative to the first call
     double stateSince_ = 0, lastFrame_ = 0, lastBeaconTx_ = 0, lastTransferBytesAt_ = 0, firstSeen_ = -1;
-    double handshakeAt_ = 0, cadenceWin_ = 0;
-    uint64_t cadenceCount_ = 0, transferBytes_ = 0, windowCmdReply_ = 0;
+    double handshakeAt_ = 0, cadenceWin_ = 0, lastBulkAt_ = 0;
+    uint64_t bulkFrames_ = 0, transferBytes_ = 0, windowCmdReply_ = 0, blankReplies_ = 0, realReplies_ = 0;
     bool associated_ = false, transferDone_ = false;
 };
 
