@@ -32,3 +32,4 @@ firmware*.bin
 *.srm
 *.ppm
 mario_out/
+cloud/worker/wrangler.prod.jsonc

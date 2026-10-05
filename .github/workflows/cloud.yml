@@ -104,6 +104,11 @@ jobs:
       - name: Touch controls in real Chrome (4 layouts, multitouch, stylus, FOCUS)
         env: { CHROME: /opt/google/chrome/chrome }
         run: cd cloud/tests && node controls_e2e.mjs http://localhost:8787
+      - name: Cloudflare Containers media path (no inbound UDP): browsers <-> TURN relay <-> gateway, relay-only
+        env: { CHROME: /opt/google/chrome/chrome, DSLINK_VIDEO_CODEC: h264 }
+        run: |
+          pkill -x dslink-gateway || true; sleep 1
+          cloud/tests/turn_relay.sh "$PWD/build/rt/dslink-runtime" "$PWD/build/core/src/libretro/melondsds_libretro.so" "$PWD/build/dslink/dslink_cfgtool" "$PWD/build/dslink/dslink_romcheck" "$PWD/build/rom/dslink_test_1.nds" "$PWD/build/rom/dslink_test_2.nds"
       - if: always()
         run: tail -60 /tmp/gw.log /tmp/wrangler.log || true
       - uses: actions/upload-artifact@v4

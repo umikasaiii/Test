@@ -9,6 +9,9 @@ export interface Env {
   CONTAINER?: DurableObjectNamespace;  // DSLinkContainer (production only)
   ASSETS?: Fetcher;
   DEV_GATEWAY?: string;                // dev/test only: local gateway standing in for the Container
+  TURN_KEY_ID?: string;                // Cloudflare Realtime TURN key (credentials are minted per request, short-lived)
+  TURN_KEY_API_TOKEN?: string;         // secret
+  ICE_POLICY?: string;                 // "relay" forces browsers through TURN (tests / restrictive networks)
   ICE_SERVERS?: string;                // JSON array of RTCIceServer (TURN) handed to browsers
   RP_NAME: string;
   RP_ID: string;

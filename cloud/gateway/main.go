@@ -43,6 +43,7 @@ type Server struct {
 	env  Env
 	api  *webrtc.API
 	ice  []webrtc.ICEServer
+	relayOnly bool // TURN-relay-only ICE policy (Cloudflare Containers: no inbound UDP)
 	mu   sync.Mutex
 	room *Room
 	up   websocket.Upgrader
@@ -326,7 +327,13 @@ func main() {
 	mux.HandleFunc("/api/join", s.joinRoom)
 	mux.HandleFunc("/api/status", s.status)
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
-		jsonOut(w, 200, map[string]any{"iceServers": s.ice})
+		s.mu.Lock()
+		cfg := map[string]any{"iceServers": s.ice}
+		if s.relayOnly {
+			cfg["iceTransportPolicy"] = "relay"
+		}
+		s.mu.Unlock()
+		jsonOut(w, 200, cfg)
 	})
 	if os.Getenv("DSLINK_DEBUG") == "1" { // diagnostics only: last lines of a slot's RetroArch log
 		mux.HandleFunc("/api/slotlog", func(w http.ResponseWriter, r *http.Request) {

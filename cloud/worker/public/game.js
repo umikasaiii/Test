@@ -10,7 +10,7 @@ export async function startGame({ sessionId, info, api, onExit }) {
   document.getElementById("app").hidden = true;
 
   const cfg = await fetch("/api/config").then((r) => r.json()).catch(() => ({}));
-  const pc = new RTCPeerConnection({ iceServers: cfg.iceServers || [] });
+  const pc = new RTCPeerConnection({ iceServers: cfg.iceServers || [], iceTransportPolicy: cfg.iceTransportPolicy || "all" });
   const dc = pc.createDataChannel("input", { ordered: true });
   const dcMove = pc.createDataChannel("move", { ordered: false, maxRetransmits: 0 });
   pc.addTransceiver("video", { direction: "recvonly" });

@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/pion/webrtc/v4"
 )
 
 type sessionManifest struct {
@@ -50,6 +52,9 @@ type sessionRequest struct {
 	Ticket      string          `json:"ticket"`
 	Tokens      [2]string       `json:"tokens"`
 	ContentBase string          `json:"contentBase"`
+	// TURN relay (Cloudflare Containers have no inbound UDP: the gateway allocates a relay as a TURN client; browsers use the same TURN service)
+	Ice          []webrtc.ICEServer `json:"ice"`
+	IceRelayOnly bool               `json:"iceRelayOnly"`
 }
 
 func (s *Server) internalAuth(w http.ResponseWriter, r *http.Request) bool {
@@ -116,6 +121,11 @@ func (s *Server) internalSession(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
+	if len(req.Ice) > 0 {
+		s.mu.Lock()
+		s.ice, s.relayOnly = req.Ice, req.IceRelayOnly
+		s.mu.Unlock()
+	}
 	dir := filepath.Join(s.env.WorkDir, "room")
 	os.RemoveAll(dir)
 	os.MkdirAll(dir, 0o700)

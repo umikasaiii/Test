@@ -8,6 +8,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env, Platform } from "./env";
 import { hostFor } from "./container";
+import { mintIceServers } from "./turn";
 import { b64url, logEvent, now, randomBytes, sha256hex, timingSafeEqual } from "./util";
 
 const TICKET_TTL = 10 * 60_000;
@@ -158,12 +159,13 @@ export class GameSession extends DurableObject<Env> {
     if (!c) { s.status = "running"; s.startedAt = now(); await this.ctx.storage.put("s", s); return; }   // unit tests: no container and no dev gateway
     try {
       await c.start();
+      const turn = await mintIceServers(this.env, 6 * 3600);   // the container is a TURN client (no inbound UDP on Cloudflare Containers)
       const ticket = await this.issueTicket();
       const manifest = await this.manifest();
       const r = await c.fetch(new Request("http://container/api/internal/session", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${this.env.INTERNAL_TOKEN}` },
-        body: JSON.stringify({ manifest, ticket, tokens: s.tokens, contentBase: `${this.env.ORIGINS.split(",")[0].trim()}/internal/sessions/${s.id}` }),
+        body: JSON.stringify({ manifest, ticket, tokens: s.tokens, ice: turn, iceRelayOnly: !!turn, contentBase: `${this.env.ORIGINS.split(",")[0].trim()}/internal/sessions/${s.id}` }),
       }));
       if (!r.ok) throw new Error("container refused the session: " + r.status);
       s.status = "running"; s.startedAt = now();

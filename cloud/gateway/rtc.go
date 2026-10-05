@@ -37,6 +37,7 @@ func (s *Server) initWebRTC() error {
 	if raw := os.Getenv("DSLINK_ICE"); raw != "" {
 		json.Unmarshal([]byte(raw), &s.ice)
 	}
+	s.relayOnly = os.Getenv("DSLINK_RELAY_ONLY") == "1" // force the TURN-relay-only policy (local test of the Cloudflare Containers media path)
 	return nil
 }
 
@@ -133,7 +134,13 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	slot := room.Slots[player-1]
 
-	pc, err := s.api.NewPeerConnection(webrtc.Configuration{ICEServers: s.ice})
+	s.mu.Lock()
+	cfg := webrtc.Configuration{ICEServers: s.ice}
+	if s.relayOnly {
+		cfg.ICETransportPolicy = webrtc.ICETransportPolicyRelay
+	}
+	s.mu.Unlock()
+	pc, err := s.api.NewPeerConnection(cfg)
 	if err != nil {
 		return
 	}

@@ -40,7 +40,7 @@
     $('home').hidden = true;
     $('player').classList.add('on');
     const cfg = await (await fetch('/api/config')).json();
-    const pc = new RTCPeerConnection({ iceServers: cfg.iceServers || [] });
+    const pc = new RTCPeerConnection({ iceServers: cfg.iceServers || [], iceTransportPolicy: cfg.iceTransportPolicy || 'all' });
     // two channels: discrete events must be reliable+ordered; touch-move samples are replaceable, so unordered/no-retransmit (lowest latency)
     const dc = pc.createDataChannel('input', { ordered: true });
     const dcMove = pc.createDataChannel('move', { ordered: false, maxRetransmits: 0 });

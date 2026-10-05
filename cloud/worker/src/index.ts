@@ -1,3 +1,4 @@
+import { browserIce } from "./turn";
 import type { Env, User } from "./env";
 import { authenticate, handleAuth, handleMe, publicUser } from "./auth";
 import { handleFriends, presenceOf } from "./friends";
@@ -62,9 +63,7 @@ async function route(env: Env, req: Request): Promise<Response> {
   checkOrigin(env, req);
   if (path === "/api/health") return json({ ok: true });
   if (path === "/api/config") {   // WebRTC ICE servers for the game screen (TURN credentials come from the environment, never from code)
-    let ice: unknown[] = [{ urls: "stun:stun.cloudflare.com:3478" }];
-    try { if (env.ICE_SERVERS) ice = JSON.parse(env.ICE_SERVERS); } catch { /* keep default */ }
-    return json({ iceServers: ice });
+    return json({ iceServers: await browserIce(env), ...(env.ICE_POLICY === "relay" ? { iceTransportPolicy: "relay" } : {}) }, 200, { "cache-control": "no-store" });
   }
 
   const user = await authenticate(env, req);
