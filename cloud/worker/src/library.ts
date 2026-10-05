@@ -230,6 +230,7 @@ export async function handleLibrary(env: Env, req: Request, path: string, user: 
 export async function purgeUserData(env: Env, uid: string): Promise<{ objects: number }> {
   const objects = await deleteByPrefix(env, userPrefix(uid));
   await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(uid).run();  // ON DELETE CASCADE: credentials, sessions, games, files, saves, friendships, requests, invites
-  await env.DB.prepare("DELETE FROM play_sessions WHERE host_user = ?1 OR guest_user = ?1").bind(uid).run();
+  await env.DB.prepare("DELETE FROM play_sessions WHERE host_user = ?").bind(uid).run();
+  await env.DB.prepare("UPDATE play_sessions SET guest_user = 'deleted' WHERE guest_user = ?").bind(uid).run();   // the host's own history keeps the row, without the identity
   return { objects };
 }

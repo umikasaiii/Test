@@ -8,6 +8,8 @@ export interface Env {
   SESSION: DurableObjectNamespace<GameSession>;
   CONTAINER?: DurableObjectNamespace;  // DSLinkContainer (production only)
   ASSETS?: Fetcher;
+  DEV_GATEWAY?: string;                // dev/test only: local gateway standing in for the Container
+  ICE_SERVERS?: string;                // JSON array of RTCIceServer (TURN) handed to browsers
   RP_NAME: string;
   RP_ID: string;
   ORIGINS: string;                    // comma separated allowed origins (WebAuthn + CSRF check)

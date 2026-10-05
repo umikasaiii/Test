@@ -7,6 +7,7 @@
 //     receives the ROM: it is streamed from R2 into the container over an authenticated, ticketed request.
 import { DurableObject } from "cloudflare:workers";
 import type { Env, Platform } from "./env";
+import { hostFor } from "./container";
 import { b64url, logEvent, now, randomBytes, sha256hex, timingSafeEqual } from "./util";
 
 const TICKET_TTL = 10 * 60_000;
@@ -15,9 +16,10 @@ const IDLE_END_MS = 2 * 60_000;          // nobody heartbeating -> end
 const NEVER_JOINED_MS = 3 * 60_000;      // invite accepted but nobody opened the session
 const MAX_SESSION_MS = 4 * 3600_000;
 
+/** guestId "" = solo session (GIOCA): one slot, no guest */
 export interface SessionInit { hostId: string; guestId: string; hostName: string; guestName: string; gameId: string; platform: Platform; title: string }
 export interface Manifest {
-  sessionId: string; platform: Platform; title: string;
+  sessionId: string; platform: Platform; title: string; solo: boolean;
   files: { id: string; role: string; name: string; size: number }[];
   slots: { slot: 1 | 2; userId: string; name: string; system: string[]; hasContent: boolean }[];
   saves: { kind: string }[];
@@ -29,7 +31,7 @@ interface State extends SessionInit {
   error?: string;
 }
 
-const slotOf = (s: State, uid: string): 1 | 2 | 0 => (uid === s.hostId ? 1 : uid === s.guestId ? 2 : 0);
+const slotOf = (s: State, uid: string): 1 | 2 | 0 => (uid === s.hostId ? 1 : s.guestId && uid === s.guestId ? 2 : 0);
 
 export class GameSession extends DurableObject<Env> {
   private async st(): Promise<State | undefined> { return this.ctx.storage.get<State>("s"); }
@@ -50,7 +52,7 @@ export class GameSession extends DurableObject<Env> {
     const slot = slotOf(s, uid);
     if (!slot) return null;
     return { id: s.id, status: s.status, slot, platform: s.platform, title: s.title, hasCartridge: slot === 1, error: s.error,
-      players: [{ slot: 1, userId: s.hostId, displayName: s.hostName }, { slot: 2, userId: s.guestId, displayName: s.guestName }] };
+      players: [{ slot: 1, userId: s.hostId, displayName: s.hostName }, ...(s.guestId ? [{ slot: 2, userId: s.guestId, displayName: s.guestName }] : [])] };
   }
 
   /** gateway credentials for a member (used by the Worker to open the signalling socket; never returned to browsers) */
@@ -112,6 +114,7 @@ export class GameSession extends DurableObject<Env> {
     }
     if (what.kind === "system") {
       const uid = what.slot === 1 ? s.hostId : s.guestId;
+      if (!uid) return null;
       const f = await this.env.DB.prepare("SELECT r2_key FROM system_files WHERE user_id = ? AND platform = ? AND name = ?").bind(uid, s.platform, what.name).first<{ r2_key: string }>();
       return f ? { key: f.r2_key } : null;   // always the slot's OWN firmware
     }
@@ -131,8 +134,9 @@ export class GameSession extends DurableObject<Env> {
     const files = (await this.env.DB.prepare("SELECT id, role, name, size FROM game_files WHERE game_id = ? AND ok = 1 ORDER BY role").bind(s.gameId).all<{ id: string; role: string; name: string; size: number }>()).results;
     const sys = async (uid: string) => (await this.env.DB.prepare("SELECT name FROM system_files WHERE user_id = ? AND platform = ?").bind(uid, s.platform).all<{ name: string }>()).results.map((r) => r.name);
     const saves = (await this.env.DB.prepare("SELECT kind FROM saves WHERE game_id = ?").bind(s.gameId).all<{ kind: string }>()).results;
-    return { sessionId: s.id, platform: s.platform, title: s.title, files, saves,
-      slots: [{ slot: 1, userId: s.hostId, name: s.hostName, system: await sys(s.hostId), hasContent: true }, { slot: 2, userId: s.guestId, name: s.guestName, system: await sys(s.guestId), hasContent: false }] };
+    return { sessionId: s.id, platform: s.platform, title: s.title, solo: !s.guestId, files, saves,
+      slots: [{ slot: 1, userId: s.hostId, name: s.hostName, system: await sys(s.hostId), hasContent: true },
+        ...(s.guestId ? [{ slot: 2 as const, userId: s.guestId, name: s.guestName, system: await sys(s.guestId), hasContent: false }] : [])] };
   }
 
   // ----- lifecycle -----
@@ -150,11 +154,10 @@ export class GameSession extends DurableObject<Env> {
   }
 
   private async boot(s: State): Promise<void> {
-    if (!this.env.CONTAINER) { s.status = "running"; s.startedAt = now(); await this.ctx.storage.put("s", s); return; }   // tests / no container binding
+    const c = await hostFor(this.env, s.id);
+    if (!c) { s.status = "running"; s.startedAt = now(); await this.ctx.storage.put("s", s); return; }   // unit tests: no container and no dev gateway
     try {
-      const { getContainer } = await import("@cloudflare/containers");
-      const c = getContainer(this.env.CONTAINER as any, s.id);
-      await c.startAndWaitForPorts();
+      await c.start();
       const ticket = await this.issueTicket();
       const manifest = await this.manifest();
       const r = await c.fetch(new Request("http://container/api/internal/session", {
@@ -175,10 +178,9 @@ export class GameSession extends DurableObject<Env> {
   }
 
   private async destroyContainer(): Promise<void> {
-    if (!this.env.CONTAINER) return;
     try {
-      const { getContainer } = await import("@cloudflare/containers");
-      const c = getContainer(this.env.CONTAINER as any, (await this.st())!.id);
+      const c = await hostFor(this.env, (await this.st())!.id);
+      if (!c) return;
       try {   // graceful: the gateway flushes the host's SRAM back to private storage and wipes the room before the container dies
         await c.fetch(new Request("http://container/api/internal/end", { method: "POST", headers: { authorization: `Bearer ${this.env.INTERNAL_TOKEN}` }, signal: AbortSignal.timeout(15_000) }));
       } catch { /* container already stopped */ }
@@ -187,7 +189,7 @@ export class GameSession extends DurableObject<Env> {
   }
 
   private async setLeases(s: State, on: boolean): Promise<void> {
-    for (const uid of [s.hostId, s.guestId]) {
+    for (const uid of [s.hostId, s.guestId].filter(Boolean)) {
       try { await this.env.PRESENCE.get(this.env.PRESENCE.idFromName(uid)).setGame(on ? s.id : null); } catch { /* presence unreachable */ }
     }
   }

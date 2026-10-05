@@ -21,7 +21,7 @@ export async function hashPassword(password: string, salt: Uint8Array<ArrayBuffe
 }
 
 function cookieFor(token: string, env: Env, maxAgeSec: number): string {
-  const secure = env.ENVIRONMENT === "test" ? "" : "; Secure";
+  const secure = env.ENVIRONMENT === "test" || env.ENVIRONMENT === "dev" ? "" : "; Secure";   // localhost development only
   return `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
 }
 

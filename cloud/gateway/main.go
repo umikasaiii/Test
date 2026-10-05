@@ -31,6 +31,7 @@ type Room struct {
 	Title        string
 	SHA256       string
 	Created      time.Time
+	Solo         bool      // cloud solo session: only slot 1 runs
 	FirmwareDirs [2]string // cloud sessions: each slot's own firmware
 	ContentBase  string    // cloud sessions: where to persist saves
 	Ticket       string
@@ -202,6 +203,9 @@ func (s *Server) startSlots(room *Room, rom1, rom2 string) error {
 		mp := filepath.Join(s.env.WorkDir, "mp.sock")
 		if err := room.Slots[0].StartRuntime(mp); err != nil {
 			return fmt.Errorf("slot 1: %w", err)
+		}
+		if room.Solo {
+			return nil
 		}
 		time.Sleep(1500 * time.Millisecond) // the host's bridge listens as soon as its core is started
 		if err := room.Slots[1].StartRuntime(mp); err != nil {

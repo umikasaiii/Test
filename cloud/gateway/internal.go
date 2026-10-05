@@ -28,6 +28,7 @@ type sessionManifest struct {
 	SessionID string `json:"sessionId"`
 	Platform  string `json:"platform"`
 	Title     string `json:"title"`
+	Solo      bool   `json:"solo"`
 	Files     []struct {
 		ID   string `json:"id"`
 		Role string `json:"role"`
@@ -163,7 +164,7 @@ func (s *Server) internalSession(w http.ResponseWriter, r *http.Request) {
 			fwDirs[sl.Slot-1] = d
 		}
 	}
-	room := &Room{Code: m.SessionID, Title: m.Title, Created: time.Now(), Tokens: req.Tokens, FirmwareDirs: fwDirs, ContentBase: req.ContentBase, Ticket: req.Ticket}
+	room := &Room{Solo: m.Solo, Code: m.SessionID, Title: m.Title, Created: time.Now(), Tokens: req.Tokens, FirmwareDirs: fwDirs, ContentBase: req.ContentBase, Ticket: req.Ticket}
 	for _, sv := range m.Saves {
 		if sv.Kind == "sram" {
 			dst := filepath.Join(s.env.WorkDir, "slot1", "saves", "melonDS DS", "player1.srm")

@@ -1,0 +1,13 @@
+{
+  // Local development (wrangler dev): everything real except the Container, which is replaced by a gateway on localhost.
+  "name": "dslink-cloud-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./public", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*", "/internal/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "dslink", "database_id": "dev", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "STORE", "bucket_name": "dslink-private" }],
+  "durable_objects": { "bindings": [ { "name": "PRESENCE", "class_name": "Presence" }, { "name": "SESSION", "class_name": "GameSession" } ] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession"] }],
+  "vars": { "RP_NAME": "DSLink", "ORIGINS": "http://localhost:8787", "RP_ID": "localhost", "ENVIRONMENT": "dev", "DEV_GATEWAY": "http://localhost:8080", "INTERNAL_TOKEN": "internal-secret" }
+}
