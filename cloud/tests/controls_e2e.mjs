@@ -139,7 +139,37 @@ for (const [p, o, w, h] of [['nds', 'portrait', 390, 844], ['nds', 'landscape', 
   const a0 = await page.evaluate(() => getComputedStyle(document.getElementById('stage')).getPropertyValue('--ctl-alpha'));
   await fire(page, 'pointerdown', 6, f.cx, f.cy); await fire(page, 'pointerup', 6, f.cx, f.cy);
   const a1 = await page.evaluate(() => getComputedStyle(document.getElementById('stage')).getPropertyValue('--ctl-alpha'));
-  check('ps1 landscape: the auxiliary key toggles immersive mode (controls fade, picture unchanged)', Number(a1) < Number(a0) && Number(a1) <= 0.3, `${a0.trim()} -> ${a1.trim()}`);
+  check('ps1 landscape: the auxiliary key toggles immersive mode (controls almost hidden, picture unchanged)', Number(a1) < Number(a0) && Number(a1) <= 0.15, `${a0.trim()} -> ${a1.trim()}`);
+  const d = await rectOf(page, '[data-id=dpad]');
+  await fire(page, 'pointerdown', 7, d.cx, d.cy); await fire(page, 'pointerup', 7, d.cx, d.cy);
+  const a2 = await page.evaluate(() => getComputedStyle(document.getElementById('stage')).getPropertyValue('--ctl-alpha'));
+  check('ps1 immersive: a touch brings the controls back', Number(a2) >= 0.99, a2.trim());
+  await page.waitForTimeout(2900);
+  const a3 = await page.evaluate(() => getComputedStyle(document.getElementById('stage')).getPropertyValue('--ctl-alpha'));
+  check('ps1 immersive: controls fade again after the touch', Number(a3) <= 0.15, a3.trim());
+  await page.context().close();
+}
+{
+  // D-pad artwork: one plus-shaped silhouette (approved reference), four pressed-state overlays, no separate arms
+  const page = await open('nds', 390, 844);
+  const info = await page.evaluate(() => { const d = document.querySelector('[data-id=dpad]'); return { shapes: d.querySelectorAll('path.shape').length, arms: d.querySelectorAll('.arm').length, dimple: !!d.querySelector('.dimple'), chev: d.querySelectorAll('.chev').length, w: d.getBoundingClientRect().width }; });
+  check('dpad: single plus silhouette + dimple, 4 direction overlays, no chevrons', info.shapes === 1 && info.arms === 4 && info.dimple && info.chev === 0, JSON.stringify(info));
+  const d = await rectOf(page, '[data-id=dpad]');
+  await fire(page, 'pointerdown', 3, d.cx, d.y + 8);
+  const lit = await page.evaluate(() => [...document.querySelectorAll('[data-id=dpad] .arm.is-down')].map((e) => e.dataset.dir).join());
+  await fire(page, 'pointerup', 3, d.cx, d.y + 8);
+  const off = await page.evaluate(() => document.querySelectorAll('[data-id=dpad] .arm.is-down').length);
+  check('dpad: pressed direction lights its arm and releases', lit === 'up' && off === 0, `${lit} / ${off}`);
+  const sizes = await page.evaluate(() => { const r = (q) => { const b = document.querySelector(q).getBoundingClientRect(); return [b.width, b.height]; }; return { dpad: r('[data-id=dpad]'), face: r('[data-face=a]'), pill: r('[data-id=menu] .ctl-pillbtn') }; });
+  check('visible sizes: D-pad >= 48, action buttons >= 48', sizes.dpad[0] >= 48 && sizes.face[0] >= 47.5 && sizes.face[1] >= 47.5, JSON.stringify(sizes));
+  const def = await page.evaluate(() => { const v = document.querySelector('#stage .ctl-clip'); const b = v.getBoundingClientRect(); return b.height / b.width; });
+  check('default DS picture keeps the real 2:3 aspect (two 4:3 screens)', Math.abs(def - 1.5) < 0.01, def.toFixed(3));
+  await page.context().close();
+}
+{
+  const page = await open('nds', 844, 390);
+  const r = await page.evaluate(() => { const b = document.querySelector('#stage .ctl-clip').getBoundingClientRect(); return b.height / b.width; });
+  check('default DS landscape keeps the real aspect (not stretched)', Math.abs(r - 1.5) < 0.01, r.toFixed(3));
   await page.context().close();
 }
 await browser.close();

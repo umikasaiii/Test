@@ -24,6 +24,7 @@ export const FACE_COLORS = {   // light accents on the action buttons
 
 const el = (tag, cls, attrs = {}) => { const e = document.createElement(tag); if (cls) e.className = cls; for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
 
+let dpadSeq = 0;
 export function buildControl(c) {
   const root = el("div", `ctl-c ctl-${c.type}`, { "data-id": c.id });
   switch (c.type) {
@@ -34,13 +35,17 @@ export function buildControl(c) {
       root.append(b, l); break;
     }
     case "dpad": {
-      const s = svg('' +
-        '<path class="arm" data-dir="up" d="M40 4h20a6 6 0 0 1 6 6v24H34V10a6 6 0 0 1 6-6z"/>' +
-        '<path class="arm" data-dir="down" d="M40 96h20a6 6 0 0 0 6-6V66H34v24a6 6 0 0 0 6 6z"/>' +
-        '<path class="arm" data-dir="left" d="M4 40v20a6 6 0 0 0 6 6h24V34H10a6 6 0 0 0-6 6z"/>' +
-        '<path class="arm" data-dir="right" d="M96 40v20a6 6 0 0 1-6 6H66V34h24a6 6 0 0 1 6 6z"/>' +
-        '<rect class="hub" x="34" y="34" width="32" height="32"/>' +
-        '<path class="chev" d="M44 24l6-6 6 6M44 76l6 6 6-6M24 44l-6 6 6 6M76 44l6 6-6 6"/>', "0 0 100 100");
+      // ONE plus-shaped silhouette like the approved artwork: pale glowing rim, blue-navy glass body (lighter at the arm tips), dark centre dimple, faint round halo.
+      // The four `.arm` overlays are clipped to the silhouette and only show the pressed direction.
+      const u = ++dpadSeq, PLUS = "M42 4H58A7 7 0 0 1 65 11V32A3 3 0 0 0 68 35H89A7 7 0 0 1 96 42V58A7 7 0 0 1 89 65H68A3 3 0 0 0 65 68V89A7 7 0 0 1 58 96H42A7 7 0 0 1 35 89V68A3 3 0 0 0 32 65H11A7 7 0 0 1 4 58V42A7 7 0 0 1 11 35H32A3 3 0 0 0 35 32V11A7 7 0 0 1 42 4Z";
+      const s = svg(`<defs><clipPath id="dpc${u}"><path d="${PLUS}"/></clipPath>` +
+        `<radialGradient id="dpg${u}" cx="50%" cy="50%" r="55%"><stop offset="0" stop-color="#0a1430" stop-opacity=".92"/><stop offset=".38" stop-color="#14245a" stop-opacity=".74"/><stop offset="1" stop-color="#2f4d9a" stop-opacity=".62"/></radialGradient></defs>` +
+        `<circle class="halo" cx="50" cy="50" r="47"/>` +
+        `<path class="shape" d="${PLUS}" fill="url(#dpg${u})"/>` +
+        `<g clip-path="url(#dpc${u})">` +
+        `<rect class="arm" data-dir="up" x="35" y="0" width="30" height="46"/><rect class="arm" data-dir="down" x="35" y="54" width="30" height="46"/>` +
+        `<rect class="arm" data-dir="left" x="0" y="35" width="46" height="30"/><rect class="arm" data-dir="right" x="54" y="35" width="46" height="30"/></g>` +
+        `<circle class="dimple" cx="50" cy="50" r="7"/>`, "0 0 100 100");
       root.append(s); break;
     }
     case "cluster": {

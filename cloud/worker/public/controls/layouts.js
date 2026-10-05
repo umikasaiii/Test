@@ -9,12 +9,13 @@ export const PLATFORMS = {
 
 export const DIM = {
   margin: 14, gap: 10,
-  shoulder: { w: 68, h: 36 },          // DS L / R
-  shoulderPs: { w: 54, h: 36 },        // PS1 L1 L2 R1 R2
-  pill: { hit: 40, vis: 34, label: 12 },   // MENU SELECT START FOCUS (round icon button + micro label)
-  dpad: { max: 136, min: 108 },
-  cluster: { max: 144, min: 112 },     // diamond of four action buttons
-  minHit: 40,
+  shoulder: { w: 68, h: 40 },          // DS L / R
+  shoulderPs: { w: 54, h: 40 },        // PS1 L1 L2 R1 R2
+  pill: { hit: 44, vis: 36, label: 12 },   // MENU SELECT START FOCUS (round icon button + micro label)
+  dpad: { max: 140, min: 116 },
+  cluster: { max: 156, min: 134 },     // diamond of four action buttons
+  minHit: 48,                          // D-pad, action buttons, shoulders
+  minHitSystem: 44,                    // MENU SELECT START FOCUS
 };
 
 const rect = (x, y, w, h) => ({ x, y, w, h });
@@ -38,9 +39,10 @@ export function computeLayout({ platform = "nds", width, height, insets = {}, vi
   if (landscape) s = Math.min(s, frame.h / columnNeed);
 
   const D = (v) => v * s;
+  const PH = () => Math.max(D(DIM.pill.hit), DIM.pill.hit);          // MENU / SELECT / START / FOCUS never drop below their 44 px touch size
   const dpadSize = (avail) => Math.max(D(DIM.dpad.min), Math.min(D(DIM.dpad.max), avail));
   const mk = (id, type, x, y, w, h, extra = {}) => add({ id, type, x: frame.x + x, y: frame.y + y, w, h, ...extra });
-  const pill = (id, label, icon, cx, cy) => mk(id, "pill", cx - D(DIM.pill.hit) / 2, cy - D(DIM.pill.hit) / 2, D(DIM.pill.hit), D(DIM.pill.hit) + D(DIM.pill.label), { label, icon, vis: D(DIM.pill.vis) });
+  const pill = (id, label, icon, cx, cy) => mk(id, "pill", cx - PH() / 2, cy - PH() / 2, PH(), PH() + D(DIM.pill.label), { label, icon, vis: D(DIM.pill.vis) });
 
   const faces = ps
     ? [["x", "triangle", "top"], ["a", "circle", "right"], ["b", "cross", "bottom"], ["y", "square", "left"]]
@@ -67,14 +69,14 @@ export function computeLayout({ platform = "nds", width, height, insets = {}, vi
     const top = D(m) + D(sh.h) + D(g);
 
     // bottom area: D-pad bottom-left, actions bottom-right, MENU/SELECT/START small, centred.
-    const pillsW = 3 * D(DIM.pill.hit) + 2 * D(4);
-    const pillH = D(DIM.pill.hit) + D(DIM.pill.label);
+    const pillsW = 3 * PH() + 2 * D(4);
+    const pillH = PH() + D(DIM.pill.label);
     let dp = D(DIM.dpad.max), cl = D(DIM.cluster.max);
     let centre = frame.w - 2 * D(m) - dp - cl;
     let pillsInline = centre >= pillsW + D(8);
     if (!pillsInline) {                                   // shrink the pads a little before giving up the reference arrangement
       const shrink = Math.min(1, (frame.w - 2 * D(m) - pillsW - D(8)) / (dp + cl));
-      const dp2 = Math.max(D(DIM.dpad.min), dp * shrink), cl2 = Math.max(D(DIM.cluster.min), cl * shrink);
+      const dp2 = Math.max(D(DIM.dpad.min), dp * shrink), cl2 = Math.max(Math.max(D(DIM.cluster.min), DIM.cluster.min), cl * shrink);
       if (frame.w - 2 * D(m) - dp2 - cl2 >= pillsW + D(8)) { dp = dp2; cl = cl2; pillsInline = true; }
     }
     variant = pillsInline ? "inline-pills" : "tiered-pills";
@@ -83,10 +85,10 @@ export function computeLayout({ platform = "nds", width, height, insets = {}, vi
     const padsBottom = pillsInline ? bottomPad : bottomPad - pillH - D(6);
     mk("dpad", "dpad", D(m), padsBottom - dp, dp, dp);
     addCluster(frame.w - D(m) - cl, padsBottom - cl, cl);
-    const cx = frame.w / 2, step = D(DIM.pill.hit) + D(4);
-    pill("menu", "MENU", "menu", cx - step, pillRowY + D(DIM.pill.hit) / 2);
-    pill("select", "SELECT", "minus", cx, pillRowY + D(DIM.pill.hit) / 2);
-    pill("start", "START", "play", cx + step, pillRowY + D(DIM.pill.hit) / 2);
+    const cx = frame.w / 2, step = PH() + D(4);
+    pill("menu", "MENU", "menu", cx - step, pillRowY + PH() / 2);
+    pill("select", "SELECT", "minus", cx, pillRowY + PH() / 2);
+    pill("start", "START", "play", cx + step, pillRowY + PH() / 2);
     const controlsTop = padsBottom - Math.max(dp, cl);
     const region = rect(frame.x + D(m), frame.y + top, frame.w - 2 * D(m), Math.max(0, controlsTop - D(g) - top));
     screen = { region };
@@ -97,7 +99,7 @@ export function computeLayout({ platform = "nds", width, height, insets = {}, vi
     // the pads shrink (never below their minimum) when the picture would otherwise be limited by width instead of height (PS1 4:3 on a short, narrow phone)
     const wWanted = (frame.h - 2 * D(m)) * P.aspect;
     const colBudget = (frame.w - wWanted) / 2 - D(g) - D(m);
-    const dp = Math.max(D(DIM.dpad.min), Math.min(D(DIM.dpad.max), colBudget)), cl = Math.max(D(DIM.cluster.min), Math.min(D(DIM.cluster.max), colBudget));
+    const dp = Math.max(D(DIM.dpad.min), Math.min(D(DIM.dpad.max), colBudget)), cl = Math.max(Math.max(D(DIM.cluster.min), DIM.cluster.min), Math.min(D(DIM.cluster.max), colBudget));
     const colW = Math.max(dp, cl, shouldersW) + D(m);
     addShoulders("L", D(m), D(m));
     addShoulders("R", frame.w - D(m) - shouldersW, D(m));
@@ -105,11 +107,11 @@ export function computeLayout({ platform = "nds", width, height, insets = {}, vi
     addCluster(frame.w - D(m) - cl, frame.h - D(m) - cl, cl);
     // the two small buttons are stacked in the band between the shoulder row and the pad, centred on the shoulder / pad axis
     const bandTop = D(m) + D(sh.h) + D(g), bandBottom = frame.h - D(m) - Math.max(dp, cl) - D(g);
-    const pillH = D(DIM.pill.hit) + D(DIM.pill.label);
+    const pillH = PH() + D(DIM.pill.label);
     const gapPills = Math.max(0, Math.min(D(8), (bandBottom - bandTop - 2 * pillH) / 3));
     const y0 = bandTop + Math.max(0, (bandBottom - bandTop - 2 * pillH - gapPills) / 2);
     const lcx = D(m) + Math.max(shouldersW, dp) / 2, rcx = frame.w - D(m) - Math.max(shouldersW, cl) / 2;
-    const cyA = y0 + D(DIM.pill.hit) / 2, cyB = y0 + pillH + gapPills + D(DIM.pill.hit) / 2;
+    const cyA = y0 + PH() / 2, cyB = y0 + pillH + gapPills + PH() / 2;
     pill("menu", "MENU", "menu", lcx, cyA);
     pill("select", "SELECT", "minus", lcx, cyB);
     pill("start", "START", "play", rcx, cyA);
@@ -140,8 +142,9 @@ export function computeLayout({ platform = "nds", width, height, insets = {}, vi
 
   // hit areas: visible rect grown towards free space but never beyond the minimum comfortable size; clamped to the frame
   for (const c of controls) {
-    const mw = Math.max(c.w, D(DIM.minHit)), mh = Math.max(c.type === "pill" ? D(DIM.pill.hit) : c.h, D(DIM.minHit));
-    c.hit = rect(c.x - (mw - c.w) / 2, c.y - (mh - (c.type === "pill" ? D(DIM.pill.hit) : c.h)) / 2, mw, c.type === "pill" ? D(DIM.pill.hit) : mh);
+    const sys = c.type === "pill", need = sys ? DIM.minHitSystem : DIM.minHit, baseH = sys ? PH() : c.h;
+    const mw = Math.max(c.w, need), mh = Math.max(baseH, need);
+    c.hit = rect(c.x - (mw - c.w) / 2, c.y - (mh - baseH) / 2, mw, mh);
   }
   return { platform, orientation: landscape ? "landscape" : "portrait", scale: s, frame, screen, stylus, controls, variant };
 }

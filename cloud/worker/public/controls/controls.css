@@ -14,7 +14,7 @@
 .ctl-shoulder { background: linear-gradient(180deg, rgba(40, 70, 130, .55), var(--fill)); border: 1.5px solid var(--edge); border-radius: calc(11px * var(--k, 1)); box-shadow: var(--glow);
   display: grid; place-items: center; font-size: calc(14px * var(--k, 1)); font-weight: 700; letter-spacing: .02em; }
 .ctl-shoulder.is-down, .ctl-pillbtn.is-down { background: var(--fill-down); box-shadow: var(--glow-down); transform: scale(.95); }
-.ctl-shoulder, .ctl-pillbtn, .ctl-face, .ctl-dpad .arm { transition: transform .06s, background .06s, box-shadow .06s, fill .06s; }
+.ctl-shoulder, .ctl-pillbtn, .ctl-face { transition: transform .06s, background .06s, box-shadow .06s, fill .06s; }
 
 /* MENU / SELECT / START / FOCUS: round icon + micro label */
 .ctl-pill { display: flex; flex-direction: column; align-items: center; }
@@ -23,18 +23,20 @@
 .ctl-micro { margin-top: calc(3px * var(--k, 1)); font-size: calc(9px * var(--k, 1)); letter-spacing: .06em; color: rgba(214, 232, 255, .86); text-transform: uppercase; white-space: nowrap; }
 .ctl-pill.is-active .ctl-pillbtn { border-color: #8fd0ff; box-shadow: var(--glow-down); }
 
-/* D-pad */
-.ctl-dpad .arm { fill: var(--fill); stroke: var(--edge); stroke-width: 1.6; filter: drop-shadow(0 0 3px rgba(64, 140, 255, .45)); }
-.ctl-dpad .hub { fill: rgba(10, 18, 38, .8); stroke: var(--edge-dim); stroke-width: 1.2; rx: 6; }
-.ctl-dpad .chev { fill: none; stroke: rgba(214, 232, 255, .8); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
-.ctl-dpad .arm.is-down { fill: var(--fill-down); stroke: #bfe2ff; filter: drop-shadow(0 0 7px rgba(110, 180, 255, .95)); }
+/* D-pad: single plus silhouette (see components.js) */
+.ctl-dpad svg { overflow: visible; }
+.ctl-dpad .halo { fill: rgba(30, 60, 130, .05); stroke: rgba(80, 140, 255, .10); stroke-width: .6; }
+.ctl-dpad .shape { stroke: rgba(200, 222, 255, .9); stroke-width: 1.2; stroke-linejoin: round; filter: drop-shadow(0 0 3px rgba(90, 160, 255, .75)) drop-shadow(0 0 7px rgba(50, 110, 240, .35)); }
+.ctl-dpad .arm { fill: rgba(120, 185, 255, 0); transition: fill .06s; }
+.ctl-dpad .arm.is-down { fill: rgba(120, 190, 255, .55); }
+.ctl-dpad .dimple { fill: rgba(4, 9, 22, .55); stroke: rgba(120, 170, 255, .12); stroke-width: .8; }
 
 /* action cluster */
-.ctl-cluster .ctl-face { position: absolute; width: 34%; height: 34%; border-radius: 50%; background: var(--fill); border: 1.8px solid color-mix(in srgb, var(--accent) 80%, white 0%);
+.ctl-cluster .ctl-face { position: absolute; width: 36%; height: 36%; border-radius: 50%; background: var(--fill); border: 1.8px solid color-mix(in srgb, var(--accent) 80%, white 0%);
   color: var(--accent); box-shadow: 0 0 9px color-mix(in srgb, var(--accent) 38%, transparent), inset 0 0 7px color-mix(in srgb, var(--accent) 16%, transparent); display: grid; place-items: center; }
 .ctl-face .ctl-glyph { font-size: calc(19px * var(--k, 1)); font-weight: 800; }
 .ctl-face svg { width: 62%; height: 62%; }
-.ctl-face.face-top { left: 33%; top: 0; } .ctl-face.face-bottom { left: 33%; bottom: 0; } .ctl-face.face-left { left: 0; top: 33%; } .ctl-face.face-right { right: 0; top: 33%; }
+.ctl-face.face-top { left: 32%; top: 0; } .ctl-face.face-bottom { left: 32%; bottom: 0; } .ctl-face.face-left { left: 0; top: 32%; } .ctl-face.face-right { right: 0; top: 32%; }
 .ctl-face.is-down { background: color-mix(in srgb, var(--accent) 38%, rgba(10, 20, 44, .8)); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 80%, transparent), inset 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent); transform: scale(.93); color: #fff; }
 
 /* in-game menu */
@@ -46,4 +48,3 @@
 .ctl-menu button { appearance: none; border: 1.5px solid var(--edge); background: var(--fill); color: var(--txt); border-radius: 12px; padding: 12px 14px; font: 700 14px system-ui; min-height: 44px; }
 .ctl-menu button.primary { background: rgba(70, 140, 255, .55); } .ctl-menu button.danger { border-color: rgba(255, 110, 130, .7); color: #ffb3bf; }
 .ctl-hud { position: absolute; left: 50%; transform: translateX(-50%); top: 4px; font-size: 10px; letter-spacing: .08em; color: rgba(190, 215, 255, .55); pointer-events: none; z-index: 2; }
-.ctl-immersive .ctl-c { --ctl-alpha: .28; }

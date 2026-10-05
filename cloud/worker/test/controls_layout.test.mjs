@@ -30,13 +30,15 @@ for (const c of cases) {
     }
     for (const k of L.controls) assert.ok(!overlap(k, L.screen.clip), `${k.id} covers the game picture`);
   });
-  test(`${name(c)}: thumb-sized targets`, () => {
-    const min = DIM.minHit * L.scale - 0.5;
+  test(`${name(c)}: thumb-sized targets (>=48 dp pads/actions/shoulders, >=44 dp MENU/SELECT/START/FOCUS)`, () => {
     for (const k of L.controls) {
-      if (k.type === "pill") assert.ok(k.hit.w >= min && k.hit.h >= min, `${k.id} hit ${k.hit.w}x${k.hit.h} < ${min}`);
-      else assert.ok(k.hit.w >= min && k.hit.h >= min, `${k.id} too small`);
+      const min = (k.type === "pill" ? DIM.minHitSystem : DIM.minHit) - 0.01;
+      assert.ok(k.hit.w >= min && k.hit.h >= min, `${k.id} hit ${k.hit.w}x${k.hit.h} < ${min}`);
+      assert.ok(k.hit.x >= L.frame.x - 0.01 && k.hit.y >= L.frame.y - 0.01 && k.hit.x + k.hit.w <= L.frame.x + L.frame.w + 0.01 && k.hit.y + k.hit.h <= L.frame.y + L.frame.h + 0.01, `${k.id} hit leaves the frame`);
     }
-    assert.ok(get(L, "dpad").w >= DIM.dpad.min * L.scale - 0.5 && get(L, "actions").w >= DIM.cluster.min * L.scale - 0.5, "pad clusters too small");
+    const ac = get(L, "actions");
+    assert.ok(ac.w * 0.36 >= DIM.minHit - 0.01, `action buttons ${ac.w * 0.36} < ${DIM.minHit}`);
+    assert.ok(get(L, "dpad").w >= Math.max(DIM.dpad.min * L.scale, DIM.minHit) - 0.5 && ac.w >= DIM.cluster.min - 0.5, "pad clusters too small");
   });
   test(`${name(c)}: approved structure`, () => {
     const frame = L.frame, S = (id) => get(L, id), dp = S("dpad"), ac = S("actions");
@@ -57,7 +59,7 @@ for (const c of cases) {
       assert.ok(dp.y + dp.h > frame.y + frame.h * 0.55, "pads are low");
       // the picture is as large as the minimum column widths allow (limited by height for DS, by height or width for PS1 4:3)
       const aspect = c.platform === "nds" ? 2 / 3 : 4 / 3, sh = c.platform === "ps1" ? DIM.shoulderPs.w * 2 + 6 : DIM.shoulder.w;
-      const colMin = Math.max(DIM.dpad.min, DIM.cluster.min, sh) * L.scale + DIM.margin * L.scale + DIM.gap * L.scale;
+      const colMin = Math.max(DIM.dpad.min * L.scale, Math.max(DIM.cluster.min * L.scale, DIM.cluster.min), sh * L.scale) + DIM.margin * L.scale + DIM.gap * L.scale;
       const best = Math.min(frame.h - 2 * DIM.margin * L.scale, (frame.w - 2 * colMin) / aspect);
       assert.ok(L.screen.clip.h >= best * 0.97, `picture ${L.screen.clip.h.toFixed(0)}px high, could be ${best.toFixed(0)}px`);
       if (c.platform === "nds") assert.ok(L.screen.clip.h / frame.h >= 0.88, "DS picture uses the full height");

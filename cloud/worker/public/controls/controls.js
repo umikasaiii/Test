@@ -14,7 +14,9 @@ export function mountControls({ container, video, platform = "nds", sink, insets
   container.append(clip, overlay);
 
   const nodes = new Map();
-  let view = "both", layout = null, menu = null, immersive = false, destroyed = false;
+  let view = "both", layout = null, menu = null, immersive = false, awake = false, wakeTimer = 0, destroyed = false;
+  const IMMERSIVE_ALPHA = 0.1, WAKE_MS = 2500;                      // PS1 aux key: controls almost hidden, back at full opacity on touch
+  const alphaNow = () => (immersive && !awake ? Math.min(settings.alpha, IMMERSIVE_ALPHA) : settings.alpha);
   const visual = (id, sub, down) => {
     const n = nodes.get(id); if (!n) return;
     if (sub) { const part = n.querySelector(`[data-dir="${sub}"], [data-face="${sub}"]`); if (part) part.classList.toggle("is-down", down); }
@@ -37,7 +39,7 @@ export function mountControls({ container, video, platform = "nds", sink, insets
     const { width, height } = dims();
     layout = computeLayout({ platform, width, height, insets: readInsets(), view, fill: settings.stretch, userScale: settings.scale });
     container.dataset.orientation = layout.orientation; container.dataset.variant = layout.variant; container.dataset.platform = platform;
-    container.style.setProperty("--ctl-alpha", String(immersive ? Math.min(settings.alpha, 0.28) : settings.alpha));
+    container.style.setProperty("--ctl-alpha", String(alphaNow()));
     const cl = layout.screen.clip, v = layout.screen.video;
     Object.assign(clip.style, { left: `${cl.x}px`, top: `${cl.y}px`, width: `${cl.w}px`, height: `${cl.h}px` });
     Object.assign(video.style, { left: `${v.x - cl.x}px`, top: `${v.y - cl.y}px`, width: `${v.w}px`, height: `${v.h}px`, objectFit: "fill" });
@@ -58,14 +60,16 @@ export function mountControls({ container, video, platform = "nds", sink, insets
     if (name === "menu") { api.openMenu(); }
     else if (name === "focus") {
       if (platform === "nds") { view = view === "both" ? "bottom" : view === "bottom" ? "top" : "both"; }
-      else immersive = !immersive;
+      else { immersive = !immersive; awake = false; clearTimeout(wakeTimer); }
       relayout();
     }
     sink.ui?.(name);
   }
 
   const on = (t, ev, fn, opt) => { t.addEventListener(ev, fn, opt); return () => t.removeEventListener(ev, fn, opt); };
+  const wake = () => { if (!immersive) return; awake = true; container.style.setProperty("--ctl-alpha", String(alphaNow())); clearTimeout(wakeTimer); wakeTimer = setTimeout(() => { awake = false; if (!destroyed) container.style.setProperty("--ctl-alpha", String(alphaNow())); }, WAKE_MS); };
   const offs = [
+    on(container, "pointerdown", wake, true),
     on(container, "pointerdown", (e) => { if (menu) return; if (router.down(e)) { try { container.setPointerCapture(e.pointerId); } catch { /* ignore */ } e.preventDefault(); } }),
     on(container, "pointermove", (e) => router.move(e)),
     on(container, "pointerup", (e) => router.up(e)),
@@ -87,7 +91,7 @@ export function mountControls({ container, video, platform = "nds", sink, insets
       router.releaseAll(); menu?.close();
       menu = openMenu(container, { settings, onChange: (s) => { Object.assign(settings, s); if (persist) saveSettings(settings); relayout(); }, onResume: () => { menu = null; }, onLeave: () => { menu = null; onLeave(); } });
     },
-    destroy() { destroyed = true; router.releaseAll(); offs.forEach((f) => f()); menu?.close(); overlay.remove(); clip.remove(); container.classList.remove("ctl-stage"); },
+    destroy() { destroyed = true; clearTimeout(wakeTimer); router.releaseAll(); offs.forEach((f) => f()); menu?.close(); overlay.remove(); clip.remove(); container.classList.remove("ctl-stage"); },
     router,
   };
   relayout();

@@ -11,7 +11,7 @@ for (const [p, o, w, h] of shots) {
   await page.goto(`${base}/controls-preview.html?p=${p}`); await page.waitForSelector('.ctl-c');
   await page.screenshot({ path: `${out}/${p}_${o}.png` });
 }
-const page = await (await browser.newContext({ viewport: { width: 1500, height: 1500 }, deviceScaleFactor: 1 })).newPage();
+const page = await (await browser.newContext({ viewport: { width: 1800, height: 1500 }, deviceScaleFactor: 1 })).newPage();
 await page.goto(`${base}/controls-preview.html`); await page.waitForSelector('.ctl-c');
 await page.screenshot({ path: `${out}/sheet.png`, fullPage: true });
 await browser.close(); console.log('written to', out);
