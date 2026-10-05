@@ -1,0 +1,15 @@
+{
+  // Test-only config (miniflare / vitest-pool-workers): no Containers, no assets. Production config: wrangler.jsonc
+  "name": "dslink-cloud-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [{ "binding": "DB", "database_name": "dslink", "database_id": "test", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "STORE", "bucket_name": "dslink-private" }],
+  "durable_objects": { "bindings": [
+    { "name": "PRESENCE", "class_name": "Presence" },
+    { "name": "SESSION", "class_name": "GameSession" }
+  ] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession"] }],
+  "vars": { "RP_NAME": "DSLink", "ORIGINS": "https://dslink.test", "RP_ID": "dslink.test", "ENVIRONMENT": "test" }
+}
