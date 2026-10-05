@@ -122,7 +122,11 @@ bool LibretroHost::start(const HostConfig& cfg, std::string& err) {
         auto dot = base.find_last_of('.');
         if (dot != std::string::npos) base = base.substr(0, dot);
     }
-    saveFile_ = cfg_.saveDir + "/" + base + ".srm";
+    // Same layout RetroArch uses for this core: <saves>/<core name>/<content>.srm
+    std::string coreDir = cfg_.saveDir + "/" + (sysinfo.library_name ? sysinfo.library_name : "core");
+    std::string mk = "mkdir -p '" + coreDir + "'";
+    if (std::system(mk.c_str()) != 0) log(RETRO_LOG_WARN, "cannot create " + coreDir);
+    saveFile_ = coreDir + "/" + base + ".srm";
     if (p_mem_data && p_mem_size) {
         size_t n = p_mem_size(RETRO_MEMORY_SAVE_RAM);
         void* m = p_mem_data(RETRO_MEMORY_SAVE_RAM);

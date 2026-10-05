@@ -17,3 +17,8 @@ add_executable(dslink-runtime src/main.cpp src/libretro_host.cpp src/mp_bridge.c
 target_include_directories(dslink-runtime PRIVATE src ${LIBRETRO_INCLUDE})
 target_compile_options(dslink-runtime PRIVATE -Wall -Wextra)
 target_link_libraries(dslink-runtime PRIVATE PkgConfig::FFMPEG Threads::Threads ${CMAKE_DL_LIBS})
+
+# Test core for the multiplayer bridge (NETPACKET interface only).
+add_library(npt_testcore MODULE tests/netpacket_testcore.cpp)
+target_include_directories(npt_testcore PRIVATE ${LIBRETRO_INCLUDE})
+set_target_properties(npt_testcore PROPERTIES PREFIX "" OUTPUT_NAME "dslink_npt_libretro")
