@@ -1,0 +1,54 @@
+name: cloud
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gateway:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - name: vet + build
+        run: cd cloud/gateway && go vet ./... && go build ./...
+
+  container-e2e:
+    # Builds the container image and drives it with two real Chromium browsers (WebRTC).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Homebrew test ROMs (own code, built with arm-none-eabi-gcc)
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi
+          mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
+      - name: Build the container
+        run: docker build -f cloud/Dockerfile -t dslink-cloud .
+      - name: Start the container
+        run: |
+          docker run -d --name dslink -p 8080:8080 -e DSLINK_DEBUG=1 dslink-cloud
+          for i in $(seq 1 30); do curl -sf localhost:8080/api/status && break; sleep 1; done
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install Playwright + Chromium
+        run: cd cloud/tests && npm install && npx playwright install --with-deps chromium
+      - name: Product flow through the UI (emulator 2 has no cartridge)
+        run: cd cloud/tests && node browser_ui_nocart.mjs http://localhost:8080 "$PWD/../../build/rom/dslink_test_1.nds"
+      - name: Independent audio/video/input/touch (compatibility mode, both emulators have a test ROM)
+        run: cd cloud/tests && node browser_e2e.mjs http://localhost:8080 "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds"
+      - name: Container logs
+        if: always()
+        run: docker logs dslink | tail -80
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloud-e2e-screenshots
+          path: |
+            /tmp/ui_A.png
+            /tmp/ui_B.png
+            /tmp/e2e_A.png
+            /tmp/e2e_B.png

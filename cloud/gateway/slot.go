@@ -46,20 +46,21 @@ type SlotSpec struct {
 }
 
 type Slot struct {
-	Spec    SlotSpec
-	env     Env
-	dir     string
-	mu      sync.Mutex
-	procs   []*exec.Cmd
-	Nick    string
-	MAC     string
-	Joined  bool // Netplay link established (RetroArch log)
-	CoreMP  bool // core reported "Starting multiplayer"
-	LogPath string
-	Video   *MediaIn
-	Audio   *MediaIn
-	input   *Injector
-	Events  atomic.Uint64 // input messages received from the browser
+	Spec        SlotSpec
+	env         Env
+	dir         string
+	mu          sync.Mutex
+	procs       []*exec.Cmd
+	Nick        string
+	MAC         string // as reported by the core (empty if it stopped before printing it)
+	ExpectedMAC string // DSLink DeviceIdentity derivation of the nickname given to RetroArch
+	Joined      bool   // Netplay link established (RetroArch log)
+	CoreMP      bool   // core reported "Starting multiplayer"
+	LogPath     string
+	Video       *MediaIn
+	Audio       *MediaIn
+	input       *Injector
+	Events      atomic.Uint64 // input messages received from the browser
 }
 
 var (
@@ -177,6 +178,7 @@ func (s *Slot) Start() error {
 		return fmt.Errorf("cfgtool opts: %v", err)
 	}
 	s.Nick, _ = env.cfgtool(role, s.dir, "", hostip, s.Spec.NetPort, s.Spec.Name, s.Spec.DeviceID, "nick")
+	s.ExpectedMAC, _ = env.cfgtool(role, s.dir, "", hostip, s.Spec.NetPort, s.Spec.Name, s.Spec.DeviceID, "mac")
 	// cloud overrides: X11 + software GL, windowed 1:1 so the browser's touch maps exactly onto the bottom screen,
 	// Pulse sink per slot, absolute X pointer (no mouse grab), no cursor drawing, JIT left to the core default.
 	cfg += `video_driver = "gl"
@@ -310,7 +312,7 @@ func (s *Slot) Status() map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := map[string]any{"id": s.Spec.ID, "display": s.Spec.Display, "sink": s.Spec.Sink, "host": s.Spec.Host,
-		"has_cartridge": s.Spec.ROM != "", "netplay_joined": s.Joined, "core_multiplayer": s.CoreMP, "mac": s.MAC, "nick": s.Nick,
+		"has_cartridge": s.Spec.ROM != "", "netplay_joined": s.Joined, "core_multiplayer": s.CoreMP, "mac": s.MAC, "expected_mac": s.ExpectedMAC, "nick": s.Nick,
 		"netplay_port": s.Spec.NetPort, "input_events": s.Events.Load()}
 	if s.Video != nil {
 		st["video_packets"] = s.Video.Count()

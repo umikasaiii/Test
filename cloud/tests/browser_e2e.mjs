@@ -2,15 +2,16 @@
 // Verifies, with real WebRTC: independent video, independent audio, independent keyboard/pad input, independent
 // touch screen, and that the two emulators are Netplay-connected INSIDE the container (gateway /api/status).
 // usage: node browser_e2e.mjs <base-url> <rom1.nds> <rom2.nds>
-import { chromium } from 'playwright-core';
+import { chromium } from 'playwright';
 import fs from 'node:fs';
 
 const base = process.argv[2] || 'http://localhost:8080';
 const rom1 = process.argv[3], rom2 = process.argv[4];
-const chrome = process.env.CHROME || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const chrome = process.env.CHROME || undefined; // undefined = Playwright's own Chromium; locally: CHROME=/opt/pw-browsers/chromium-1194/chrome-linux/chrome
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  -> ' + detail : ''}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const waitStatus = async (pred, ms = 40000) => { const end = Date.now() + ms; let st; while (Date.now() < end) { st = (await (await fetch(base + '/api/status')).json()).room; if (st && pred(st)) return st; await sleep(500); } return st; };
 
 await fetch(base + '/api/room', { method: 'DELETE' }); // start from a clean container
 const browser = await chromium.launch({
@@ -108,11 +109,12 @@ check('...and not on emulator 1', tA < 30, `white px on A: ${tA}`);
 await B.evaluate(() => window.dslink.touch(0.5, 0.4, false, false)); await sleep(300);
 
 // ---- 5. DS multiplayer link is internal: status from the container
-const st = await (await fetch(base + '/api/status')).json();
+const stAll = await waitStatus((r) => r.slots.every((x) => x.netplay_joined && x.core_multiplayer));
+const st = { room: stAll };
 const [s1, s2] = st.room.slots;
 check('both emulators Netplay-connected inside the container', s1.netplay_joined && s2.netplay_joined);
 check('core multiplayer layer started on both', s1.core_multiplayer && s2.core_multiplayer);
-check('distinct DS MAC addresses', st.room.macs_differ, `${s1.mac} / ${s2.mac}`);
+check('distinct DS MAC addresses (core-reported, equal to the DSLink derivation)', st.room.macs_differ && s1.mac === s1.expected_mac && s2.mac === s2.expected_mac, `${s1.mac} / ${s2.mac}`);
 check('emulator 2 is the Netplay client of emulator 1 (host)', s1.host && !s2.host);
 
 const failed = results.filter((r) => !r.ok);

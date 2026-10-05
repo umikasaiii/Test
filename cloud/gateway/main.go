@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -244,7 +245,8 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	jsonOut(w, 200, map[string]any{"room": map[string]any{
 		"code": s.room.Code, "title": s.room.Title, "compat_mode": s.room.Compat,
 		"slots": []any{s.room.Slots[0].Status(), s.room.Slots[1].Status()}, "peers": peers,
-		"macs_differ": s.room.Slots[0].MAC != "" && s.room.Slots[0].MAC != s.room.Slots[1].MAC,
+		"macs_differ":            s.room.Slots[0].ExpectedMAC != "" && s.room.Slots[0].ExpectedMAC != s.room.Slots[1].ExpectedMAC,
+		"core_macs_match_dslink": (s.room.Slots[0].MAC == "" || s.room.Slots[0].MAC == s.room.Slots[0].ExpectedMAC) && (s.room.Slots[1].MAC == "" || s.room.Slots[1].MAC == s.room.Slots[1].ExpectedMAC),
 	}})
 }
 
@@ -283,6 +285,24 @@ func main() {
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, 200, map[string]any{"iceServers": s.ice})
 	})
+	if os.Getenv("DSLINK_DEBUG") == "1" { // diagnostics only: last lines of a slot's RetroArch log
+		mux.HandleFunc("/api/slotlog", func(w http.ResponseWriter, r *http.Request) {
+			n, _ := strconv.Atoi(r.URL.Query().Get("slot"))
+			s.mu.Lock()
+			room := s.room
+			s.mu.Unlock()
+			if room == nil || n < 1 || n > 2 {
+				http.Error(w, "no such slot", 404)
+				return
+			}
+			b, _ := os.ReadFile(room.Slots[n-1].LogPath)
+			if len(b) > 60000 {
+				b = b[len(b)-60000:]
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write(b)
+		})
+	}
 	mux.HandleFunc("/ws", s.ws)
 	mux.Handle("/", http.FileServer(http.Dir(*web)))
 	srv := &http.Server{Addr: *addr, Handler: mux}
