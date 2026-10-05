@@ -1,8 +1,9 @@
 # DSLink
 
-> **Direction change:** native Android/iOS apps are frozen (baseline `2e5ed1d`). Current work is **DSLink Cloud V1** — two
-> emulators in one Linux container, played from browsers over WebRTC. See [docs/CLOUD.md](docs/CLOUD.md) and
-> [docs/CLOUD_MIGRATION.md](docs/CLOUD_MIGRATION.md).
+> **Direction (current):** DSLink is a cloud service with its own minimal Libretro frontend, the **DSLink Runtime**
+> (`runtime/`), a PWA and a Cloudflare Worker backend (accounts, friends, presence, private library, invites). **RetroArch is reference
+> only** (parity baseline, not in the production image). Native Android/iOS apps are frozen (baseline `2e5ed1d`).
+> Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/CLOUD.md](docs/CLOUD.md) (status table, how to run, what is NOT done).
 
 Nintendo DS emulator for **Android and iOS** focused on **simple local multiplayer** (same Wi-Fi / hotspot), first target:
 **Mario Party DS** through the real *DS Download Play* flow. It is built on RetroArch 1.22.2 and the melonDS DS 1.4.0 libretro

@@ -1,5 +1,70 @@
 # Architecture
 
+> **Direction (current):** DSLink is its own minimal Libretro frontend, the **DSLink Runtime**, built for the cloud.
+> RetroArch is **REFERENCE ONLY**: it stays in the repository (patches, submodule, `cloud/Dockerfile`, the `DSLINK_BACKEND=retroarch`
+> gateway backend, the native-app work from commit `c7393f0`) as a diagnostic and parity baseline, and is **not** in the production
+> path or in the production image (`cloud/Dockerfile.runtime`).
+
+```
+ PWA (browser, installable)
+   │  HTTPS / WebSocket                         accounts · friends · presence · library · invites
+ Cloudflare Worker ───────────────────────────── D1 (metadata) · R2 (private bytes)
+   │                                              Durable Objects: Presence (per user) · GameSession (per session)
+   │  session boot: Container API + one-time content ticket
+ Cloudflare Container  (cloud/Dockerfile.runtime)
+   ├─ gateway (Go, pion WebRTC): signalling, per-slot media tracks, input
+   ├─ DSLink Runtime  ─ libretro ─ melonDS DS     (slot 1: Player 1, has the cartridge)
+   └─ DSLink Runtime  ─ libretro ─ melonDS DS     (slot 2: Player 2, no cartridge)
+        └── DSLink Multiplayer Bridge (Unix socket, inside the container): DS wireless packets never leave it
+ WebRTC media: Runtime framebuffer/audio → libx264 / libopus (in-process) → RTP → browser. Inputs back on two DataChannels.
+```
+
+| Document | Topic |
+|---|---|
+| [DSLINK_RUNTIME.md](DSLINK_RUNTIME.md) | the Runtime: process model, CLI, control link, A/V pipeline, metrics |
+| [LIBRETRO_HOST.md](LIBRETRO_HOST.md) | which libretro environment calls / callbacks the host implements and how |
+| [RETROARCH_PARITY.md](RETROARCH_PARITY.md) | A/B evidence against RetroArch, what RetroArch may not be removed for |
+| [MULTIPLAYER_BRIDGE.md](MULTIPLAYER_BRIDGE.md) | DS multiplayer without RetroArch |
+| [CLOUD.md](CLOUD.md) | deployment, status table, how to run everything |
+| [AUTH.md](AUTH.md) · [FRIENDS.md](FRIENDS.md) · [PRESENCE.md](PRESENCE.md) | accounts, friends/invites, presence |
+| [LIBRARY.md](LIBRARY.md) · [STORAGE.md](STORAGE.md) | private game library, R2/D1 layout, saves |
+| [SECURITY.md](SECURITY.md) | threat model and privacy rules |
+
+Status vocabulary used everywhere: **CODED · BUILD VERIFIED · LOCAL TESTED · CLOUD DEPLOYED · BROWSER VERIFIED · DEVICE VERIFIED · MARIO PARTY VERIFIED**.
+Automated browser tests are never reported as device tests.
+
+## Why a Runtime instead of RetroArch in the cloud
+
+RetroArch is a desktop/mobile frontend: window system, GL/audio drivers, menus, input drivers, playlists. In a container we had to
+fake a display, an audio sink and a screen capture per emulator (Xvfb + PulseAudio + ffmpeg x11grab) and inject keys/mouse with
+xdotool-style tooling. The Runtime removes the whole detour: the core's framebuffer and audio go straight into an encoder, inputs
+are written straight into the core's input state, and the DS wireless packets are forwarded by a ~300-line bridge.
+Measured differences: no X server, no audio server, one process per console, ~60 fps pacing with a single thread plus the encoder.
+
+## Layers in the repository
+
+| Path | Role |
+|---|---|
+| `runtime/` | DSLink Runtime (C++17): libretro host, bridge, A/V pipeline, control link |
+| `cloud/gateway/` | Go gateway: WebRTC, rooms, `/api/internal/*` session provisioning; backends `runtime` (production) and `retroarch` (reference) |
+| `cloud/worker/` | Cloudflare Worker (TypeScript): API, D1 schema, Durable Objects, R2, PWA assets (`public/`) |
+| `cloud/web/` | the original minimal UI (CREA PARTITA / ENTRA) talking directly to a gateway; kept for development |
+| `dslink/` | portable C++ library: identity/MAC derivation, ROM check, config generation (also used by the gateway) |
+| `patches/`, `upstream/` | RetroArch patches + pinned submodules (reference path) |
+| `android/`, `ios/` | native apps — **frozen** |
+| `tests/` | runtime tests, A/B parity, homebrew test ROMs (own code, GPLv3) |
+
+## Identity and MAC (unchanged)
+
+`deviceId` → nickname (set of distinct letters from `SHA-256(deviceId+salt)`) → the core derives the DS MAC from the libretro
+username (`melonds_mac_address_mode=from-username`). The Runtime passes the same username; tests assert the MAC reported by the core
+equals DSLink's derivation under both frontends.
+
+---
+
+# Appendix: the original architecture (native apps + RetroArch, frozen)
+
+
 Decision: **fork-style integration of RetroArch (option A)**, not a new frontend (option B). RetroArch already provides the
 mature pieces that are risky to rewrite: libretro host, Netplay (TCP, handshake, packet relay for the core's *netpacket*
 interface), audio/video, touch overlay, saves. DSLink adds a thin layer on top and a minimal, documented patch set.
@@ -46,7 +111,7 @@ and opaque blobs. The control channel is unauthenticated UDP on the local networ
 
 ---
 
-# DSLink Cloud V1 (current direction)
+# Appendix: DSLink Cloud V1 as first built (RetroArch capture path — now the reference backend)
 
 **The native Android/iOS apps are frozen** (baseline commit `2e5ed1d`). The goal is now a cloud-hosted DS "room":
 both players use only a browser; the emulators and the DS wireless link live **inside one Linux container**.

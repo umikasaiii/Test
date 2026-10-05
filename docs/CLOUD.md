@@ -1,45 +1,72 @@
-# DSLink Cloud V1 — status and how to run
+# DSLink Cloud — status, how it deploys, how to run it
 
-Status scale: **CODED · BUILD VERIFIED · LOCAL TESTED · CLOUD DEPLOYED · BROWSER VERIFIED · DEVICE VERIFIED · MARIO PARTY VERIFIED**
+Status scale: **CODED · BUILD VERIFIED · LOCAL TESTED · CLOUD DEPLOYED · BROWSER VERIFIED · DEVICE VERIFIED · MARIO PARTY VERIFIED**.
+"LOCAL TESTED" = automated tests on a Linux machine. Automated browser tests (headless Chromium) are **BROWSER VERIFIED**, never DEVICE VERIFIED.
 
-| Item | Status |
-|---|---|
-| Two RetroArch+melonDS DS instances in one environment, each with its own X framebuffer, PulseAudio sink, input injector, DS MAC | LOCAL TESTED |
-| Emulator 1 with ROM (Netplay host) / emulator 2 with **no cartridge** (Netplay client), connected over loopback inside the environment | LOCAL TESTED (joins and starts the core's multiplayer layer; DS menu itself needs the user's firmware → not yet) |
-| Per-slot video (VP8) + audio (Opus) → WebRTC, per-browser input → its own emulator only (buttons + touch screen) | LOCAL TESTED / BROWSER VERIFIED (two headless Chromium, localhost) |
-| Web UI: CREA PARTITA (upload .nds → room code/link), ENTRA (code) | BROWSER VERIFIED (headless Chromium driving the real UI) |
-| Container image (`cloud/Dockerfile`: pinned RetroArch+core, gateway, Xvfb, Pulse, ffmpeg) | BUILD VERIFIED (GitHub Actions `cloud` run 37298639235, ~3.5 min) |
-| Both browser suites against the **container** (Playwright Chromium on the runner) | BROWSER VERIFIED in CI (13/13 UI flow + 16/16 independence), same run |
-| Cloudflare Realtime SFU/TURN/Containers integration | **NOT DONE — API unverified** (developers.cloudflare.com blocked in the build environment) |
-| CLOUD DEPLOYED | NO |
-| DEVICE VERIFIED (real phones) | NO |
-| MARIO PARTY VERIFIED | NO — blocked on the user's ROM **and** firmware |
+## Status
 
-## What the browser tests prove (`cloud/tests/`)
+| Area | Status | Evidence |
+|---|---|---|
+| **DSLink Runtime** (libretro host, A/V, input/touch, 4 ports, core options, dirs, SRAM, no-content boot, logs, metrics, clean stop) | CODED · BUILD VERIFIED · LOCAL TESTED | `test_single.py` 15/15 |
+| melonDS DS directly under the Runtime | **PASS** | same + A/B 13/13 |
+| RetroArch parity | **13/13 + 10/10 + 19/19** | [RETROARCH_PARITY.md](RETROARCH_PARITY.md) |
+| Two simultaneous DS instances (different identities/MACs, independent video, audio, input, touch) | **PASS** (LOCAL TESTED) | `test_two_ds.py` 14/14; `browser_e2e.mjs` 19/19 |
+| DS multiplayer **without RetroArch** (bridge; real DS Wi-Fi frames between two cores) | **PASS** for transport and radio frames; Download Play / Mario Party protocol UNVERIFIED | `test_wifi_bridge.py` 9/9, `test_bridge_parity.py` 10/10 |
+| WebRTC from Runtime framebuffer/audio (no screen capture), 2 media tracks per browser, reliable + unreliable data channels | **PASS** locally: VP8 in headless Chromium (BROWSER VERIFIED). H.264 path CODED; verified only by the CI job with real Chrome (not run in this sandbox) | `browser_e2e.mjs`, `pwa_e2e.mjs` |
+| Cloudflare Realtime **SFU** (per Cloud Gaming example) | **NOT IMPLEMENTED — API unverified** (developers.cloudflare.com unreachable from the build environment). Container → browser media must go through TURN/SFU because Containers do not accept inbound UDP: the gateway accepts ICE/TURN servers (`DSLINK_ICE`, Worker `ICE_SERVERS`) so a TURN-relayed peer is the CODED fallback; **untested on Cloudflare** | — |
+| Accounts (passkeys + password) | **PASS** (LOCAL TESTED, BROWSER VERIFIED with a virtual authenticator) | `auth.test.ts` 13 + `pwa_e2e` |
+| Friends / requests / invites | **PASS** (LOCAL TESTED, BROWSER VERIFIED) | `friends.test.ts` 9, `session.test.ts` 14, `pwa_e2e` |
+| Presence (ONLINE / IN_GAME / OFFLINE, multi-device, timeouts) | **PASS** (LOCAL TESTED, BROWSER VERIFIED) | `friends.test.ts`, `pwa_e2e` |
+| Game library (header detection, validation, delete, account purge) | **PASS** (LOCAL TESTED) | `library.test.ts` 12 |
+| R2 private storage (per-user prefixes, never public, presigned direct upload) | Worker-proxied path **PASS** against miniflare R2; presigned URL generation CODED, **not tested against real R2** | `library.test.ts` |
+| Session DO + Container (`DSLinkContainer`, ticketed content, cleanup) | DO logic LOCAL TESTED; Container API integration CODED, **cannot run outside Cloudflare**; a local gateway stands in for it | `session.test.ts`, `internal_session.py` 14/14, `pwa_e2e` |
+| PWA (manifest, service worker, installable, mobile-first, passkey UI, library, friends, invites, game screen) | **BROWSER VERIFIED** (Chromium, mobile emulation, offline shell, no horizontal scroll) · **DEVICE PENDING** (Safari iPhone, Chrome Android, desktop not run) | `pwa_e2e.mjs` 33/33 |
+| Production image without RetroArch (`cloud/Dockerfile.runtime`) | CODED · CI job defined; **not built in this sandbox (no Docker daemon)** | `.github/workflows/cloud.yml` |
+| **Cloudflare deployment** | **NOT DEPLOYED** | needs account, D1/R2 ids, `wrangler deploy` |
+| PS1 | library accepts/validates `.chd`, `.cue+.bin`; **no core in the Runtime, no two-port mapping** | [LIBRARY.md](LIBRARY.md) |
+| DEVICE VERIFIED | **NO** | |
+| **Mario Party DS** | **NOT TESTED** — requires the user's private ROM and bootable DS firmware | |
 
-`browser_e2e.mjs` (16 checks, "Multi-ROM compatibility mode": slot 2 also gets a test ROM so its output differs):
-two browsers connected at once; video A is a blue screen and video B a red one (different framebuffers); audio A peaks at 440 Hz
-and audio B at 660 Hz (different streams); a button pressed in A lights only emulator 1, in B only emulator 2; a touch in B
-makes emulator 2's ARM7 read the touch panel (crosshair) and emulator 1 sees nothing; both emulators joined Netplay inside the
-container; core multiplayer started on both; DS MACs differ and equal DSLink's derivation.
-
-`browser_ui_nocart.mjs` (13 checks, the real product flow, **no test hooks**): host uploads a .nds in the UI and gets a code;
-guest enters it; both connected; emulator 2 has no cartridge, joined as Netplay client, and its core reports it needs bootable
-firmware (expected without the user's DS firmware).
-
-## Run locally (Linux)
+## Request path of a game
 
 ```
-# test ROMs (own homebrew, redistributable)
-tests/rom/build.sh /tmp                       # needs gcc-arm-none-eabi
-# gateway + tools built as in cloud/Dockerfile; then:
-DSLINK_RETROARCH=... DSLINK_CORE=... DSLINK_CFGTOOL=... DSLINK_ROMCHECK=... DSLINK_LOOPBACK=1 DSLINK_DEBUG=1 \
-  cloud/gateway/dslink-gateway -addr :8080 -web cloud/web
-cd cloud/tests && npm install && node browser_ui_nocart.mjs http://localhost:8080 /tmp/dslink_test_1.nds
+ invite accepted ─► Worker creates GameSession DO ─► alarm: container start ─► Worker→container POST /api/internal/session
+   { manifest, one-time ticket, per-slot gateway tokens, contentBase }
+ gateway: GET contentBase/files/<id>            (ticket)  → Player 1's ROM, only in the container's private work dir
+          GET contentBase/slot/N/system/<name>  (ticket)  → each slot's OWN firmware
+          GET contentBase/save/sram             (ticket)  → restore host save
+          starts Runtime #1 (host) and Runtime #2 (no cartridge), joined by the bridge
+ browsers: wss /api/sessions/:id/signal  ── Worker (membership) ──► container /ws?player=N&token=…  → WebRTC
+ end:      Worker → POST /api/internal/end → gateway uploads SRAM, wipes the room → container destroyed; leases and tickets removed
 ```
-Container: `docker build -f cloud/Dockerfile -t dslink-cloud . && docker run --rm -p 8080:8080 dslink-cloud`
-(for remote browsers: publish `50000-50100/udp`, set `DSLINK_PUBLIC_IP`, or provide TURN through `DSLINK_ICE`).
-Private firmware for emulator 2: mount a directory with `bios7.bin bios9.bin firmware.bin` and set `DSLINK_FIRMWARE_DIR`.
+
+## Deploying (not done)
+```
+cd cloud/worker && npm ci --legacy-peer-deps
+wrangler d1 create dslink && wrangler r2 bucket create dslink-private            # put the ids in wrangler.jsonc
+wrangler secret put INTERNAL_TOKEN      # and R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET_NAME for presigned uploads
+wrangler d1 migrations apply dslink --remote
+wrangler deploy                          # builds cloud/Dockerfile.runtime as the Container image
+```
+Set `ORIGINS`/`RP_ID` to the real hostname (WebAuthn is bound to it) and `ICE_SERVERS` to a TURN configuration.
+
+## Run everything locally (what the tests do)
+```
+tests/rom/build.sh /tmp                                              # homebrew ROMs (gcc-arm-none-eabi)
+cmake -S runtime -B build/rt -G Ninja && cmake --build build/rt      # Runtime
+(cd cloud/gateway && go build -o /tmp/dslink-gateway .)
+# gateway (stands in for the Container; DSLINK_BACKEND=retroarch selects the reference backend)
+DSLINK_INTERNAL_TOKEN=internal-secret DSLINK_BACKEND=runtime DSLINK_RUNTIME=build/rt/dslink-runtime DSLINK_CORE=<melondsds_libretro.so> \
+  DSLINK_CFGTOOL=<dslink_cfgtool> DSLINK_ROMCHECK=<dslink_romcheck> DSLINK_LOOPBACK=1 /tmp/dslink-gateway -addr :8080 -web cloud/web
+# Worker + PWA (workerd, local D1/R2/Durable Objects)
+cd cloud/worker && npx wrangler d1 migrations apply dslink --local -c wrangler.dev.jsonc && npx wrangler dev -c wrangler.dev.jsonc --port 8787 --local
+cd cloud/tests && npm install && node pwa_e2e.mjs http://localhost:8787 /tmp/dslink_test_1.nds        # 33 checks
+cd cloud/worker && npx vitest run                                    # 48 tests
+```
+`DSLINK_VIDEO_CODEC=vp8` for headless Chromium; the default (H.264) needs a browser with H.264 in WebRTC (real Chrome).
+
+## Reference path (RetroArch) — kept, not production
+`cloud/Dockerfile` (RetroArch + Xvfb + PulseAudio + ffmpeg capture), `DSLINK_BACKEND=retroarch`; used by CI for A/B and by `browser_e2e.mjs`.
 
 ## Findings worth knowing
 
