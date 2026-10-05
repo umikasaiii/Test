@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash -eo pipefail {0}
+
 jobs:
   build:
     runs-on: macos-15
@@ -26,7 +30,8 @@ jobs:
           echo "simulator: $SIM"
           xcodebuild -project ios/DSLink.xcodeproj -scheme DSLink -configuration Debug \
             -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath build/ios-sim \
-            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test | tail -60
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test | tee /tmp/xctest.log | tail -15
+          grep -E "Executed [0-9]+ tests, with 0 failures" /tmp/xctest.log
       - name: Package unsigned .app (zip)
         run: |
           cd build/ios-device/Build/Products/Release-iphoneos && zip -qr "$GITHUB_WORKSPACE/DSLink-unsigned-iphoneos.app.zip" DSLink.app
