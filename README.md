@@ -10,9 +10,9 @@ core; DSLink adds a layer that hides cores, Netplay, IPs, ports and MACs.
 |---|---|
 | Portable DSLink layer (identity/MAC, discovery, handshake, state machines, diagnostics…) | IMPLEMENTED, 56 native tests (NETWORK TESTED) |
 | RetroArch + melonDS DS driven only by DSLink config: host↔client Netplay, MACs, no-cartridge client | EMULATOR TESTED on Linux (integration test) |
-| Android app (APK) | IMPLEMENTED; build status: see "CI" below |
+| Android app (APK, arm64, core+RetroArch+DSLink, JUnit+lint) | BUILD VERIFIED in CI (artifact `DSLink-android`) |
 | Android on a phone: emulation, touch, multiplayer | NEEDS DEVICE TEST |
-| iOS app: UI, Bonjour, local-network permission, handshake | IMPLEMENTED; build status: see "CI" |
+| iOS app: UI, Bonjour, local-network permission, handshake; arm64 device build (unsigned) + XCTest on simulator | BUILD VERIFIED in CI (4 XCTests); not run on a phone |
 | iOS emulator engine linked in | **NOT DONE** (docs/IOS.md) |
 | Android ↔ iPhone, iPhone ↔ iPhone, Mario Party DS Download Play | NEEDS DEVICE TEST / blocked on iOS engine |
 | Automatic pick of the host in the DS Download Play list | NOT IMPLEMENTED (user taps it) |
