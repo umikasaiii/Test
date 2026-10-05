@@ -13,7 +13,7 @@ find_package(Threads REQUIRED)
 # libretro.h comes from the pinned RetroArch submodule (libretro-common, MIT) - not copied into the repo.
 set(LIBRETRO_INCLUDE "${CMAKE_SOURCE_DIR}/../upstream/retroarch/libretro-common/include" CACHE PATH "directory containing libretro.h")
 
-add_executable(dslink-runtime src/main.cpp src/libretro_host.cpp src/mp_bridge.cpp src/av_pipeline.cpp src/link.cpp src/dlplay_diag.cpp)
+add_executable(dslink-runtime src/main.cpp src/libretro_host.cpp src/mp_bridge.cpp src/radio_lan.cpp src/av_pipeline.cpp src/link.cpp src/dlplay_diag.cpp)
 target_include_directories(dslink-runtime PRIVATE src ${LIBRETRO_INCLUDE})
 target_compile_options(dslink-runtime PRIVATE -Wall -Wextra)
 target_link_libraries(dslink-runtime PRIVATE PkgConfig::FFMPEG Threads::Threads ${CMAKE_DL_LIBS})
@@ -28,3 +28,9 @@ add_executable(dlplay_test tests/dlplay_test.cpp src/dlplay_diag.cpp)
 target_include_directories(dlplay_test PRIVATE src)
 enable_testing()
 add_test(NAME dlplay COMMAND dlplay_test)
+
+# Unit test of the LAN RadioTransport (loopback UDP, no emulator).
+add_executable(lan_test tests/lan_test.cpp src/radio_lan.cpp)
+target_include_directories(lan_test PRIVATE src)
+target_link_libraries(lan_test PRIVATE Threads::Threads)
+add_test(NAME lan COMMAND lan_test)

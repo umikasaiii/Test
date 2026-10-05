@@ -18,6 +18,7 @@
 #include "libretro_host.hpp"
 #include "mp_bridge.hpp"
 #include "dlplay_diag.hpp"
+#include "session_mode.hpp"
 
 using namespace dsrt;
 using Clock = std::chrono::steady_clock;
@@ -80,6 +81,7 @@ int main(int argc, char** argv) {
     signal(SIGINT, onSig);
     signal(SIGTERM, onSig);
     const std::string name = args.get("name", "runtime");
+    const std::string name_ = name;
     std::ofstream logf;
     if (args.has("log")) logf.open(args.get("log"), std::ios::app);
     Link link;
@@ -138,12 +140,42 @@ int main(int argc, char** argv) {
     DlDiag dl;
     dl.logFn = [&](const std::string& s) { log(s); };
     mp.setDiag(&dl);
-    if (args.get("mp-role") == "host") {
-        if (!mp.startHost(host, args.get("mp-path"), err)) { log("FATAL: " + err); return 6; }
-        log("multiplayer bridge: host");
-    } else if (args.get("mp-role") == "client") {
-        if (!mp.startClient(host, args.get("mp-path"), args.geti("mp-timeout", 20000), err)) { log("FATAL: " + err); return 6; }
-        log("multiplayer bridge: client id " + std::to_string(mp.clientId()));
+    SessionPlan plan;
+    if (!planFor(args.get("session-mode", args.get("radio-transport") == "lan" ? "distributed" : "hosted"), plan, err)) { log("FATAL: " + err); return 2; }
+    if (args.get("radio-transport") == "lan") plan.radio = RadioTransport::Lan; else if (args.get("radio-transport") == "local") plan.radio = RadioTransport::Local;
+    if (args.has("stream-transport")) plan.stream = args.get("stream-transport") == "none" ? StreamTransport::None : StreamTransport::WebRtc;
+    log(std::string("session: mode=") + dsrt::name(plan.mode) + " radio=" + dsrt::name(plan.radio) + " stream=" + dsrt::name(plan.stream));
+    LanConfig lc;
+    std::string lanUri;
+    auto parseImpair = [](const std::string& s) {
+        LanImpair im; std::stringstream ss(s); std::string kv;
+        while (std::getline(ss, kv, ',')) { auto e = kv.find('='); if (e == std::string::npos) continue; double v = std::atof(kv.c_str() + e + 1); auto k = kv.substr(0, e);
+            if (k == "delay") im.delayMs = v; else if (k == "jitter") im.jitterMs = v; else if (k == "loss") im.lossPct = v; }
+        return im; };
+    if (plan.radio == RadioTransport::Lan) {
+        lc.code = args.get("lan-code"); lc.secretHex = args.get("lan-secret"); lc.bindAddr = args.get("lan-bind", "0.0.0.0");
+        lc.port = args.geti("lan-port", 0); lc.discoveryPort = args.geti("lan-discovery-port", 47531); lc.discoveryAddr = args.get("lan-discovery-addr", "255.255.255.255");
+        lc.hostAddr = args.get("lan-host"); lc.name = args.get("lan-name", name_); lc.reorderMs = args.geti("lan-reorder-ms", 8);
+        lc.impair = parseImpair(args.get("lan-impair")); lc.maxPeers = args.geti("lan-max-peers", 3);
+        if (args.has("lan-uri") && !LanLink::parseUri(args.get("lan-uri"), lc)) { log("FATAL: bad --lan-uri"); return 2; }
+    }
+    if (args.get("mp-role") == "host" || args.get("lan-role") == "host") {
+        if (plan.radio == RadioTransport::Lan) {
+            if (!mp.startLanHost(host, lc, err)) { log("FATAL: " + err); return 6; }
+            lanUri = mp.lan()->joinUri(args.get("lan-advertise-ip", "127.0.0.1"));
+            log("multiplayer bridge: host (LAN) code " + lc.code + " port " + std::to_string(mp.lan()->port()));
+        } else {
+            if (!mp.startHost(host, args.get("mp-path"), err)) { log("FATAL: " + err); return 6; }
+            log("multiplayer bridge: host");
+        }
+    } else if (args.get("mp-role") == "client" || args.get("lan-role") == "guest") {
+        if (plan.radio == RadioTransport::Lan) {
+            if (!mp.startLanClient(host, lc, args.geti("mp-timeout", 20000), err)) { log("FATAL: " + err); return 6; }
+            log("multiplayer bridge: guest (LAN) id " + std::to_string(mp.clientId()));
+        } else {
+            if (!mp.startClient(host, args.get("mp-path"), args.geti("mp-timeout", 20000), err)) { log("FATAL: " + err); return 6; }
+            log("multiplayer bridge: client id " + std::to_string(mp.clientId()));
+        }
     }
 
     const double fps = host.av.timing.fps > 1 ? host.av.timing.fps : 60.0;
@@ -233,6 +265,8 @@ int main(int argc, char** argv) {
                << ",\"slowest_frame_ms\":" << slowest << ",\"mp_active\":" << (mp.sessionActive() ? "true" : "false")
                << ",\"mp_role\":\"" << (mp.role() == MpBridge::Role::Host ? "host" : mp.role() == MpBridge::Role::Client ? "client" : "none")
                << "\",\"mp_peers\":" << mp.peers() << ",\"mp_in\":" << mp.packetsIn() << ",\"mp_out\":" << mp.packetsOut()
+               << ",\"session_mode\":\"" << dsrt::name(plan.mode) << "\",\"radio\":\"" << mp.transportName() << "\",\"stream\":\"" << dsrt::name(plan.stream) << "\""
+               << (mp.lan() ? ",\"lan\":" + mp.lan()->json() : std::string()) << (lanUri.empty() ? std::string() : ",\"lan_code\":\"" + lc.code + "\",\"lan_join_uri\":\"" + lanUri + "\"")
                << ",\"video_frames\":" << av.videoFrames() << ",\"video_bytes\":" << av.videoBytes() << ",\"audio_packets\":" << av.audioPackets()
                << ",\"env_unhandled\":" << host.metrics.envUnhandled.load() << "," << dl.json() << "}";
             std::string s = js.str();

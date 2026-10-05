@@ -7,7 +7,10 @@
 #include <vector>
 
 #include "dlplay_diag.hpp"
+#include <memory>
+
 #include "libretro_host.hpp"
+#include "radio_lan.hpp"
 
 namespace dsrt {
 
@@ -22,6 +25,12 @@ public:
     // Call once per frame BEFORE retro_run (RetroArch does the same): accept clients, deliver received packets, core poll().
     void pump();
     void stop();
+
+    // LAN RadioTransport (Distributed Mode): the same bridge over DSLink Radio Protocol / UDP instead of the in-container Unix socket.
+    bool startLanHost(LibretroHost& host, LanConfig& cfg, std::string& err);                       // fills cfg.code / cfg.secretHex when empty
+    bool startLanClient(LibretroHost& host, const LanConfig& cfg, int timeoutMs, std::string& err);
+    const LanLink* lan() const { return lan_.get(); }
+    const char* transportName() const { return lan_ ? "lan" : "local"; }
 
     void setDiag(DlDiag* d) { diag_ = d; }  // passive observer of the wireless frames (Download Play diagnostics)
     Role role() const { return role_; }
@@ -41,6 +50,9 @@ private:
     bool readConn(Conn& c);        // false = closed
     void handleFrame(Conn* from, uint16_t dest, uint16_t src, const uint8_t* p, size_t n);
     void writeFrame(int fd, uint16_t dest, uint16_t src, const void* p, size_t n);
+    void sendFrame(Conn& c, uint16_t dest, uint16_t src, const void* p, size_t n);   // transport dispatch (stream or LAN datagram)
+    void wireLan();
+    std::unique_ptr<LanLink> lan_;
     void dropConn(size_t idx);
     void startSession(uint16_t id);
 

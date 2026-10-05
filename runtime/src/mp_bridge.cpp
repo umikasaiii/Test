@@ -133,17 +133,61 @@ void MpBridge::writeFrame(int fd, uint16_t dest, uint16_t src, const void* p, si
     ++out_;
 }
 
+void MpBridge::sendFrame(Conn& c, uint16_t dest, uint16_t src, const void* p, size_t n) {
+    if (lan_) { lan_->sendData(c.id, dest, src, p, n); ++out_; return; }
+    writeFrame(c.fd, dest, src, p, n);
+}
+
+void MpBridge::wireLan() {
+    lan_->setHandlers(
+        [this](uint16_t id, uint16_t dest, uint16_t src, const uint8_t* p, size_t n) {          // a datagram's frame, in order
+            for (auto& c : conns_) if (c.id == id) { handleFrame(&c, dest, src, p, n); return; }
+        },
+        [this](uint16_t id) {                                                                    // host: a guest joined
+            bool accept = !host_->netpacket().connected || host_->netpacket().connected(id);
+            if (accept) { Conn c; c.id = id; conns_.push_back(std::move(c)); }
+            return accept;
+        },
+        [this](uint16_t id) { for (size_t i = 0; i < conns_.size(); i++) if (conns_[i].id == id) { dropConn(i); return; } });
+}
+
+bool MpBridge::startLanHost(LibretroHost& host, LanConfig& cfg, std::string& err) {
+    host_ = &host;
+    g_mp = this;
+    if (!host.hasNetpacket()) { err = "core has no netpacket interface"; return false; }
+    lan_ = std::make_unique<LanLink>();
+    if (!lan_->hostStart(cfg, err)) { lan_.reset(); return false; }
+    wireLan();
+    role_ = Role::Host;
+    startSession(0);
+    return true;
+}
+
+bool MpBridge::startLanClient(LibretroHost& host, const LanConfig& cfg, int timeoutMs, std::string& err) {
+    host_ = &host;
+    g_mp = this;
+    if (!host.hasNetpacket()) { err = "core has no netpacket interface"; return false; }
+    lan_ = std::make_unique<LanLink>();
+    uint16_t id = 0;
+    if (!lan_->clientJoin(cfg, timeoutMs, id, err)) { lan_.reset(); return false; }
+    wireLan();
+    Conn c; c.id = 0; conns_.push_back(std::move(c));
+    role_ = Role::Client;
+    startSession(id);
+    return true;
+}
+
 void MpBridge::send(int, const void* buf, size_t len, uint16_t dest) {
     if (!active_ || (len && !buf) || len > kMaxPacket) return;
     if (diag_ && len) diag_->observe(true, static_cast<const uint8_t*>(buf), len, nowMs());
     if (len) trace(true, static_cast<const uint8_t*>(buf), len, nowMs());
     if (role_ == Role::Client) {
-        if (!conns_.empty() && len) writeFrame(conns_[0].fd, dest, myId_, buf, len);  // the host routes it
+        if (!conns_.empty() && len) sendFrame(conns_[0], dest, myId_, buf, len);  // the host routes it
         return;
     }
     if (!len) return;
     for (auto& c : conns_)
-        if (dest == kBroadcast || dest == c.id) writeFrame(c.fd, dest, 0, buf, len);
+        if (dest == kBroadcast || dest == c.id) sendFrame(c, dest, 0, buf, len);
 }
 
 void MpBridge::acceptNew() {
@@ -173,7 +217,7 @@ void MpBridge::acceptNew() {
 
 void MpBridge::dropConn(size_t idx) {
     uint16_t id = conns_[idx].id;
-    ::close(conns_[idx].fd);
+    if (conns_[idx].fd >= 0) ::close(conns_[idx].fd);
     conns_.erase(conns_.begin() + long(idx));
     if (role_ == Role::Host) {
         pendingDisconnected_.push_back(id);               // delivered from pump(): see flushPending()
@@ -203,9 +247,9 @@ void MpBridge::handleFrame(Conn* from, uint16_t dest, uint16_t src, const uint8_
     bool bcast = dest == kBroadcast;
     if ((bcast || dest == 0) && cb.receive) { if (diag_) diag_->observe(false, p, n, nowMs()); trace(false, p, n, nowMs()); cb.receive(p, n, incoming); }
     if (bcast) {
-        for (auto& c : conns_) if (c.id != incoming) writeFrame(c.fd, kBroadcast, incoming, p, n);
+        for (auto& c : conns_) if (c.id != incoming) sendFrame(c, kBroadcast, incoming, p, n);
     } else if (dest && dest != incoming) {
-        for (auto& c : conns_) if (c.id == dest) writeFrame(c.fd, dest, incoming, p, n);
+        for (auto& c : conns_) if (c.id == dest) sendFrame(c, dest, incoming, p, n);
     }
 }
 
@@ -235,6 +279,7 @@ bool MpBridge::readConn(Conn& c) {
 
 void MpBridge::pollReceive() {
     if (!active_) return;
+    if (lan_) { lan_->poll(); return; }
     for (size_t i = 0; i < conns_.size();) {
         if (!readConn(conns_[i])) { dropConn(i); continue; }
         ++i;
@@ -244,7 +289,7 @@ void MpBridge::pollReceive() {
 void MpBridge::pump() {
     if (role_ == Role::None) return;
     flushPending();
-    acceptNew();
+    if (!lan_) acceptNew();
     pollReceive();
     if (active_ && host_->netpacket().poll) host_->netpacket().poll();
 }
@@ -253,7 +298,8 @@ void MpBridge::stop() {
     if ((active_ || pendingStop_) && host_ && host_->netpacket().stop) host_->netpacket().stop();   // shutdown path: called from main, never from inside the core
     active_ = false;
     pendingStop_ = false;
-    for (auto& c : conns_) ::close(c.fd);
+    if (lan_) { lan_->stop(); lan_.reset(); }
+    for (auto& c : conns_) if (c.fd >= 0) ::close(c.fd);
     conns_.clear();
     if (listenFd_ >= 0) { ::close(listenFd_); ::unlink(path_.c_str()); listenFd_ = -1; }
     role_ = Role::None;
