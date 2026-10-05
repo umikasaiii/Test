@@ -1,0 +1,130 @@
+diff --git a/frontend/drivers/platform_unix.c b/frontend/drivers/platform_unix.c
+index e4ffe0f3f7..e9ca6f6f13 100644
+--- a/frontend/drivers/platform_unix.c
++++ b/frontend/drivers/platform_unix.c
+@@ -1518,6 +1518,51 @@ static void frontend_unix_get_env(int *argc,
+       }
+    }
+ 
++   /* DSLink: "host;PORT;NICK" or "client;IP;PORT;NICK" */
++   CALL_OBJ_METHOD_PARAM(env, jstr, obj, android_app->getStringExtra,
++         (*env)->NewStringUTF(env, "DSLINK_NETPLAY"));
++
++   if (android_app->getStringExtra && jstr)
++   {
++      static char dslink_buf[256];
++      static char dslink_host[64];
++      static char dslink_nick[64];
++      const char *argv = (*env)->GetStringUTFChars(env, jstr, 0);
++
++      *dslink_buf = '\0';
++      if (argv && *argv)
++         strlcpy(dslink_buf, argv, sizeof(dslink_buf));
++      (*env)->ReleaseStringUTFChars(env, jstr, argv);
++
++      if (args && *dslink_buf)
++      {
++         struct string_list list = {0};
++         if (string_list_initialize(&list) &&
++             string_split_noalloc(&list, dslink_buf, ";"))
++         {
++            bool host = list.size == 3 && string_is_equal(list.elems[0].data, "host");
++            bool cli  = list.size == 4 && string_is_equal(list.elems[0].data, "client");
++            if (host || cli)
++            {
++               unsigned idx = cli ? 1 : 0;
++               if (cli)
++               {
++                  strlcpy(dslink_host, list.elems[1].data, sizeof(dslink_host));
++                  args->dslink_netplay_host = dslink_host;
++               }
++               args->dslink_netplay_port = (unsigned)strtoul(list.elems[idx + 1].data, NULL, 10);
++               strlcpy(dslink_nick, list.elems[idx + 2].data, sizeof(dslink_nick));
++               args->dslink_netplay_nick = dslink_nick;
++               args->dslink_netplay_role = host ? 1 : 2;
++               __android_log_print(ANDROID_LOG_INFO,
++                  "RetroArch", "[DSLink] Netplay %s port %u.\n",
++                  host ? "host" : "client", args->dslink_netplay_port);
++            }
++         }
++         string_list_deinitialize(&list);
++      }
++   }
++
+    /* Internal Storage */
+    CALL_OBJ_METHOD_PARAM(env, jstr, obj, android_app->getStringExtra,
+          (*env)->NewStringUTF(env, "SDCARD"));
+diff --git a/retroarch_types.h b/retroarch_types.h
+index 2d0aac5120..a400ad81d2 100644
+--- a/retroarch_types.h
++++ b/retroarch_types.h
+@@ -246,6 +246,12 @@ struct rarch_main_wrap
+    const char *state_path;
+    const char *config_path;
+    const char *libretro_path;
++   /* DSLink: LAN Netplay requested by the host app (Android intent extra "DSLINK_NETPLAY").
++    * role: 0 = none, 1 = host (-H), 2 = client (-C <host>). */
++   const char *dslink_netplay_host;
++   const char *dslink_netplay_nick;
++   unsigned dslink_netplay_port;
++   uint8_t dslink_netplay_role;
+    int argc;
+    uint8_t flags;
+ };
+diff --git a/tasks/task_content.c b/tasks/task_content.c
+index 5c0e91f0be..d31e0d58bc 100644
+--- a/tasks/task_content.c
++++ b/tasks/task_content.c
+@@ -1345,6 +1345,12 @@ static void content_load_init_wrap(
+       argv[(*argc)++] = strdup(args->content_path);
+    }
+ #ifdef HAVE_MENU
++   else if (args->dslink_netplay_role && args->libretro_path)
++   {
++      /* DSLink: start the core without content (e.g. a Download Play client booting
++       * the DS firmware with no cartridge) instead of the menu. */
++      RARCH_LOG("[DSLink] Starting core without content.\n");
++   }
+    else
+    {
+       RARCH_LOG("[Core] %s\n",
+@@ -1381,6 +1387,28 @@ static void content_load_init_wrap(
+ 
+    if (args->flags & RARCH_MAIN_WRAP_FLAG_VERBOSE)
+       argv[(*argc)++] = strldup("-v", sizeof("-v"));
++
++#ifdef HAVE_NETWORKING
++   if (args->dslink_netplay_role == 1)
++      argv[(*argc)++] = strldup("-H", sizeof("-H"));
++   else if (args->dslink_netplay_role == 2 && args->dslink_netplay_host)
++   {
++      argv[(*argc)++] = strldup("-C", sizeof("-C"));
++      argv[(*argc)++] = strdup(args->dslink_netplay_host);
++   }
++   if (args->dslink_netplay_role)
++   {
++      char port[16];
++      snprintf(port, sizeof(port), "%u", args->dslink_netplay_port);
++      argv[(*argc)++] = strldup("--port", sizeof("--port"));
++      argv[(*argc)++] = strdup(port);
++      if (args->dslink_netplay_nick)
++      {
++         argv[(*argc)++] = strldup("--nick", sizeof("--nick"));
++         argv[(*argc)++] = strdup(args->dslink_netplay_nick);
++      }
++   }
++#endif
+ }
+ 
+ /**
+@@ -1415,6 +1443,10 @@ static bool content_load(content_ctx_info_t *info,
+    wrap_args->state_path     = NULL;
+    wrap_args->config_path    = NULL;
+    wrap_args->libretro_path  = NULL;
++   wrap_args->dslink_netplay_host = NULL;
++   wrap_args->dslink_netplay_nick = NULL;
++   wrap_args->dslink_netplay_port = 0;
++   wrap_args->dslink_netplay_role = 0;
+    wrap_args->flags          = 0;
+    wrap_args->argc           = 0;
+ 

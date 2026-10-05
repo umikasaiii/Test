@@ -20,7 +20,12 @@ std::string buildRetroArchConfig(const LaunchPlan& p) {
     kv(s, "system_directory", p.systemDir);
     kv(s, "savefile_directory", p.saveDir);
     kv(s, "savestate_directory", p.stateDir);
+    // Use ONE options file that DSLink rewrites at every launch: RetroArch only seeds a per-core file once, which
+    // would freeze the boot mode / screen layout of the first session.
     kv(s, "core_options_path", p.configDir + "/melondsds.opt");
+    kvb(s, "global_core_options", true);
+    kvb(s, "game_specific_options", false);
+    if (!p.infoDir.empty()) kv(s, "libretro_info_path", p.infoDir);
     // Identity: the core derives the emulated DS MAC from this nickname.
     kv(s, "netplay_nickname", p.identity.netplayNick());
     // LAN only: no relay, no UPnP, no public lobby, no spectators.
@@ -45,7 +50,7 @@ std::string buildRetroArchConfig(const LaunchPlan& p) {
     }
     kvb(s, "video_vsync", true);
     kvb(s, "video_fullscreen", true);
-    kv(s, "menu_driver", "ozone");
+    kv(s, "menu_driver", "rgui");  // built-in font, needs no asset pack; the menu is hidden from users
     kvb(s, "menu_show_load_content_animation", false);
     kvb(s, "notification_show_config_override_load", false);
     kvb(s, "notification_show_autoconfig", false);
@@ -61,6 +66,11 @@ std::string buildCoreOptions(const LaunchPlan& p) {
     kv(s, "melonds_console_mode", p.dsi ? "dsi" : "ds");
     // With no cartridge (Download Play client) the core forces a native boot into the DS menu itself.
     kv(s, "melonds_boot_mode", p.role == Role::Client && p.contentPath.empty() ? "native" : "direct");
+    // Two layouts, cycled by the overlay's "Schermi" button (R3): stacked (portrait) and side by side (landscape).
+    kv(s, "melonds_number_of_screen_layouts", "2");
+    kv(s, "melonds_screen_layout1", p.landscape ? "left-right" : "top-bottom");
+    kv(s, "melonds_screen_layout2", p.landscape ? "top-bottom" : "left-right");
+    kv(s, "melonds_show_cursor", "disabled");  // touch screen: no pointer cursor
     return s;
 }
 

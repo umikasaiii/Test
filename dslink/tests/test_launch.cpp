@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include "dslink/diagnostics.hpp"
 #include "dslink/dslink_c.h"
 #include "dslink/launch.hpp"
@@ -129,4 +130,54 @@ TEST(c_api_end_to_end_host_client_handshake) {
     dslink_free(st);
     dslink_sm_free(sm);
     CHECK(dslink_advert_normalize("garbage") == nullptr);
+}
+
+TEST(launch_core_options_screen_layouts_follow_orientation) {
+    LaunchPlan p = plan(Role::Host);
+    std::string port = buildCoreOptions(p);
+    CHECK(port.find("melonds_screen_layout1 = \"top-bottom\"") != std::string::npos);
+    CHECK(port.find("melonds_screen_layout2 = \"left-right\"") != std::string::npos);
+    p.landscape = true;
+    std::string land = buildCoreOptions(p);
+    CHECK(land.find("melonds_screen_layout1 = \"left-right\"") != std::string::npos);
+    CHECK(land.find("melonds_number_of_screen_layouts = \"2\"") != std::string::npos);
+    CHECK(land.find("melonds_show_cursor = \"disabled\"") != std::string::npos);
+}
+
+TEST(launch_config_points_retroarch_at_core_info_and_core_dir) {
+    LaunchPlan p = plan(Role::Host);
+    p.infoDir = "/data/info";
+    std::string c = buildRetroArchConfig(p);
+    CHECK(c.find("libretro_info_path = \"/data/info\"") != std::string::npos);
+    CHECK(c.find("libretro_directory = \"/data/cores\"") != std::string::npos);
+    CHECK(c.find("system_directory = \"/data/system\"") != std::string::npos);
+    CHECK(c.find("autosave_interval = \"10\"") != std::string::npos);
+    CHECK(c.find("global_core_options = \"true\"") != std::string::npos);
+    CHECK(c.find("game_specific_options = \"false\"") != std::string::npos);
+}
+
+TEST(c_api_identity_rename_and_bump_salt_change_mac) {
+    std::string path = "/tmp/dslink_capi_id_" + std::to_string(getpid());
+    std::remove(path.c_str());
+    char* a = dslink_identity_load_or_create(path.c_str());
+    CHECK(a != nullptr);
+    std::string first = a ? a : "";
+    dslink_free(a);
+    char* r = dslink_identity_rename(path.c_str(), "Simone");
+    CHECK(r && std::string(r).find("player_name=Simone") != std::string::npos);
+    dslink_free(r);
+    CHECK(dslink_identity_rename(path.c_str(), "") == nullptr);                 // invalid name rejected
+    CHECK(dslink_identity_rename(path.c_str(), std::string(40, 'x').c_str()) == nullptr);
+    char* b = dslink_identity_bump_salt(path.c_str());
+    CHECK(b && std::string(b).find("nick_salt=1") != std::string::npos);
+    auto macOf = [](const std::string& s) { auto p = s.find("mac="); return s.substr(p, 21); };
+    CHECK(macOf(first) != macOf(b ? b : ""));
+    dslink_free(b);
+    std::remove(path.c_str());
+}
+
+TEST(c_api_nds_info_rejects_non_roms) {
+    char* r = dslink_nds_info("/nonexistent/file.nds");
+    CHECK(r && std::string(r).find("status=UNREADABLE") != std::string::npos);
+    dslink_free(r);
 }

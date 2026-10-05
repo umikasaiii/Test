@@ -11,6 +11,7 @@
 #include "dslink/kv.hpp"
 #include "dslink/launch.hpp"
 #include "dslink/netaddr.hpp"
+#include "dslink/rom.hpp"
 #include "dslink/session_machine.hpp"
 #include "dslink/sha256.hpp"
 
@@ -38,7 +39,8 @@ std::string get(const KvMap& m, const char* k, const std::string& d = {}) {
 }
 std::string idKv(const DeviceIdentity& id, bool created) {
     return kvEncode({{"device_id", id.deviceId}, {"player_name", id.playerName}, {"nick", id.netplayNick()},
-                     {"mac", macToString(id.mac())}, {"created", created ? "1" : "0"}});
+                     {"nick_salt", std::to_string(id.nickSalt)}, {"mac", macToString(id.mac())},
+                     {"created", created ? "1" : "0"}});
 }
 
 LaunchPlan planFrom(const KvMap& m) {
@@ -52,6 +54,8 @@ LaunchPlan planFrom(const KvMap& m) {
     p.stateDir = get(m, "state_dir");
     p.configDir = get(m, "config_dir");
     p.overlayPath = get(m, "overlay");
+    p.infoDir = get(m, "info_dir");
+    p.landscape = get(m, "landscape") == "1";
     p.identity.deviceId = get(m, "device_id", "00000000000000000000000000000000");
     p.identity.playerName = get(m, "player_name", "player");
     try { p.identity.nickSalt = std::uint32_t(std::stoul(get(m, "nick_salt", "0"))); } catch (...) {}
@@ -90,6 +94,14 @@ char* dslink_identity_rename(const char* path, const char* name) {
     return dup(idKv(id, false));
 }
 
+char* dslink_identity_bump_salt(const char* path) {
+    if (!path) return fail("null path");
+    DeviceIdentity id = loadOrCreateIdentity(path, systemRandom());
+    ++id.nickSalt;  // new nickname -> new derived MAC (used after a MAC conflict)
+    if (!saveIdentity(path, id)) return fail("cannot save identity");
+    return dup(idKv(id, false));
+}
+
 char* dslink_best_ipv4(void) {
     IPv4Choice c = selectBestIPv4(enumerateInterfaces());
     if (!c.found) return dup(kvEncode({{"found", "0"}, {"vpn", c.vpnPresent ? "1" : "0"}}));
@@ -119,6 +131,15 @@ char* dslink_validate_system_dir(const char* dir) {
     add("bios7", s.bios7); add("bios9", s.bios9); add("firmware", s.firmware);
     m["ready"] = s.ready() ? "1" : "0";
     return dup(kvEncode(m));
+}
+
+char* dslink_nds_info(const char* path) {
+    if (!path) return fail("null path");
+    RomInfo r = inspectRomFile(path);
+    return dup(kvEncode({{"status", romStatusCode(r.status)}, {"message", romStatusMessage(r.status)},
+                         {"title", r.title}, {"game_code", r.gameCode}, {"unit_code", std::to_string(r.unitCode)},
+                         {"logo_ok", r.logoCrcOk ? "1" : "0"}, {"size", std::to_string(r.fileSize)},
+                         {"sha256", r.sha256}}));
 }
 
 char* dslink_advert_normalize(const char* kv) {

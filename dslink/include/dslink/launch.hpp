@@ -17,7 +17,9 @@ struct LaunchPlan {
     std::string corePath;          // melondsds_libretro (.so / static on iOS)
     std::string systemDir;         // contains "melonDS DS/bios7.bin" ...
     std::string saveDir, stateDir, configDir;
+    std::string infoDir;           // directory with melondsds_libretro.info (RetroArch core info)
     std::string overlayPath;       // touch overlay .cfg (empty = none)
+    bool landscape = false;        // initial screen layout: true = side by side, false = stacked
     DeviceIdentity identity;
     std::string hostIp;            // client only
     std::uint16_t port = kDefaultPort;

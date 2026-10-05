@@ -9,7 +9,7 @@ option(DSLINK_BUILD_TESTS "Build the native unit tests" ON)
 
 set(DSLINK_SOURCES
     src/sha256.cpp src/kv.cpp src/identity.cpp src/advert.cpp src/netaddr.cpp src/firmware.cpp
-    src/latency.cpp src/session_machine.cpp src/control.cpp src/launch.cpp src/diagnostics.cpp src/c_api.cpp)
+    src/latency.cpp src/session_machine.cpp src/control.cpp src/launch.cpp src/diagnostics.cpp src/rom.cpp src/c_api.cpp)
 
 add_library(dslink STATIC ${DSLINK_SOURCES})
 target_include_directories(dslink PUBLIC include)
@@ -20,6 +20,9 @@ else()
 endif()
 find_package(Threads REQUIRED)
 target_link_libraries(dslink PUBLIC Threads::Threads)
+
+add_executable(dslink_cfgtool tools/cfgtool.cpp)
+target_link_libraries(dslink_cfgtool PRIVATE dslink)
 
 if(DSLINK_BUILD_TESTS)
   enable_testing()

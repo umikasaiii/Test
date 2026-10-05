@@ -15,12 +15,14 @@ const char* dslink_last_error(void);
 /* identity */
 char* dslink_identity_load_or_create(const char* path);          /* device_id, player_name, nick, mac, created */
 char* dslink_identity_rename(const char* path, const char* name); /* same keys; NULL if the name is invalid */
+char* dslink_identity_bump_salt(const char* path);                /* new nickname => new MAC, after a MAC conflict */
 
 /* network */
 char* dslink_best_ipv4(void);                  /* found, ip, iface, kind, prefix, vpn */
 int dslink_pick_port(int preferred);           /* 0 = none free */
 char* dslink_sha256_file(const char* path);    /* lowercase hex or NULL */
 char* dslink_validate_system_dir(const char* dir); /* bios7, bios9, firmware (status codes + messages), ready */
+char* dslink_nds_info(const char* path);       /* status, message, title, game_code, unit_code, size, sha256 */
 
 /* adverts */
 char* dslink_advert_normalize(const char* kv); /* validates; returns canonical wire form or NULL */
