@@ -28,7 +28,7 @@ const (
 )
 
 // libretro RetroPad ids
-var padID = map[string]byte{"b": 0, "y": 1, "select": 2, "start": 3, "up": 4, "down": 5, "left": 6, "right": 7, "a": 8, "x": 9, "l": 10, "r": 11}
+var padID = map[string]byte{"b": 0, "y": 1, "select": 2, "start": 3, "up": 4, "down": 5, "left": 6, "right": 7, "a": 8, "x": 9, "l": 10, "r": 11, "l2": 12, "r2": 13}
 
 // DSLINK_VIDEO_CODEC=h264 (default, production) or vp8 (browsers without WebRTC H.264)
 func videoCodec() string {

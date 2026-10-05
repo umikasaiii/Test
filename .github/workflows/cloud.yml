@@ -64,6 +64,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - run: cd cloud/worker && npm ci --legacy-peer-deps && npx tsc --noEmit && npx vitest run
+      - name: Touch controls layout engine (4 layouts, geometry/hit areas)
+        run: cd cloud/worker && node --test test/controls_layout.test.mjs
 
   pwa-e2e:
     # PWA in real Chrome (mobile emulation, virtual passkey authenticator): Worker (wrangler dev) -> gateway -> DSLink Runtime -> melonDS -> WebRTC H.264.
@@ -99,6 +101,9 @@ jobs:
       - name: PWA end-to-end
         env: { CHROME: /opt/google/chrome/chrome }
         run: cd cloud/tests && node pwa_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
+      - name: Touch controls in real Chrome (4 layouts, multitouch, stylus, FOCUS)
+        env: { CHROME: /opt/google/chrome/chrome }
+        run: cd cloud/tests && node controls_e2e.mjs http://localhost:8787
       - if: always()
         run: tail -60 /tmp/gw.log /tmp/wrangler.log || true
       - uses: actions/upload-artifact@v4

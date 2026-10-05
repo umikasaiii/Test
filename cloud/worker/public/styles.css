@@ -23,9 +23,4 @@ input:focus { outline:none; border-color:var(--accent); }
 .modal .box .row { margin-top:16px; } .modal .box button { flex:1; }
 .badge { background:var(--bad); color:#fff; border-radius:10px; padding:1px 8px; font-size:.75rem; margin-left:6px; }
 /* game screen */
-#game { position:fixed; inset:0; background:#000; display:flex; flex-direction:column; align-items:center; z-index:30; touch-action:none; user-select:none; -webkit-user-select:none; }
-#game video { width:100%; max-height:calc(100% - 190px); aspect-ratio:2/3; object-fit:contain; background:#000; touch-action:none; }
-#game .hud { position:absolute; top:max(8px,env(safe-area-inset-top)); left:8px; right:8px; display:flex; justify-content:space-between; font-size:.8rem; color:#fff9; pointer-events:none; } #game .hud button { pointer-events:auto; }
-#game .pad { position:absolute; bottom:max(10px,env(safe-area-inset-bottom)); left:0; right:0; height:170px; }
-#game .pad .k { position:absolute; width:52px; height:52px; border-radius:50%; background:#fff2; color:#fff; display:grid; place-items:center; font-weight:800; user-select:none; touch-action:none; } #game .pad .k.on { background:#fff6; }
-#game .pad .k.wide { width:64px; height:34px; border-radius:17px; font-size:.7rem; }
+#game { position:fixed; inset:0; z-index:30; }

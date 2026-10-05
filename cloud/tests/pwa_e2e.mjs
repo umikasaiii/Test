@@ -123,7 +123,12 @@ await A.page.evaluate(() => window.dslinkGame.btn('a', false));
 check('the on-screen/keyboard button path (PWA game screen) reaches the Runtime: A pressed -> emulator 1 reacts', !!red, JSON.stringify(red));
 await A.page.screenshot({ path: '/tmp/pwa_A_game.png' }); await B.page.screenshot({ path: '/tmp/pwa_B_game.png' });
 // leaving: A exits -> B's heartbeat sees the session ended and B is released too
-await A.page.locator('#game .hud button').click();
+const ctlInfo = await A.page.evaluate(() => ({ n: document.querySelectorAll('#game .ctl-c').length, o: window.dslinkGame?.controls?.layout?.orientation, plat: window.dslinkGame?.controls?.layout?.platform }));
+check('game screen mounts the DS touch controls in the portrait layout (L R D-pad ABXY MENU SELECT START)', ctlInfo.n === 7 && ctlInfo.o === 'portrait' && ctlInfo.plat === 'nds', JSON.stringify(ctlInfo));
+const mb = await A.page.locator('#game [data-id=menu] .ctl-pillbtn').boundingBox();
+await A.page.mouse.click(mb.x + mb.width / 2, mb.y + mb.height / 2);
+check('MENU in the game screen opens the in-game menu', !!(await until(() => A.page.locator('#game .ctl-menu').isVisible(), 5000)));
+await A.page.locator('#game .ctl-menu button[data-act=leave]').click();
 check('A leaves; the session ends and B is brought back to the home screen', !!(await until(() => B.page.locator('#meName').isVisible(), 40000)));
 check('A is back on the home screen', !!(await until(() => A.page.locator('#meName').isVisible())));
 check('both are ONLINE again (the IN_GAME lease is released)', !!(await until(async () => (await cardB().textContent())?.includes('Online'), 15000)));

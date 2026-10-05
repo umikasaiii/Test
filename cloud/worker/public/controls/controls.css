@@ -1,0 +1,49 @@
+/* DSLink touch controls — SKIN. Dark navy, translucent fills, soft neon edge. Geometry comes from layouts.js (inline px); this file is look only. */
+.ctl-stage { --ctl-alpha: 1; --edge: rgba(112, 176, 255, .62); --edge-dim: rgba(112, 176, 255, .30); --fill: rgba(16, 28, 56, .56); --fill-down: rgba(76, 150, 255, .50);
+  --glow: 0 0 10px rgba(64, 140, 255, .32), inset 0 0 8px rgba(64, 140, 255, .14); --glow-down: 0 0 16px rgba(96, 170, 255, .75), inset 0 0 12px rgba(120, 190, 255, .35);
+  --txt: #e9f2ff; position: relative; overflow: hidden; background: radial-gradient(120% 90% at 50% 0%, #0d1b36 0%, #060b17 60%, #03060d 100%); color: var(--txt);
+  font: 600 11px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.ctl-stage * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+.ctl-clip { position: absolute; overflow: hidden; background: #000; border-radius: 6px; box-shadow: 0 0 0 1px rgba(112, 176, 255, .22), 0 0 24px rgba(40, 110, 255, .14); }
+.ctl-clip > video, .ctl-clip > canvas, .ctl-clip > .ctl-placeholder { position: absolute; display: block; background: #000; }
+.ctl-overlay { position: absolute; inset: 0; pointer-events: none; }
+.ctl-c { position: absolute; opacity: var(--ctl-alpha); transition: opacity .15s; pointer-events: none; }
+.ctl-c svg { display: block; width: 100%; height: 100%; }
+
+/* shoulder buttons */
+.ctl-shoulder { background: linear-gradient(180deg, rgba(40, 70, 130, .55), var(--fill)); border: 1.5px solid var(--edge); border-radius: calc(11px * var(--k, 1)); box-shadow: var(--glow);
+  display: grid; place-items: center; font-size: calc(14px * var(--k, 1)); font-weight: 700; letter-spacing: .02em; }
+.ctl-shoulder.is-down, .ctl-pillbtn.is-down { background: var(--fill-down); box-shadow: var(--glow-down); transform: scale(.95); }
+.ctl-shoulder, .ctl-pillbtn, .ctl-face, .ctl-dpad .arm { transition: transform .06s, background .06s, box-shadow .06s, fill .06s; }
+
+/* MENU / SELECT / START / FOCUS: round icon + micro label */
+.ctl-pill { display: flex; flex-direction: column; align-items: center; }
+.ctl-pillbtn { width: var(--pill); height: var(--pill); border-radius: 50%; background: var(--fill); border: 1.5px solid var(--edge); box-shadow: var(--glow); display: grid; place-items: center; margin-top: calc((var(--hit) - var(--pill)) / 2); }
+.ctl-pillbtn svg { width: 62%; height: 62%; }
+.ctl-micro { margin-top: calc(3px * var(--k, 1)); font-size: calc(9px * var(--k, 1)); letter-spacing: .06em; color: rgba(214, 232, 255, .86); text-transform: uppercase; white-space: nowrap; }
+.ctl-pill.is-active .ctl-pillbtn { border-color: #8fd0ff; box-shadow: var(--glow-down); }
+
+/* D-pad */
+.ctl-dpad .arm { fill: var(--fill); stroke: var(--edge); stroke-width: 1.6; filter: drop-shadow(0 0 3px rgba(64, 140, 255, .45)); }
+.ctl-dpad .hub { fill: rgba(10, 18, 38, .8); stroke: var(--edge-dim); stroke-width: 1.2; rx: 6; }
+.ctl-dpad .chev { fill: none; stroke: rgba(214, 232, 255, .8); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+.ctl-dpad .arm.is-down { fill: var(--fill-down); stroke: #bfe2ff; filter: drop-shadow(0 0 7px rgba(110, 180, 255, .95)); }
+
+/* action cluster */
+.ctl-cluster .ctl-face { position: absolute; width: 34%; height: 34%; border-radius: 50%; background: var(--fill); border: 1.8px solid color-mix(in srgb, var(--accent) 80%, white 0%);
+  color: var(--accent); box-shadow: 0 0 9px color-mix(in srgb, var(--accent) 38%, transparent), inset 0 0 7px color-mix(in srgb, var(--accent) 16%, transparent); display: grid; place-items: center; }
+.ctl-face .ctl-glyph { font-size: calc(19px * var(--k, 1)); font-weight: 800; }
+.ctl-face svg { width: 62%; height: 62%; }
+.ctl-face.face-top { left: 33%; top: 0; } .ctl-face.face-bottom { left: 33%; bottom: 0; } .ctl-face.face-left { left: 0; top: 33%; } .ctl-face.face-right { right: 0; top: 33%; }
+.ctl-face.is-down { background: color-mix(in srgb, var(--accent) 38%, rgba(10, 20, 44, .8)); box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 80%, transparent), inset 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent); transform: scale(.93); color: #fff; }
+
+/* in-game menu */
+.ctl-menu { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(3, 7, 16, .66); backdrop-filter: blur(4px); z-index: 5; }
+.ctl-menu .sheet { width: min(86%, 360px); background: rgba(14, 24, 48, .94); border: 1.5px solid var(--edge); border-radius: 16px; box-shadow: var(--glow); padding: 16px; display: grid; gap: 12px; font-size: 14px; }
+.ctl-menu h3 { margin: 0 0 2px; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: #bcd9ff; }
+.ctl-menu label { display: grid; gap: 6px; color: #cfe3ff; font-weight: 600; } .ctl-menu input[type=range] { width: 100%; accent-color: #5aa8ff; }
+.ctl-menu .row { display: flex; justify-content: space-between; align-items: center; }
+.ctl-menu button { appearance: none; border: 1.5px solid var(--edge); background: var(--fill); color: var(--txt); border-radius: 12px; padding: 12px 14px; font: 700 14px system-ui; min-height: 44px; }
+.ctl-menu button.primary { background: rgba(70, 140, 255, .55); } .ctl-menu button.danger { border-color: rgba(255, 110, 130, .7); color: #ffb3bf; }
+.ctl-hud { position: absolute; left: 50%; transform: translateX(-50%); top: 4px; font-size: 10px; letter-spacing: .08em; color: rgba(190, 215, 255, .55); pointer-events: none; z-index: 2; }
+.ctl-immersive .ctl-c { --ctl-alpha: .28; }

@@ -1,6 +1,6 @@
 // Service worker: caches the app shell only. API calls and anything private are NEVER cached.
-const CACHE = "dslink-shell-v1";
-const SHELL = ["/", "/index.html", "/app.js", "/game.js", "/styles.css", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png"];
+const CACHE = "dslink-shell-v2";
+const SHELL = ["/", "/index.html", "/app.js", "/game.js", "/styles.css", "/controls/controls.css", "/controls/controls.js", "/controls/layouts.js", "/controls/components.js", "/controls/input.js", "/controls/menu.js", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", (e) => {
