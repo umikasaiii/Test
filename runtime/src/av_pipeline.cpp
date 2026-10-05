@@ -36,8 +36,8 @@ bool AvPipeline::open(const AvConfig& cfg, double coreRate, std::string& err) {
     t0Us_ = nowUs();
     pkt_ = av_packet_alloc();
 
-    const AVCodec* vc = avcodec_find_encoder_by_name("libx264");
-    if (!vc) { err = "libx264 encoder not available"; return false; }
+    const AVCodec* vc = avcodec_find_encoder_by_name(cfg.vp8 ? "libvpx" : "libx264");
+    if (!vc) { err = std::string(cfg.vp8 ? "libvpx" : "libx264") + " encoder not available"; return false; }
     venc_ = avcodec_alloc_context3(vc);
     venc_->width = int(cfg.outW);
     venc_->height = int(cfg.outH);
@@ -49,10 +49,19 @@ bool AvPipeline::open(const AvConfig& cfg, double coreRate, std::string& err) {
     venc_->bit_rate = int64_t(cfg.videoKbps) * 1000;
     venc_->rc_max_rate = venc_->bit_rate * 3 / 2;
     venc_->rc_buffer_size = int(venc_->bit_rate / 2);
-    av_opt_set(venc_->priv_data, "preset", "ultrafast", 0);
-    av_opt_set(venc_->priv_data, "tune", "zerolatency", 0);
-    av_opt_set(venc_->priv_data, "profile", "baseline", 0);  // widest WebRTC/H.264 interop (Safari, Chrome, Android)
-    av_opt_set(venc_->priv_data, "x264-params", "repeat-headers=1:scenecut=0:threads=2", 0);
+    if (cfg.vp8) {
+        av_opt_set(venc_->priv_data, "deadline", "realtime", 0);
+        av_opt_set(venc_->priv_data, "cpu-used", "8", 0);
+        av_opt_set(venc_->priv_data, "lag-in-frames", "0", 0);
+        av_opt_set(venc_->priv_data, "error-resilient", "1", 0);
+        av_opt_set(venc_->priv_data, "auto-alt-ref", "0", 0);
+        venc_->thread_count = 1;
+    } else {
+        av_opt_set(venc_->priv_data, "preset", "ultrafast", 0);
+        av_opt_set(venc_->priv_data, "tune", "zerolatency", 0);
+        av_opt_set(venc_->priv_data, "profile", "baseline", 0);  // widest WebRTC/H.264 interop (Safari, Chrome, Android)
+        av_opt_set(venc_->priv_data, "x264-params", "repeat-headers=1:scenecut=0:threads=2", 0);
+    }
     int r = avcodec_open2(venc_, vc, nullptr);
     if (r < 0) { err = "x264 open: " + averr(r); return false; }
     vframe_ = av_frame_alloc();

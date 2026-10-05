@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"github.com/pion/webrtc/v4"
 	"io"
 	"net"
 	"os"
@@ -24,6 +25,8 @@ type Env struct {
 	FirmwareDir string // optional: directory with the user's bios7.bin / bios9.bin / firmware.bin (private)
 	WorkDir     string
 	RuntimeDir  string // XDG_RUNTIME_DIR for PulseAudio
+	Runtime     string // dslink-runtime (production backend)
+	Backend     string // "runtime" (default) or "retroarch" (reference implementation)
 }
 
 const (
@@ -59,7 +62,11 @@ type Slot struct {
 	LogPath     string
 	Video       *MediaIn
 	Audio       *MediaIn
-	input       *Injector
+	input       SlotInput
+	Backend     string // "runtime" (production) or "retroarch" (reference)
+	VideoTrack  webrtc.TrackLocal
+	AudioTrack  webrtc.TrackLocal
+	rt          *RuntimeLink
 	Events      atomic.Uint64 // input messages received from the browser
 }
 
@@ -257,6 +264,13 @@ video_font_enable = "false"
 	return nil
 }
 
+// SlotInput is how a browser's input reaches ITS emulator (never another slot).
+type SlotInput interface {
+	Button(name string, down bool)
+	Touch(x, y float64, down bool, move bool) // x,y: normalised over the WHOLE video frame (both DS screens)
+	Close()
+}
+
 // watchLog follows RetroArch's log to learn the DS MAC and whether the Netplay link / multiplayer layer came up.
 func (s *Slot) watchLog() {
 	var off int64
@@ -311,14 +325,31 @@ func (s *Slot) Stop() {
 func (s *Slot) Status() map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := map[string]any{"id": s.Spec.ID, "display": s.Spec.Display, "sink": s.Spec.Sink, "host": s.Spec.Host,
+	st := map[string]any{"backend": s.Backend, "id": s.Spec.ID, "display": s.Spec.Display, "sink": s.Spec.Sink, "host": s.Spec.Host,
 		"has_cartridge": s.Spec.ROM != "", "netplay_joined": s.Joined, "core_multiplayer": s.CoreMP, "mac": s.MAC, "expected_mac": s.ExpectedMAC, "nick": s.Nick,
 		"netplay_port": s.Spec.NetPort, "input_events": s.Events.Load()}
+	st["backend"] = s.Backend
+	if s.rt != nil {
+		for k, v := range s.rt.Stats() {
+			st[k] = v
+		}
+		if m, ok := st["mac"].(string); ok {
+			st["mac"] = m
+		}
+		active, _ := st["mp_active"].(bool)
+		peers, _ := st["mp_peers"].(float64)
+		st["netplay_joined"] = active || peers > 0 // bridge connected (client active / host has a peer)
+	}
 	if s.Video != nil {
 		st["video_packets"] = s.Video.Count()
 	}
 	if s.Audio != nil {
 		st["audio_packets"] = s.Audio.Count()
+	}
+	if s.rt != nil {
+		for k, v := range s.rt.Stats() {
+			st[k] = v
+		}
 	}
 	return st
 }

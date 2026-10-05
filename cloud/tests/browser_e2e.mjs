@@ -101,12 +101,12 @@ await B.evaluate(() => window.dslink.btn('up', false));
 
 // ---- 4. independent touch screen: B touches the bottom screen -> crosshair on emulator 2's top screen only
 const before = await whiteCount(B, 0, 360);
-await B.evaluate(() => { window.dslink.touch(0.5, 0.4, false, true); window.dslink.touch(0.5, 0.4, true, false); });
+await B.evaluate(() => { window.dslink.touch(0.5, 0.7, false, true); window.dslink.touch(0.5, 0.7, true, false); });
 await sleep(900);
 const [tB, tA] = [await whiteCount(B, 0, 360), await whiteCount(A, 0, 360)];
 check('touch in browser B shows the stylus crosshair on emulator 2 (ARM7 read the touch panel)', tB - before > 30, `white px ${before} -> ${tB}`);
 check('...and not on emulator 1', tA < 30, `white px on A: ${tA}`);
-await B.evaluate(() => window.dslink.touch(0.5, 0.4, false, false)); await sleep(300);
+await B.evaluate(() => window.dslink.touch(0.5, 0.7, false, false)); await sleep(300);
 
 // ---- 5. DS multiplayer link is internal: status from the container
 const stAll = await waitStatus((r) => r.slots.every((x) => x.netplay_joined && x.core_multiplayer));

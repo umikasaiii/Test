@@ -149,8 +149,11 @@ func parseKV(s string) map[string]string {
 }
 
 func (s *Server) startSlots(room *Room, rom1, rom2 string) error {
-	if err := s.env.StartPulse([]string{"dslink_s1", "dslink_s2"}); err != nil {
-		return err
+	runtimeBackend := s.env.Backend != "retroarch"
+	if !runtimeBackend { // reference implementation (RetroArch + Xvfb + capture) needs PulseAudio sinks
+		if err := s.env.StartPulse([]string{"dslink_s1", "dslink_s2"}); err != nil {
+			return err
+		}
 	}
 	// distinct deviceIds -> distinct DS MACs (DSLink DeviceIdentity); re-roll on the (unlikely) clash
 	var d1, d2 string
@@ -168,14 +171,40 @@ func (s *Server) startSlots(room *Room, rom1, rom2 string) error {
 	}
 	for i := range specs {
 		sl := &Slot{Spec: specs[i], env: s.env}
-		var err error
-		if sl.Video, err = NewMediaIn(specs[i].VideoPort, webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000}, "video", fmt.Sprintf("slot%d", i+1)); err != nil {
-			return err
-		}
-		if sl.Audio, err = NewMediaIn(specs[i].AudioPort, webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2}, "audio", fmt.Sprintf("slot%d", i+1)); err != nil {
-			return err
+		if runtimeBackend {
+			sl.Backend = "runtime"
+			v, err := newVideoTrack(fmt.Sprintf("slot%d", i+1))
+			if err != nil {
+				return err
+			}
+			a, err := newAudioTrack(fmt.Sprintf("slot%d", i+1))
+			if err != nil {
+				return err
+			}
+			sl.VideoTrack, sl.AudioTrack = v, a
+		} else {
+			sl.Backend = "retroarch"
+			var err error
+			if sl.Video, err = NewMediaIn(specs[i].VideoPort, webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000}, "video", fmt.Sprintf("slot%d", i+1)); err != nil {
+				return err
+			}
+			if sl.Audio, err = NewMediaIn(specs[i].AudioPort, webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2}, "audio", fmt.Sprintf("slot%d", i+1)); err != nil {
+				return err
+			}
+			sl.VideoTrack, sl.AudioTrack = sl.Video.Track, sl.Audio.Track
 		}
 		room.Slots[i] = sl
+	}
+	if runtimeBackend {
+		mp := filepath.Join(s.env.WorkDir, "mp.sock")
+		if err := room.Slots[0].StartRuntime(mp); err != nil {
+			return fmt.Errorf("slot 1: %w", err)
+		}
+		time.Sleep(1500 * time.Millisecond) // the host's bridge listens as soon as its core is started
+		if err := room.Slots[1].StartRuntime(mp); err != nil {
+			return fmt.Errorf("slot 2: %w", err)
+		}
+		return nil
 	}
 	if err := room.Slots[0].Start(); err != nil {
 		return fmt.Errorf("slot 1: %w", err)
@@ -222,8 +251,10 @@ func (s *Server) closeRoom() {
 	for _, sl := range room.Slots {
 		if sl != nil {
 			sl.Stop()
-			sl.Video.Close()
-			sl.Audio.Close()
+			if sl.Video != nil {
+				sl.Video.Close()
+				sl.Audio.Close()
+			}
 		}
 	}
 	os.RemoveAll(filepath.Join(s.env.WorkDir, "room"))
@@ -262,6 +293,8 @@ func main() {
 		FirmwareDir: os.Getenv("DSLINK_FIRMWARE_DIR"),
 		WorkDir:     getenv("DSLINK_WORKDIR", "/tmp/dslink-cloud"),
 		RuntimeDir:  getenv("XDG_RUNTIME_DIR", "/tmp/dslink-xdg"),
+		Runtime:     getenv("DSLINK_RUNTIME", "/opt/dslink/bin/dslink-runtime"),
+		Backend:     getenv("DSLINK_BACKEND", "runtime"),
 	}
 	os.MkdirAll(env.WorkDir, 0o755)
 	s := &Server{env: env, up: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}}

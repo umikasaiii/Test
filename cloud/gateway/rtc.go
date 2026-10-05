@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -72,7 +73,7 @@ type inputMsg struct {
 	T string  `json:"t"` // "btn" | "touch"
 	K string  `json:"k"`
 	D bool    `json:"d"`
-	X float64 `json:"x"`
+	X float64 `json:"x"` // touch: 0..1 over the whole video frame
 	Y float64 `json:"y"`
 	M bool    `json:"m"` // move only
 }
@@ -98,8 +99,12 @@ func (p *Peer) onInput(raw []byte) {
 		if !m.M {
 			p.touch = m.D
 		}
+		down := m.D
+		if m.M {
+			down = p.touch // moves travel on the unordered channel and can overtake press/release: they never change the pressed state
+		}
 		p.mu.Unlock()
-		p.slot.input.Touch(m.X, m.Y, m.D, m.M)
+		p.slot.input.Touch(m.X, m.Y, down, m.M)
 	}
 }
 
@@ -137,11 +142,27 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	send := func(v any) { wmu.Lock(); conn.WriteJSON(v); wmu.Unlock() }
 
 	// each browser only ever gets ITS slot's audio and video
-	for _, t := range []*webrtc.TrackLocalStaticRTP{slot.Video.Track, slot.Audio.Track} {
-		if _, err := pc.AddTrack(t); err != nil {
+	for _, t := range []webrtc.TrackLocal{slot.VideoTrack, slot.AudioTrack} {
+		sender, err := pc.AddTrack(t)
+		if err != nil {
 			return
 		}
+		go func() { // RTCP: a browser asking for a picture refresh (PLI/FIR) gets a keyframe from the encoder
+			for {
+				pkts, _, err := sender.ReadRTCP()
+				if err != nil {
+					return
+				}
+				for _, p := range pkts {
+					switch p.(type) {
+					case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+						slot.RequestKeyframe()
+					}
+				}
+			}
+		}()
 	}
+	slot.RequestKeyframe()
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) { peer.onInput(msg.Data) })
 	})

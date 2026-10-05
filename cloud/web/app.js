@@ -41,7 +41,9 @@
     $('player').classList.add('on');
     const cfg = await (await fetch('/api/config')).json();
     const pc = new RTCPeerConnection({ iceServers: cfg.iceServers || [] });
+    // two channels: discrete events must be reliable+ordered; touch-move samples are replaceable, so unordered/no-retransmit (lowest latency)
     const dc = pc.createDataChannel('input', { ordered: true });
+    const dcMove = pc.createDataChannel('move', { ordered: false, maxRetransmits: 0 });
     pc.addTransceiver('video', { direction: 'recvonly' });
     pc.addTransceiver('audio', { direction: 'recvonly' });
     const video = $('screen');
@@ -62,8 +64,8 @@
       await pc.setLocalDescription(offer);
       ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
     };
-    const send = (o) => { if (dc.readyState === 'open') dc.send(JSON.stringify(o)); };
-    const api = { pc, dc, ws, video, session, btn: (k, d) => send({ t: 'btn', k, d }), touch: (x, y, d, m) => send({ t: 'touch', x, y, d, m }) };
+    const send = (o, ch = dc) => { if (ch.readyState === 'open') ch.send(JSON.stringify(o)); };
+    const api = { pc, dc, dcMove, ws, video, session, btn: (k, d) => send({ t: 'btn', k, d }), touch: (x, y, d, m) => send({ t: 'touch', x, y, d, m }, m ? dcMove : dc) }; // x,y: 0..1 over the WHOLE frame (both screens)
     window.dslink = api;
     $('hud').textContent = `Giocatore ${session.player}`;
 
@@ -84,11 +86,11 @@
     const pos = (e) => {
       const r = video.getBoundingClientRect();
       const nx = (e.clientX - r.left) / r.width, ny = (e.clientY - r.top) / r.height;
-      return [nx, (ny - 0.5) * 2, ny >= 0.5];
+      return [nx, ny, ny >= 0.5]; // whole-frame coordinates; only the lower half (touch screen) starts a touch
     };
     video.addEventListener('pointerdown', (e) => { const [x, y, ok] = pos(e); if (!ok) return; touching = true; video.setPointerCapture(e.pointerId); api.touch(x, y, false, true); api.touch(x, y, true, false); });
     video.addEventListener('pointermove', (e) => { if (!touching) return; const [x, y] = pos(e); api.touch(x, Math.max(0, y), true, true); });
-    const end = (e) => { if (!touching) return; touching = false; const [x, y] = pos(e); api.touch(x, Math.max(0, y), false, false); };
+    const end = (e) => { if (!touching) return; touching = false; const [x, y] = pos(e); api.touch(x, Math.max(0.5, y), false, false); };
     video.addEventListener('pointerup', end); video.addEventListener('pointercancel', end);
   }
 })();

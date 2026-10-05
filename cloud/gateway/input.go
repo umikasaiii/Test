@@ -77,7 +77,8 @@ func (i *Injector) Button(name string, down bool) {
 
 // Touch moves the pointer over the BOTTOM screen. x,y are normalised (0..1) within that screen; the window is
 // exactly screenW x screenH with the touch screen in the lower half.
-func (i *Injector) Touch(x, y float64, down bool, move bool) {
+func (i *Injector) Touch(fx, fy float64, down bool, move bool) {
+	x, y := fx, (fy-0.5)*2 // full-frame -> bottom-screen coordinates (the screen RetroArch's X pointer maps onto)
 	clamp := func(v float64) float64 {
 		if v < 0 {
 			return 0

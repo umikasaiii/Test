@@ -54,11 +54,11 @@ check('MAC reported by the core == DSLink derivation', st.core_macs_match_dslink
 const log2 = await (await fetch(base + '/api/slotlog?slot=2')).text();
 check('emulator 2 core reports it needs bootable firmware (expected without the user firmware)', /can't be used to boot to the DS menu|firmware/i.test(log2));
 // the guest's touch only reaches emulator 2
-await B.evaluate(() => { window.dslink.touch(0.5, 0.5, false, true); window.dslink.touch(0.5, 0.5, true, false); });
+await B.evaluate(() => { window.dslink.touch(0.5, 0.75, false, true); window.dslink.touch(0.5, 0.75, true, false); });
 await sleep(300);
 const ev = (await (await fetch(base + '/api/status')).json()).room.slots.map((s) => s.input_events);
 check('guest input reaches only its own emulator', ev[1] > 0 && ev[0] === 0, JSON.stringify(ev));
-await B.evaluate(() => window.dslink.touch(0.5, 0.5, false, false));
+await B.evaluate(() => window.dslink.touch(0.5, 0.75, false, false));
 
 await A.screenshot({ path: '/tmp/ui_A.png' }); await B.screenshot({ path: '/tmp/ui_B.png' });
 const failed = results.filter((r) => !r.ok);

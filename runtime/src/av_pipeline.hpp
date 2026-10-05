@@ -22,6 +22,7 @@ struct AvConfig {
     int fps = 60;
     int videoKbps = 2500;
     int keyintFrames = 60;
+    bool vp8 = false;  // false: H.264 (production: Safari/Chrome/Android); true: VP8 (browsers without H.264 WebRTC, e.g. Playwright's Chromium)
 };
 
 class AvPipeline {

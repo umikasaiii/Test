@@ -1,4 +1,6 @@
 // dslink-runtime: one emulator instance = libretro core + minimal host + A/V encoder + multiplayer bridge + control link.
+#include <deque>
+#include <mutex>
 #include <signal.h>
 
 #include <chrono>
@@ -80,9 +82,12 @@ int main(int argc, char** argv) {
     std::ofstream logf;
     if (args.has("log")) logf.open(args.get("log"), std::ios::app);
     Link link;
+    std::mutex logMu;
+    std::deque<std::string> logHist;
     auto log = [&](const std::string& s) {
         std::string line = "[" + name + "] " + s;
         if (logf.is_open()) logf << line << "\n" << std::flush; else std::cerr << line << "\n";
+        { std::lock_guard<std::mutex> lk(logMu); logHist.push_back(line); if (logHist.size() > 400) logHist.pop_front(); }
         link.send(L_LOG, 0, line.data(), line.size());
     };
 
@@ -122,6 +127,7 @@ int main(int argc, char** argv) {
         AvConfig ac;
         ac.outW = unsigned(args.geti("out-w", 512));
         ac.outH = unsigned(args.geti("out-h", 768));
+        ac.vp8 = args.get("codec", "h264") == "vp8";
         if (!av.open(ac, host.av.timing.sample_rate, err)) { log("FATAL: " + err); return 5; }
         av.onVideo = [&](const uint8_t* d, size_t n, bool key, uint64_t pts) { link.send(L_VIDEO, key ? 1 : 0, &pts, 8, d, n); };
         av.onAudio = [&](const uint8_t* d, size_t n, uint64_t pts) { link.send(L_AUDIO, 0, &pts, 8, d, n); };
@@ -146,7 +152,14 @@ int main(int argc, char** argv) {
 
     auto onCmd = [&](uint8_t type, const uint8_t* p, size_t n) {
         switch (type) {
-            case 255: av.requestKeyframe(); log("peer connected"); break;
+            case 255: {
+                av.requestKeyframe();
+                std::deque<std::string> h;  // lines logged before the peer attached (MAC, multiplayer start...) are replayed
+                { std::lock_guard<std::mutex> lk(logMu); h = logHist; }
+                for (auto& l : h) link.send(L_LOG, 0, l.data(), l.size());
+                log("peer connected");
+                break;
+            }
             case L_BUTTON:
                 if (n >= 3 && p[0] < LibretroHost::kPorts && p[1] < 16) {
                     auto& b = host.input[p[0]].buttons;
