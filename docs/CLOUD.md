@@ -12,7 +12,7 @@ Status scale: **CODED · BUILD VERIFIED · LOCAL TESTED · CLOUD DEPLOYED · BRO
 | RetroArch parity | **13/13 + 10/10 + 19/19** | [RETROARCH_PARITY.md](RETROARCH_PARITY.md) |
 | Two simultaneous DS instances (different identities/MACs, independent video, audio, input, touch) | **PASS** (LOCAL TESTED) | `test_two_ds.py` 14/14; `browser_e2e.mjs` 19/19 |
 | DS multiplayer **without RetroArch** (bridge; real DS Wi-Fi frames between two cores) | **PASS** for transport and radio frames; Download Play / Mario Party protocol UNVERIFIED | `test_wifi_bridge.py` 9/9, `test_bridge_parity.py` 10/10 |
-| WebRTC from Runtime framebuffer/audio (no screen capture), 2 media tracks per browser, reliable + unreliable data channels | **PASS** locally: VP8 in headless Chromium (BROWSER VERIFIED). H.264 path CODED; verified only by the CI job with real Chrome (not run in this sandbox) | `browser_e2e.mjs`, `pwa_e2e.mjs` |
+| WebRTC from Runtime framebuffer/audio (no screen capture), 2 media tracks per browser, reliable + unreliable data channels | **PASS**: VP8 in headless Chromium locally; **H.264 with real Chrome in CI** (job `container-e2e`, run 14) — BROWSER VERIFIED | `browser_e2e.mjs`, `pwa_e2e.mjs` |
 | Cloudflare Realtime **SFU** (per Cloud Gaming example) | **NOT IMPLEMENTED — API unverified** (developers.cloudflare.com unreachable from the build environment). Container → browser media must go through TURN/SFU because Containers do not accept inbound UDP: the gateway accepts ICE/TURN servers (`DSLINK_ICE`, Worker `ICE_SERVERS`) so a TURN-relayed peer is the CODED fallback; **untested on Cloudflare** | — |
 | Accounts (passkeys + password) | **PASS** (LOCAL TESTED, BROWSER VERIFIED with a virtual authenticator) | `auth.test.ts` 13 + `pwa_e2e` |
 | Friends / requests / invites | **PASS** (LOCAL TESTED, BROWSER VERIFIED) | `friends.test.ts` 9, `session.test.ts` 14, `pwa_e2e` |
@@ -21,7 +21,7 @@ Status scale: **CODED · BUILD VERIFIED · LOCAL TESTED · CLOUD DEPLOYED · BRO
 | R2 private storage (per-user prefixes, never public, presigned direct upload) | Worker-proxied path **PASS** against miniflare R2; presigned URL generation CODED, **not tested against real R2** | `library.test.ts` |
 | Session DO + Container (`DSLinkContainer`, ticketed content, cleanup) | DO logic LOCAL TESTED; Container API integration CODED, **cannot run outside Cloudflare**; a local gateway stands in for it | `session.test.ts`, `internal_session.py` 14/14, `pwa_e2e` |
 | PWA (manifest, service worker, installable, mobile-first, passkey UI, library, friends, invites, game screen) | **BROWSER VERIFIED** (Chromium, mobile emulation, offline shell, no horizontal scroll) · **DEVICE PENDING** (Safari iPhone, Chrome Android, desktop not run) | `pwa_e2e.mjs` 33/33 |
-| Production image without RetroArch (`cloud/Dockerfile.runtime`) | CODED · CI job defined; **not built in this sandbox (no Docker daemon)** | `.github/workflows/cloud.yml` |
+| Production image without RetroArch (`cloud/Dockerfile.runtime`) | **BUILD VERIFIED in CI** (GitHub Actions `cloud` run 14, all 6 jobs green: image build + both browser suites in real Chrome, runtime-tests, RetroArch parity, worker, PWA e2e); not built in this sandbox (no Docker daemon) | `.github/workflows/cloud.yml` |
 | **Cloudflare deployment** | **NOT DEPLOYED** | needs account, D1/R2 ids, `wrangler deploy` |
 | PS1 | library accepts/validates `.chd`, `.cue+.bin`; **no core in the Runtime, no two-port mapping** | [LIBRARY.md](LIBRARY.md) |
 | DEVICE VERIFIED | **NO** | |
