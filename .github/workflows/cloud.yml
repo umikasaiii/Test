@@ -132,6 +132,7 @@ jobs:
         run: python3 tests/runtime/test_bridge_parity.py build/rt/dslink-runtime build/rt/dslink_npt_libretro.so build/ra/retroarch
       - name: A/B frontend parity (RetroArch vs Runtime, same core/ROM)
         run: |
+          (Xvfb :151 -screen 0 512x768x24 >/dev/null 2>&1 &)
           pulseaudio --start --exit-idle-time=-1 || true
           pactl load-module module-null-sink sink_name=parity_ra || true
           python3 tests/parity/ab_parity.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/ra/retroarch build/rom/dslink_test_1.nds build/dslink/dslink_cfgtool

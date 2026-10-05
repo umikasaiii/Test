@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A/B parity: RetroArch + melonDS DS (reference) vs DSLink Runtime + the same core, same ROM, same options, same inputs.
 usage: ab_parity.py <dslink-runtime> <core.so> <retroarch-x11> <rom.nds> <dslink_cfgtool>
-needs Xvfb, xdotool, ffmpeg, pulseaudio (RetroArch's audio sink is recorded with ffmpeg)."""
+needs: Xvfb :151 with a 512x768 screen (`Xvfb :151 -screen 0 512x768x24`), xdotool, ffmpeg and PulseAudio with a null sink named parity_ra (RetroArch's audio is recorded from it)."""
 import os, re, signal, subprocess, sys, tempfile, time
 from rtlib import *
 
