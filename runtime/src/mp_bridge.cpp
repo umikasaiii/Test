@@ -176,11 +176,17 @@ void MpBridge::dropConn(size_t idx) {
     ::close(conns_[idx].fd);
     conns_.erase(conns_.begin() + long(idx));
     if (role_ == Role::Host) {
-        if (host_->netpacket().disconnected) host_->netpacket().disconnected(id);
+        pendingDisconnected_.push_back(id);               // delivered from pump(): see flushPending()
     } else if (active_) {
-        active_ = false;
-        if (host_->netpacket().stop) host_->netpacket().stop();
+        active_ = false;                                   // sends/polls become no-ops immediately; the core hears about it between frames
+        pendingStop_ = true;
     }
+}
+
+void MpBridge::flushPending() {
+    for (uint16_t id : pendingDisconnected_) if (host_->netpacket().disconnected) host_->netpacket().disconnected(id);
+    pendingDisconnected_.clear();
+    if (pendingStop_) { pendingStop_ = false; if (host_->netpacket().stop) host_->netpacket().stop(); }
 }
 
 // Same routing as RetroArch's NETPLAY_CMD_NETPACKET handler (netplay_frontend.c): see docs/MULTIPLAYER_BRIDGE.md
@@ -237,14 +243,16 @@ void MpBridge::pollReceive() {
 
 void MpBridge::pump() {
     if (role_ == Role::None) return;
+    flushPending();
     acceptNew();
     pollReceive();
     if (active_ && host_->netpacket().poll) host_->netpacket().poll();
 }
 
 void MpBridge::stop() {
-    if (active_ && host_ && host_->netpacket().stop) host_->netpacket().stop();
+    if ((active_ || pendingStop_) && host_ && host_->netpacket().stop) host_->netpacket().stop();   // shutdown path: called from main, never from inside the core
     active_ = false;
+    pendingStop_ = false;
     for (auto& c : conns_) ::close(c.fd);
     conns_.clear();
     if (listenFd_ >= 0) { ::close(listenFd_); ::unlink(path_.c_str()); listenFd_ = -1; }

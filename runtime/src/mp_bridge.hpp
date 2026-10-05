@@ -53,6 +53,11 @@ private:
     bool active_ = false;
     uint64_t in_ = 0, out_ = 0;
     DlDiag* diag_ = nullptr;
+    // lifecycle callbacks that must not run inside a core call: the core may be inside poll_receive (blocking reply wait) when a peer vanishes,
+    // and its stop() handler clears the very function pointers that wait loop is still using. They are delivered from pump(), between frames.
+    bool pendingStop_ = false;
+    std::vector<uint16_t> pendingDisconnected_;
+    void flushPending();
 };
 
 }  // namespace dsrt

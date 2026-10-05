@@ -49,6 +49,8 @@ jobs:
           DSLINK_CFGTOOL=$PWD/build/dslink/dslink_cfgtool DSLINK_ROMCHECK=$PWD/build/dslink/dslink_romcheck DSLINK_WORKDIR=/tmp/dslink-cloud DSLINK_LOOPBACK=1 \
             build/dslink-gateway -addr :8080 -web cloud/web > /tmp/gw.log 2>&1 &
           sleep 3; python3 cloud/tests/internal_session.py http://localhost:8080 build/rom/dslink_test_1.nds
+      - name: Peer loss never crashes the surviving console (blocking MP reply wait + SIGKILLed peer)
+        run: python3 tests/runtime/test_peer_loss.py build/rt/dslink-runtime build/rt/dslink_npt_libretro.so 8
       - name: Download Play diagnostics state machine (synthetic frames)
         run: build/rt/dlplay_test
       - name: Two simultaneous DS instances

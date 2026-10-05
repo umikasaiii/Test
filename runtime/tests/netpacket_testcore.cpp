@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <ctime>
+#include <cstdlib>
 
 #include "libretro.h"
 
@@ -62,6 +64,15 @@ RETRO_API void retro_set_controller_port_device(unsigned, unsigned) {}
 RETRO_API void retro_reset(void) {}
 RETRO_API void retro_run(void) {
     ++frame_no;
+    // NPT_BLOCK=1 reproduces how melonDS DS waits for MP replies (MpState::NextPacketBlock): a 25 ms busy loop that calls send(flush hint) and poll_receive
+    // through its CURRENT function pointers, which np_stop() nulls. A frontend that calls stop() from inside poll_receive makes the next iteration crash.
+    static const bool block = std::getenv("NPT_BLOCK") != nullptr;
+    if (block && send_fn && poll_fn) {
+        for (std::clock_t t0 = std::clock(); std::clock() < t0 + 25 * CLOCKS_PER_SEC / 1000;) {
+            send_fn(RETRO_NETPACKET_FLUSH_HINT, nullptr, 0, RETRO_NETPACKET_BROADCAST);
+            poll_fn();
+        }
+    }
     if (send_fn && my_id >= 0 && frame_no % 20 == 0) {
         char m[64];
         int n = snprintf(m, sizeof m, "id=%d:seq=%u", my_id, frame_no / 20);

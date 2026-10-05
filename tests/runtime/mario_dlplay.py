@@ -128,7 +128,7 @@ t.check("GAME_HANDSHAKE: regular replies from the downloaded game", wait_state(C
 t.check("GAME_HANDSHAKE (screen): client 'You are P2' (downloaded game, no ROM)", wait_screen(C, "client_you_are_p2", 60, "bot"))
 t.check("GAME_HANDSHAKE (screen): host 'You are P1'", wait_screen(H, "host_you_are_p1", 30, "bot"))
 lob_c = goto(C, "client_lobby", lambda: (if_screen(H, "host_you_are_p1", "bot", lambda: tap(H, 0.5, 0.79, 0.4, 1)), if_screen(C, "client_you_are_p2", "bot", lambda: tap(C, 0.5, 0.79, 0.4, 4))), "bot", 6, 3, 60)
-lob_h = goto(H, "host_select_mode", lambda: None, "bot", 1, 1, 60)
+lob_h = goto(H, "host_select_mode", lambda: if_screen(H, "host_you_are_p1", "bot", lambda: tap(H, 0.5, 0.79, 0.4, 1)), "bot", 6, 3, 60)
 t.check("LOBBY (screen): both in the same session (client: 'P1 is making selections', host: Select Mode)", lob_c and lob_h, str({k: lastdist.get(k) for k in ("client_lobby", "host_select_mode")}))
 t.check("LOBBY (radio): the state machine sees the game-level session", wait_state(C, {"LOBBY", "IN_GAME"}, 30), dl(C))
 if "--game" not in sys.argv:
@@ -137,7 +137,16 @@ if "--game" not in sys.argv:
         open(os.path.join(out, f"dlplay_{f}.txt"), "w").write("\n".join(l for l in r.log().splitlines() if "DLPLAY" in l))
     t.check("neither console process crashed or powered off during the whole Download Play flow", H.proc.poll() is None and C.proc.poll() is None)
     json.dump(timeline, open(os.path.join(out, "timeline.json"), "w"), indent=1)
-    C.stop(); H.stop(); sys.exit(t.done())
+    if "--sigterm" in sys.argv:                                      # production-style shutdown: a container sending SIGTERM to its processes
+        C.proc.terminate(); H.proc.terminate()
+        try: rcc = C.proc.wait(15)
+        except Exception: rcc = "hang"
+        try: rch = H.proc.wait(15)
+        except Exception: rch = "hang"
+    else:
+        rcc = C.stop(); rch = H.stop()
+    t.check("both consoles shut down cleanly after a real Download Play session (exit code 0, no crash)", rcc == 0 and rch == 0, f"client rc={rcc} host rc={rch}")
+    sys.exit(t.done())
 t.check("host picks Puzzle Mode; both consoles enter it", goto(H, "host_puzzle_menu", lambda: if_screen(H, "host_select_mode", "bot", lambda: (tap(H, 0.28, 0.80), tap(H, 0.88, 0.965, 0.5, 14))), "top", 4, 4, 60) and goto(C, "client_lobby", lambda: None, "top", 1) is not None)
 t.check("Puzzle Collection: P1 vs P2 character select on both", goto(H, "host_chars", lambda: (tap(H, 0.5, 0.645), tap(H, 0.88, 0.965, 0.5, 6)), "bot", 4, 4, 60))
 tap(H, 0.2, 0.59, 0.4, 1.5); tap(C, 0.65, 0.59, 0.4, 2)

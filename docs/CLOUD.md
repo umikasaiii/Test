@@ -25,7 +25,7 @@ Status scale: **CODED · BUILD VERIFIED · LOCAL TESTED · CLOUD DEPLOYED · BRO
 | **Cloudflare deployment** | **NOT DEPLOYED** | needs account, D1/R2 ids, `wrangler deploy` |
 | PS1 | library accepts/validates `.chd`, `.cue+.bin`; **no core in the Runtime, no two-port mapping** | [LIBRARY.md](LIBRARY.md) |
 | DEVICE VERIFIED | **NO** | |
-| **Mario Party DS** | **NOT TESTED** — requires the user's private ROM and bootable DS firmware | |
+| **Mario Party DS** (real ROM + firmware, client with NO cartridge, real DS Download Play) | **LOCAL VERIFIED** through lobby and a Block Star match, locally and from two browsers over WebRTC (22/22) — see [MARIO_PARTY_DS.md](MARIO_PARTY_DS.md). Not yet on Cloudflare / real devices | `mario_dlplay.py` 23/23, `browser_mario.mjs` 22/22 (private, not in CI) |
 
 ## Request path of a game
 

@@ -144,7 +144,7 @@ func (l *RuntimeLink) Stats() map[string]any {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := map[string]any{"runtime_link_open": !l.closed, "mac": l.mac, "core_multiplayer": l.mp}
-	for _, k := range []string{"frames", "fps", "mp_active", "mp_peers", "mp_role", "mp_in", "mp_out", "video_frames", "audio_packets", "slowest_frame_ms", "width", "height"} {
+	for _, k := range []string{"frames", "fps", "mp_active", "mp_peers", "mp_role", "mp_in", "mp_out", "video_frames", "audio_packets", "slowest_frame_ms", "width", "height", "dl_state", "dl_counters", "dl_hist"} {
 		if v, ok := l.status[k]; ok {
 			out[k] = v
 		}
@@ -237,9 +237,11 @@ func (s *Slot) StartRuntime(mpPath string) error {
 	if s.Spec.ROM != "" {
 		args = append(args, "--content", s.Spec.ROM)
 	}
-	if _, err := s.spawn(logf, nil, env.Runtime, args...); err != nil {
+	cmd, err := s.spawn(logf, nil, env.Runtime, args...)
+	if err != nil {
 		return err
 	}
+	reap(cmd)
 	if !waitFile(sock, 15*time.Second) {
 		return fmt.Errorf("runtime %d did not open its link", s.Spec.ID)
 	}
