@@ -94,7 +94,7 @@ jobs:
         env: { CHROME: /opt/google/chrome/chrome }
         run: cd cloud/tests && node pwa_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
       - if: always()
-        run: tail -60 /tmp/gw.log /tmp/wrangler.log
+        run: tail -60 /tmp/gw.log /tmp/wrangler.log || true
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: pwa-e2e-screenshots, path: "/tmp/pwa_*_game.png" }
@@ -129,13 +129,13 @@ jobs:
             --disable-materialui --disable-xmb --disable-ozone --enable-networking --disable-cheevos --disable-discord --disable-v4l2 --disable-libusb
           make -j"$(nproc)"
       - name: Bridge parity (same core under RetroArch Netplay vs Runtime bridge)
-        run: python3 tests/runtime/test_bridge_parity.py build/rt/dslink-runtime build/rt/dslink_npt_libretro.so build/ra/retroarch
+        run: python3 tests/runtime/test_bridge_parity.py $PWD/build/rt/dslink-runtime $PWD/build/rt/dslink_npt_libretro.so $PWD/build/ra/retroarch
       - name: A/B frontend parity (RetroArch vs Runtime, same core/ROM)
         run: |
           (Xvfb :151 -screen 0 512x768x24 >/dev/null 2>&1 &)
           pulseaudio --start --exit-idle-time=-1 || true
           pactl load-module module-null-sink sink_name=parity_ra || true
-          python3 tests/parity/ab_parity.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/ra/retroarch build/rom/dslink_test_1.nds build/dslink/dslink_cfgtool
+          python3 tests/parity/ab_parity.py $PWD/build/rt/dslink-runtime $PWD/build/core/src/libretro/melondsds_libretro.so $PWD/build/ra/retroarch $PWD/build/rom/dslink_test_1.nds $PWD/build/dslink/dslink_cfgtool
 
   container-e2e:
     # Builds the PRODUCTION image (DSLink Runtime, no RetroArch) and drives it with two real Chrome browsers (WebRTC, H.264).
