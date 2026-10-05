@@ -1,0 +1,32 @@
+name: native
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        san: [none, asan]
+        include:
+          - os: ubuntu-24.04
+            san: tsan
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: |
+          case "${{ matrix.san }}" in
+            asan) FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" ;;
+            tsan) FLAGS="-fsanitize=thread" ;;
+            *) FLAGS="" ;;
+          esac
+          cmake -S dslink -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="$FLAGS"
+      - name: Build
+        run: cmake --build build -j4
+      - name: Unit + loopback integration tests
+        run: ./build/dslink_tests

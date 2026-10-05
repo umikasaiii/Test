@@ -1,0 +1,6 @@
+[submodule "upstream/retroarch"]
+	path = upstream/retroarch
+	url = https://github.com/libretro/RetroArch
+[submodule "upstream/melonds-ds"]
+	path = upstream/melonds-ds
+	url = https://github.com/JesseTG/melonds-ds
