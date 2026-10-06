@@ -47,6 +47,8 @@ esac
 # github.com/wlynxg/anet (pion's Android network-interface workaround) needs go:linkname access to net internals
 (cd "$ROOT/cloud/gateway" && CGO_ENABLED=$CGO CC="$CCBIN" GOOS=android GOARCH=$GOARCH go build -trimpath -ldflags="-checklinkname=0 -s -w" -o "$OUT/libdslink_gateway.so" .)
 
+# CI keeps an unstripped copy of the Runtime to symbolise native crashes of the emulator run
+mkdir -p "$ROOT/build" && cp "$OUT/libdslink_runtime.so" "$ROOT/build/libdslink_runtime.$ABI.unstripped.so"
 # executables ship stripped
 STRIP=$(ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-strip | head -n1)
 for f in libdslink_runtime.so libdslink_cfgtool.so libdslink_romcheck.so libdslink_jni.so libmelondsds_libretro.so; do "$STRIP" --strip-unneeded "$OUT/$f" || true; done
