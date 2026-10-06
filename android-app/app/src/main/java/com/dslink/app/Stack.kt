@@ -95,7 +95,7 @@ object Stack {
             val t = Thread { p.inputStream.bufferedReader().forEachLine { out.appendLine(it) } }.apply { start() }
             if (!p.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); t.join(1000); return "{\"pass\":false,\"error\":\"timeout\"}" }
             t.join(2000)
-            out.lines().lastOrNull { it.startsWith("{") } ?: "{\"pass\":false,\"error\":\"no result\"}"
+            out.lines().lastOrNull { it.startsWith("{") } ?: "{\"pass\":false,\"error\":\"no result, exit ${p.exitValue()}, output: ${out.toString().takeLast(600).replace("\"", "'").replace("\n", " | ")}\"}"
         } catch (e: Exception) { "{\"pass\":false,\"error\":\"${e.javaClass.simpleName}\"}" }
     }
 
