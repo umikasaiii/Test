@@ -322,6 +322,7 @@ func main() {
 		ShmPath:       os.Getenv("DSLINK_SHM_PATH"),
 		NoEncoder:     os.Getenv("DSLINK_NO_ENCODER") == "1",
 		UILoopback:    os.Getenv("DSLINK_UI_LOOPBACK_ONLY") == "1",
+		TestHooks:     os.Getenv("DSLINK_TEST_HOOKS") == "1",
 	}
 	os.MkdirAll(env.WorkDir, 0o755)
 	s := &Server{env: env, up: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}}

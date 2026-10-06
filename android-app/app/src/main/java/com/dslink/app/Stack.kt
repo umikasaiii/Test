@@ -59,6 +59,7 @@ object Stack {
             put("DSLINK_UI_LOOPBACK_ONLY", "1")      // other phones may only reach the peer lobby protocol
             put("DSLINK_PARENT_WATCH", "1")          // never outlive the app
             put("DSLINK_DEVICE_NAME", Words.deviceName(Build.MODEL))
+            if (File(root, "enable_test_hooks").exists()) put("DSLINK_TEST_HOOKS", "1")   // instrumented tests only (the marker is created by the test)
             wifi?.let { put("DSLINK_ADVERTISE_IP", it.ip); it.broadcast?.let { b -> put("DSLINK_MP_DISCOVERY_ADDR", b) } }
         }
         proc = try { pb.start() } catch (e: Exception) { Log.e(TAG, "gateway start failed", e); null }

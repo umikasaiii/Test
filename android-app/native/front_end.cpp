@@ -50,23 +50,30 @@ bool ShmReader::alive() const { return valid() && H()->alive.load() != 0; }
 uint64_t ShmReader::framesPublished() const { return H() ? H()->vframes.load(std::memory_order_acquire) : 0; }
 uint32_t ShmReader::sampleRate() const { return H() ? H()->sampleRate.load() : 0; }
 
-bool ShmReader::copyLatest(std::vector<uint8_t>& out, uint32_t& w, uint32_t& h) {
+bool ShmReader::peekLatest(std::vector<uint8_t>& out, uint32_t& w, uint32_t& h) const {
     if (!valid()) return false;
-    const uint32_t sess = H()->session.load();
-    if (sess != vSession_) { vSession_ = sess; lastFrame_ = 0; }   // a new Runtime: start over
-    const uint64_t f = H()->vframes.load(std::memory_order_acquire);
-    if (f == lastFrame_) return false;
     const uint32_t idx = H()->vlatest.load(std::memory_order_acquire) % kSlots;
-    for (int tries = 0; tries < 4; ++tries) {
+    for (int tries = 0; tries < 8; ++tries) {
         const uint32_t s0 = H()->slotSeq[idx].load(std::memory_order_acquire);
         if (s0 & 1) continue;
         const uint32_t fw = H()->vw.load(), fh = H()->vh.load();
         if (fw == 0 || fh == 0 || fw > kMaxW || fh > kMaxH) return false;
         out.resize(size_t(fw) * fh * 4);
         std::memcpy(out.data(), base_ + kVideoOffset + size_t(idx) * kSlotBytes, out.size());
-        if (H()->slotSeq[idx].load(std::memory_order_acquire) == s0) { w = fw; h = fh; lastFrame_ = f; return true; }
+        if (H()->slotSeq[idx].load(std::memory_order_acquire) == s0) { w = fw; h = fh; return true; }
     }
-    return false;   // the writer lapped us while copying: the next call gets the newer frame
+    return false;
+}
+
+bool ShmReader::copyLatest(std::vector<uint8_t>& out, uint32_t& w, uint32_t& h) {
+    if (!valid()) return false;
+    const uint32_t sess = H()->session.load();
+    if (sess != vSession_) { vSession_ = sess; lastFrame_ = 0; }   // a new Runtime: start over
+    const uint64_t f = H()->vframes.load(std::memory_order_acquire);
+    if (f == lastFrame_) return false;
+    if (!peekLatest(out, w, h)) return false;   // the writer lapped us while copying: the next call gets the newer frame
+    lastFrame_ = f;
+    return true;
 }
 
 size_t ShmReader::pullAudio(int16_t* out, size_t frames) {

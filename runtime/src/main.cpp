@@ -265,6 +265,7 @@ int main(int argc, char** argv) {
                 host.input[0].pointerDown = d;
             }
             if (shm.paused()) {  // app in the background: no emulation, the status keeps ticking
+                shm.publishStatus(0, 0, 0, unsigned(mp.peers()), host.metrics.frames.load());
                 mp.pump();
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 next = Clock::now();

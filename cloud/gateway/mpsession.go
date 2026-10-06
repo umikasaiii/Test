@@ -60,6 +60,7 @@ type MpSession struct {
 	modeNote             string
 	hostName             string
 	devID                string // random per gateway process, sent when joining
+	solo                 bool   // test hook: a console with nobody else in the room (no supervision of a missing peer)
 	attempt              int    // host: current try of the DS-level setup (1..mpSetupAttempts)
 	guestAttempt         int    // guest: the host's attempt this device has acted on
 	players              [2]*MpPlayer
@@ -314,7 +315,7 @@ func (m *MpSession) resetLocked() {
 	m.players = [2]*MpPlayer{}
 	m.net, m.netDone, m.step, m.err = MpNetResult{}, false, "", nil
 	m.modeEffective, m.modeNote, m.plan, m.started = "", "", mpPlan{}, false
-	m.attempt, m.guestAttempt = 0, 0
+	m.attempt, m.guestAttempt, m.solo = 0, 0, false
 	m.hostState = ""
 	m.hostDriverOK, m.guestDriverOK, m.radioSeen, m.keepEnded = false, false, false, false
 	m.badJoins, m.lockedUntil = nil, time.Time{}

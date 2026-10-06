@@ -575,6 +575,10 @@ func (m *MpSession) supervise(stop chan struct{}) {
 			m.mu.Unlock()
 			return
 		}
+		if m.solo {
+			m.mu.Unlock()
+			continue
+		}
 		now := time.Now()
 		g := m.players[1]
 		switch m.state {

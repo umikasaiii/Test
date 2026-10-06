@@ -46,6 +46,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 class MainActivity : ComponentActivity(), SurfaceHolder.Callback {
     private lateinit var surfaceView: SurfaceView
     private lateinit var web: WebView
+    val webView: WebView get() = web   // instrumented tests
     private lateinit var overlay: TextView
     private lateinit var monitor: DevMonitor
     private lateinit var net: NetWatcher

@@ -12,6 +12,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "audio_out.hpp"
 #include "dslink/firmware.hpp"
@@ -137,6 +138,18 @@ JNIEXPORT jdoubleArray JNICALL Java_com_dslink_app_Native_nativeMetrics(JNIEnv* 
     }
     jdoubleArray out = env->NewDoubleArray(17);
     env->SetDoubleArrayRegion(out, 0, 17, v);
+    return out;
+}
+
+// the newest frame as bytes: [w:int32 LE][h:int32 LE][XRGB8888 = B,G,R,X per pixel]. For tests and the developer menu only.
+JNIEXPORT jbyteArray JNICALL Java_com_dslink_app_Native_nativeGrabFrame(JNIEnv* env, jclass) {
+    if (!eng()) return nullptr;
+    std::vector<uint8_t> px; uint32_t w = 0, h = 0;
+    if (!eng()->reader.peekLatest(px, w, h)) return nullptr;
+    jbyteArray out = env->NewByteArray(jsize(8 + px.size()));
+    int32_t hdr[2] = {int32_t(w), int32_t(h)};
+    env->SetByteArrayRegion(out, 0, 8, reinterpret_cast<const jbyte*>(hdr));
+    env->SetByteArrayRegion(out, 8, jsize(px.size()), reinterpret_cast<const jbyte*>(px.data()));
     return out;
 }
 

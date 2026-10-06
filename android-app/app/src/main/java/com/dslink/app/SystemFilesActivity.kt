@@ -53,7 +53,7 @@ class SystemFilesActivity : ComponentActivity() {
             val f = target(r.file)
             if (!f.exists()) { r.status.text = "Non presente"; all = false; continue }
             val res = Native.nativeCheckSysFile(r.kind, f.path).split('|')
-            val ok = res[0] == "ok"
+            val ok = res[0] == "OK"
             r.status.text = if (ok) "✓ Pronto (${res.getOrElse(2) { "" }})" else res.getOrElse(1) { "File non valido" }
             if (!ok) all = false
         }
@@ -70,7 +70,7 @@ class SystemFilesActivity : ComponentActivity() {
             try {
                 contentResolver.openInputStream(uri)?.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
                 val res = Native.nativeCheckSysFile(kind, tmp.path).split('|')
-                if (res[0] == "ok") { target(row.file).delete(); tmp.renameTo(target(row.file)) } else { tmp.delete(); runOnUiThread { row.status.text = res.getOrElse(1) { "File non valido" } }; return@Thread }
+                if (res[0] == "OK") { target(row.file).delete(); tmp.renameTo(target(row.file)) } else { tmp.delete(); runOnUiThread { row.status.text = res.getOrElse(1) { "File non valido" } }; return@Thread }
                 try { contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
             } catch (e: Exception) { tmp.delete(); runOnUiThread { row.status.text = "Non riesco a leggere il file." ; return@runOnUiThread } }
             runOnUiThread { refresh() }

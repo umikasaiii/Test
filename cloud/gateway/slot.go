@@ -32,6 +32,7 @@ type Env struct {
 	// (no encoder, no WebRTC for the local player), takes buttons/touch from the same file, and the UI API answers loopback requests only.
 	ShmPath    string // DSLINK_SHM_PATH
 	NoEncoder  bool   // DSLINK_NO_ENCODER=1: this build has no H.264/VP8/Opus encoder, so it cannot stream a console to another device (Hosted host)
+	TestHooks  bool   // DSLINK_TEST_HOOKS=1: instrumented-test endpoints (see mptest_hooks.go)
 	UILoopback bool   // DSLINK_UI_LOOPBACK_ONLY=1: everything except the peer lobby protocol and the hosted stream answers loopback only
 }
 

@@ -58,3 +58,43 @@ jobs:
           sha256sum dist/*.apk | tee dist/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with: { name: DSLink-android-arm64-debug, path: dist }
+
+  emulator-x86_64:
+    # The whole app on an Android EMULATOR (x86_64 build of the same code) with homebrew test content: Runtime + melonDS core from the APK, native GL surface, AAudio,
+    # WebView with the frozen touch UI, JNI input, rotation, pause/resume, recreate, Back. This proves the Android pipeline; it does NOT prove arm64 speed (that needs a phone).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: cloud/gateway/go.mod }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake gcc-arm-none-eabi binutils-arm-none-eabi
+      - name: Homebrew test ROM (own code) for the instrumented test
+        run: |
+          mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
+          mkdir -p android-app/app/src/androidTest/assets && cp build/rom/dslink_test_1.nds android-app/app/src/androidTest/assets/
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - name: Native build for x86_64 (emulator ABI)
+        env: { ANDROID_NDK: "${{ env.ANDROID_NDK_LATEST_HOME }}" }
+        run: ANDROID_NDK="$ANDROID_NDK_LATEST_HOME" scripts/build_android_native.sh x86_64
+      - name: Instrumented tests on an API 30 x86_64 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          script: cd android-app && gradle --no-daemon -Pdslink.abis=x86_64 connectedDebugAndroidTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: android-emulator-reports, path: android-app/app/build/reports }

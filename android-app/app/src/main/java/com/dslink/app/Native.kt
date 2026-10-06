@@ -16,6 +16,7 @@ object Native {
     @JvmStatic external fun nativeRequestQuit()
     @JvmStatic external fun nativePadId(name: String): Int
     @JvmStatic external fun nativeMetrics(): DoubleArray
+    @JvmStatic external fun nativeGrabFrame(): ByteArray?
     @JvmStatic external fun nativeCheckSysFile(kind: Int, path: String): String
     @JvmStatic external fun nativeInspectRom(path: String): String
 }

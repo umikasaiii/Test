@@ -61,6 +61,8 @@ jobs:
         run: python3 tests/runtime/test_lan_bridge.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/rom/dslink_test_1.nds build/rom/dslink_test_2.nds build/dslink/dslink_cfgtool
       - name: Two simultaneous DS instances
         run: python3 tests/runtime/test_two_ds.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/rom/dslink_test_1.nds build/rom/dslink_test_2.nds build/dslink/dslink_cfgtool
+      - name: Android data path on the desktop (shared-memory front end - raw frames, audio ring, buttons, touch, pause, quit - no encoder, no control link)
+        run: python3 tests/runtime/test_shm_frontend.py build/rt/dslink-runtime build/core/src/libretro/melondsds_libretro.so build/rt/shm_probe build/rom/dslink_test_1.nds
 
   worker:
     # Accounts, passkeys, friends, presence, private library, invites, sessions: Workers runtime (workerd) with real D1 / R2 / Durable Objects, locally.
@@ -119,6 +121,15 @@ jobs:
           DSLINK_CFGTOOL: ${{ github.workspace }}/build/dslink/dslink_cfgtool
           DSLINK_ROMCHECK: ${{ github.workspace }}/build/dslink/dslink_romcheck
         run: cd cloud/tests && node mp_ux_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/mpshots
+      - name: Android native display mode end to end (real UI, fake app bridge writing shared memory, gateway as the app starts it; homebrew only)
+        env:
+          CHROME: /opt/google/chrome/chrome
+          DSLINK_GATEWAY: ${{ github.workspace }}/build/dslink-gateway
+          DSLINK_RUNTIME: ${{ github.workspace }}/build/rt/dslink-runtime
+          DSLINK_CORE: ${{ github.workspace }}/build/core/src/libretro/melondsds_libretro.so
+          DSLINK_CFGTOOL: ${{ github.workspace }}/build/dslink/dslink_cfgtool
+          DSLINK_ROMCHECK: ${{ github.workspace }}/build/dslink/dslink_romcheck
+        run: cd cloud/tests && node mp_native_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" "$PWD/../../build/rt/shm_probe" /tmp/mpnative
       - name: "Cloudflare Containers media path (no inbound UDP): browsers <-> TURN relay <-> gateway, relay-only"
         env: { CHROME: /opt/google/chrome/chrome, DSLINK_VIDEO_CODEC: h264 }
         run: |

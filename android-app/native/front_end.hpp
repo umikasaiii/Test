@@ -41,6 +41,8 @@ public:
 
     // video: copies the newest complete frame if it is newer than the last one returned (seqlock; false = nothing new or torn read)
     bool copyLatest(std::vector<uint8_t>& xrgb, uint32_t& w, uint32_t& h);
+    // newest complete frame regardless of what copyLatest returned before (debug/test snapshot from another thread; leaves the renderer's cursor alone)
+    bool peekLatest(std::vector<uint8_t>& xrgb, uint32_t& w, uint32_t& h) const;
     uint64_t framesPublished() const;
 
     // audio: fills 'frames' stereo frames (zero padded). Keeps a small cushion before it starts (priming) and jumps ahead instead of drifting.

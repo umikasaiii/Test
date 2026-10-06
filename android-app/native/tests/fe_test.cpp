@@ -33,6 +33,8 @@ int main() {
     wr.pushVideo(f.data(), 256, 384, 256 * 4);
     CHECK(rd.copyLatest(out, w, h) && w == 256 && h == 384 && out == f, "frame arrives bit-exact (size + pixels)");
     CHECK(!rd.copyLatest(out, w, h), "the same frame is not delivered twice");
+    std::vector<uint8_t> peek; uint32_t pw = 0, ph = 0;
+    CHECK(rd.peekLatest(peek, pw, ph) && pw == 256 && peek == f && !rd.copyLatest(out, w, h), "peekLatest (test snapshot) reads the newest frame without consuming it");
     f[0] ^= 0xFF; wr.pushVideo(f.data(), 256, 384, 256 * 4);
     CHECK(rd.copyLatest(out, w, h) && out[0] == f[0], "the next frame replaces it");
     std::vector<uint8_t> big(512 * 768 * 4, 9);   // resolution change (core upscaling) is carried by w/h
