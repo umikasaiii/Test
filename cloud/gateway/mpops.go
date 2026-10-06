@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -414,8 +415,29 @@ type JoinRequest struct {
 	Addr    string `json:"addr"`    // developer menu only: manual host address
 }
 
+var (
+	hintMu sync.Mutex
+	hints  []string
+)
+
+// mpSetHints replaces the extra unicast discovery targets (valid IPv4 only, at most 16): the platform's own discovery (Android NSD) feeds them in.
+func mpSetHints(addrs []string) {
+	var ok []string
+	for _, a := range addrs {
+		if ip := net.ParseIP(strings.TrimSpace(a)); ip != nil && ip.To4() != nil && len(ok) < 16 {
+			ok = append(ok, ip.String())
+		}
+	}
+	hintMu.Lock()
+	hints = ok
+	hintMu.Unlock()
+}
+
 func discoveryAddrs() []string {
 	a := []string{"255.255.255.255"}
+	hintMu.Lock()
+	a = append(a, hints...)
+	hintMu.Unlock()
 	if v := os.Getenv("DSLINK_MP_DISCOVERY_ADDR"); v != "" {
 		a = append(a, strings.Split(v, ",")...)
 	}

@@ -319,6 +319,9 @@ func main() {
 		Runtime:       getenv("DSLINK_RUNTIME", "/opt/dslink/bin/dslink-runtime"),
 		Backend:       getenv("DSLINK_BACKEND", "runtime"),
 		InternalToken: os.Getenv("DSLINK_INTERNAL_TOKEN"),
+		ShmPath:       os.Getenv("DSLINK_SHM_PATH"),
+		NoEncoder:     os.Getenv("DSLINK_NO_ENCODER") == "1",
+		UILoopback:    os.Getenv("DSLINK_UI_LOOPBACK_ONLY") == "1",
 	}
 	os.MkdirAll(env.WorkDir, 0o755)
 	s := &Server{env: env, up: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}}
@@ -373,7 +376,7 @@ func main() {
 	mux.HandleFunc("/ws", s.ws)
 	mux.Handle("/controls/", http.StripPrefix("/controls/", http.FileServer(http.Dir(*controlsDir))))
 	mux.Handle("/", http.FileServer(http.Dir(*web)))
-	srv := &http.Server{Addr: *addr, Handler: mux}
+	srv := &http.Server{Addr: *addr, Handler: s.loopbackGuard(mux)}
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)

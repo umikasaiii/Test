@@ -37,6 +37,7 @@ public:
     void pushAudio(const int16_t* stereo, size_t frames);
     void requestKeyframe() { forceKey_ = true; }
     void flush();
+    void setKeepRaw(bool on) { keepRaw_ = on; }  // the RGB24 copy of every frame is only needed for snapshots (gateway link); skipped otherwise
 
     VideoSink onVideo;
     AudioSink onAudio;
@@ -64,6 +65,7 @@ private:
     std::vector<uint8_t> raw_;
     unsigned rawW_ = 0, rawH_ = 0;
     int64_t t0Us_ = 0;
+    std::atomic_bool keepRaw_{true};
     void encodeVideo(AVFrame* f);
     void drainAudio();
 };

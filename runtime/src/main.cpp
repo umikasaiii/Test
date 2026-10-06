@@ -17,6 +17,7 @@
 #include "link.hpp"
 #include "libretro_host.hpp"
 #include "mp_bridge.hpp"
+#include "shm_sink.hpp"
 #include "dlplay_diag.hpp"
 #include "session_mode.hpp"
 
@@ -116,9 +117,13 @@ int main(int argc, char** argv) {
     bool dumping = false;
     uint64_t dumpUntilFrame = 0;
 
-    host.onVideo = [&](const uint8_t* d, unsigned w, unsigned h, size_t p) { av.pushVideo(d, w, h, p); };  // pushVideo also keeps the raw frame
+    ShmSink shm;  // local front end (Android app): raw frames/audio out, touch/buttons/pause in - no encoder, no socket
+    if (args.has("shm") && !shm.open(args.get("shm"), err)) { log("FATAL: " + err); return 3; }
+    av.setKeepRaw(!linkPath.empty());  // snapshots (Download Play assistant, parity tests) go through the control link
+    host.onVideo = [&](const uint8_t* d, unsigned w, unsigned h, size_t p) { av.pushVideo(d, w, h, p); if (shm.isOpen()) shm.pushVideo(d, w, h, p); };
     host.onAudio = [&](const int16_t* d, size_t n) {
         if (avOn) av.pushAudio(d, n);
+        if (shm.isOpen()) shm.pushAudio(d, n, unsigned(host.av.timing.sample_rate + 0.5));
         if (dumping) audioDump.insert(audioDump.end(), d, d + n * 2);
     };
 
@@ -247,8 +252,25 @@ int main(int argc, char** argv) {
         }
     };
 
+    double frameMsSum = 0; uint64_t frameMsN = 0;
     while (!g_quit && !host.shutdownRequested()) {
         link.poll(onCmd);
+        if (shm.isOpen()) {
+            if (shm.quitRequested()) break;
+            host.input[0].extraButtons = shm.buttons();
+            bool d; float tx, ty;
+            if (shm.takeTouch(d, tx, ty)) {
+                host.input[0].pointerX = int((tx * 2 - 1) * 32767);
+                host.input[0].pointerY = int((ty * 2 - 1) * 32767);
+                host.input[0].pointerDown = d;
+            }
+            if (shm.paused()) {  // app in the background: no emulation, the status keeps ticking
+                mp.pump();
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                next = Clock::now();
+                continue;
+            }
+        }
         mp.pump();
         if (mp.sessionActive()) wasActive = true;
         if (!mpEnded && mp.role() == MpBridge::Role::Host && peerGraceMs > 0) {
@@ -263,6 +285,7 @@ int main(int argc, char** argv) {
         host.runFrame();
         double ms = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
         if (ms > slowest) slowest = ms;
+        frameMsSum += ms; ++frameMsN;
         if (dumping && host.metrics.frames >= dumpUntilFrame) {
             dumping = false;
             writeWav(args.get("_dumppath"), audioDump, unsigned(host.av.timing.sample_rate + 0.5));
@@ -288,6 +311,8 @@ int main(int argc, char** argv) {
                << ",\"env_unhandled\":" << host.metrics.envUnhandled.load() << "," << dl.json() << "}";
             std::string s = js.str();
             link.send(L_STATUS, 0, s.data(), s.size());
+            shm.publishStatus(host.metrics.fps.load(), frameMsN ? frameMsSum / double(frameMsN) : 0, slowest, unsigned(mp.peers()), host.metrics.frames.load());
+            frameMsSum = 0; frameMsN = 0;
             slowest = 0;
         }
         next += frameDur;

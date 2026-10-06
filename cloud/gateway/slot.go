@@ -28,6 +28,11 @@ type Env struct {
 	RuntimeDir    string // XDG_RUNTIME_DIR for PulseAudio
 	Runtime       string // dslink-runtime (production backend)
 	Backend       string // "runtime" (default) or "retroarch" (reference implementation)
+	// Android app (local front end): the console shown on THIS device writes raw frames/audio into a shared-memory file that the app renders natively
+	// (no encoder, no WebRTC for the local player), takes buttons/touch from the same file, and the UI API answers loopback requests only.
+	ShmPath    string // DSLINK_SHM_PATH
+	NoEncoder  bool   // DSLINK_NO_ENCODER=1: this build has no H.264/VP8/Opus encoder, so it cannot stream a console to another device (Hosted host)
+	UILoopback bool   // DSLINK_UI_LOOPBACK_ONLY=1: everything except the peer lobby protocol and the hosted stream answers loopback only
 }
 
 const (

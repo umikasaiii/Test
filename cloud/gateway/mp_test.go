@@ -361,3 +361,52 @@ func TestSetupFailedRetriesOnceThenTellsTheUser(t *testing.T) {
 		t.Fatalf("error %v", e)
 	}
 }
+
+// Android app mode: only the app itself may use the UI API; other devices reach the peer lobby protocol and the hosted stream signalling only.
+func TestLoopbackGuardOnlyOpensThePeerProtocolToTheLAN(t *testing.T) {
+	s := &Server{env: Env{UILoopback: true}}
+	h := s.loopbackGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	code := func(path, remote string) int {
+		r := httptest.NewRequest("GET", path, nil)
+		r.RemoteAddr = remote
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	for _, p := range []string{"/api/mp/library", "/api/mp/create", "/api/mp/dev/snapshot", "/mp/", "/api/status"} {
+		if code(p, "192.168.1.9:5555") != 403 {
+			t.Errorf("%s must be refused to a LAN peer", p)
+		}
+		if code(p, "127.0.0.1:5555") != 204 {
+			t.Errorf("%s must work for the app itself", p)
+		}
+	}
+	for _, p := range []string{"/api/lobby/join", "/api/lobby/status", "/ws"} {
+		if code(p, "192.168.1.9:5555") != 204 {
+			t.Errorf("%s must stay reachable for the other device", p)
+		}
+	}
+	off := &Server{}
+	if off.loopbackGuard(http.NotFoundHandler()) == nil {
+		t.Fatal("guard disabled must pass through")
+	}
+}
+
+func TestDiscoveryHintsAndNoEncoderMode(t *testing.T) {
+	mpSetHints([]string{"192.168.1.20", "not-an-ip", "::1", " 10.0.0.7 "})
+	a := discoveryAddrs()
+	if len(a) != 3 || a[1] != "192.168.1.20" || a[2] != "10.0.0.7" {
+		t.Fatalf("hints must be validated IPv4 only: %v", a)
+	}
+	mpSetHints(nil)
+	s := &Server{env: Env{NoEncoder: true, WorkDir: t.TempDir()}}
+	s.mp = newMpSession(s)
+	s.mp.modeChosen, s.mp.netDone, s.mp.net = "auto", true, MpNetResult{Class: "RED"}
+	if eff, _ := s.mp.decideMode(); eff != "distributed" {
+		t.Fatalf("a build without an encoder cannot be the Hosted host: %s", eff)
+	}
+	s.env.NoEncoder = false
+	if eff, _ := s.mp.decideMode(); eff != "hosted" {
+		t.Fatalf("a bad network still picks Hosted when an encoder exists: %s", eff)
+	}
+}

@@ -26,6 +26,7 @@ struct HostConfig {
 // RetroPad + touch state written by the control link and read by the core during retro_run.
 struct InputState {
     std::atomic<uint32_t> buttons{0};  // bit i = RETRO_DEVICE_ID_JOYPAD_i (per port)
+    std::atomic<uint32_t> extraButtons{0};  // same bits from a second source (the local front end's shared memory): OR-ed in, never clobbers the control link's presses
     std::atomic<bool> pointerDown{false};
     std::atomic<int> pointerX{0}, pointerY{0};  // libretro range -32767..32767 over the full video frame
 };

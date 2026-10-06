@@ -16,6 +16,7 @@
     <h1>MULTIPLAYER</h1>
     <button class="cta primary" id="btnCreate">CREA PARTITA</button>
     <button class="cta" id="btnJoin">UNISCITI</button>
+    <button class="cta ghost" id="btnSysFiles" hidden>FILE DI SISTEMA</button>
     <section class="recent" id="recent" hidden>
       <h2>Partite recenti</h2>
       <ul id="recentList"></ul>
@@ -122,6 +123,7 @@
     <label class="field small">Multiplayer Mode
       <select id="devMode"><option value="auto">Automatico</option><option value="distributed">Distributed</option><option value="hosted">Hosted</option></select>
     </label>
+    <label class="field small devandroid" hidden><input type="checkbox" id="devOverlay"> Overlay prestazioni (FPS, CPU, RAM, audio, rete, batteria)</label>
     <pre id="devDump"></pre>
   </aside>
 </main>

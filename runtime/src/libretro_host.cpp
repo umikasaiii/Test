@@ -181,7 +181,7 @@ int16_t LibretroHost::inputState(unsigned port, unsigned device, unsigned index,
     const InputState& in = input[port];
     switch (device & RETRO_DEVICE_MASK) {
         case RETRO_DEVICE_JOYPAD: {
-            uint32_t b = in.buttons.load();
+            uint32_t b = in.buttons.load() | in.extraButtons.load();
             if (id == RETRO_DEVICE_ID_JOYPAD_MASK) return int16_t(b & 0xFFFF);
             return id < 16 ? int16_t((b >> id) & 1) : 0;
         }

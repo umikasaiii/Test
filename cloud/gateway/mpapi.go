@@ -66,6 +66,12 @@ func (s *Server) registerMp(mux *http.ServeMux) {
 		readBody(r, &q)
 		mpReply(w, m.Create(q.GameID, q.Mode), nil)
 	})
+	mux.HandleFunc("/api/mp/hints", func(w http.ResponseWriter, r *http.Request) { // the Android app's NSD/mDNS browse results: IPs of devices that advertise a DSLink room
+		var q struct{ Addrs []string }
+		readBody(r, &q)
+		mpSetHints(q.Addrs)
+		mpReply(w, nil, nil)
+	})
 	mux.HandleFunc("/api/mp/nearby", func(w http.ResponseWriter, r *http.Request) { jsonOut(w, 200, map[string]any{"rooms": m.Nearby()}) })
 	mux.HandleFunc("/api/mp/join", func(w http.ResponseWriter, r *http.Request) {
 		var q JoinRequest
@@ -131,4 +137,24 @@ func (s *Server) registerMp(mux *http.ServeMux) {
 	mux.HandleFunc("/api/lobby/net", m.handleLobbyNet)
 	mux.HandleFunc("/api/lobby/report", m.handleLobbyReport)
 	mux.HandleFunc("/api/lobby/leave", m.handleLobbyLeave)
+}
+
+// loopbackGuard: on the Android app the whole UI/control API (library, create, join, start, dev menu, static files) must only answer the app itself.
+// What other devices may reach: the peer lobby protocol (/api/lobby/*, authenticated by code/secret/token) and the hosted stream signalling (/ws, token).
+func (s *Server) loopbackGuard(next http.Handler) http.Handler {
+	if !s.env.UILoopback {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/lobby/") || r.URL.Path == "/ws" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

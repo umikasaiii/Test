@@ -63,3 +63,8 @@ body.ingame #app { display:none; }
   h1 { font-size:22px; } .spinner { margin-top:6px; } .actions { flex-direction:row; } .actions .cta { min-height:52px; }
 }
 @media (min-width:700px) { .lobbygrid { grid-template-columns:minmax(240px,300px) 1fr; } }
+
+/* Android app: the picture is a native surface behind the page, so the page must be see-through while a game runs */
+html.native, html.native body { background: transparent !important; }
+#game.native, #game.native .ctl-clip, #game.native .ctl-clip > * { background: transparent !important; }
+.cta.ghost { background: transparent; border-style: dashed; }

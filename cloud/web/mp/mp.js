@@ -201,12 +201,38 @@ $("btnScanClose").onclick = () => { if (scanStop) scanStop(); else $("scanner").
 function stopStream() {
   if (!stream) return;
   const s = stream; stream = null;
-  try { s.controls.destroy(); s.ws.close(); s.pc.close(); } catch { /* closed */ }
-  $("game").hidden = true; $("game").innerHTML = ""; delete window.dslinkGame; document.body.classList.remove("ingame");
+  try { s.controls.destroy(); if (s.ws) s.ws.close(); if (s.pc) s.pc.close(); if (s.ro) s.ro.disconnect(); } catch { /* closed */ }
+  if (s.native) { try { ANDROID.gameVisible(false); } catch { /* app gone */ } }
+  $("game").hidden = true; $("game").innerHTML = ""; $("game").classList.remove("native"); delete window.dslinkGame; document.body.classList.remove("ingame", "native"); document.documentElement.classList.remove("native");
+}
+// ---- Android app: the console of THIS device is drawn by the app itself (shared memory -> GL surface behind the page), the page only supplies the frozen touch
+// controls. The controls engine lays the picture out exactly as before; its rectangles are handed to the app, and its buttons/stylus go to the app's input path.
+const ANDROID = window.DSLinkAndroid || null;
+function ensureNative() {
+  if (stream) return;
+  const root = $("game"); root.hidden = false; root.innerHTML = ""; root.classList.add("native");
+  const ph = document.createElement("div"); ph.className = "ctl-placeholder";
+  let down = false;
+  const sink = { btn: (k, d) => ANDROID.btn(k, !!d), stylus: (x, y, d, m) => { if (!m) down = !!d; ANDROID.touch(x, y, m ? down : !!d); }, ui() {} };
+  const controls = mountControls({ container: root, video: ph, platform: "nds", persist: true, onLeave: () => askLeave(), sink });
+  let raf = 0;
+  const report = () => {
+    raf = 0; const dpr = window.devicePixelRatio || 1, c = ph.parentElement.getBoundingClientRect(), v = ph.getBoundingClientRect();
+    try { ANDROID.setLayout(c.left * dpr, c.top * dpr, c.right * dpr, c.bottom * dpr, v.left * dpr, v.top * dpr, v.right * dpr, v.bottom * dpr, true); } catch { /* app gone */ }
+  };
+  const kick = () => { if (!raf) raf = requestAnimationFrame(report); };
+  const ro = new MutationObserver(kick);
+  ro.observe(ph, { attributes: true, attributeFilter: ["style"] }); ro.observe(ph.parentElement, { attributes: true, attributeFilter: ["style"] });
+  window.addEventListener("resize", kick); window.addEventListener("orientationchange", kick);
+  stream = { native: true, controls, ro }; window.dslinkGame = { native: true, btn: sink.btn, touch: sink.stylus, get controls() { return controls; } };
+  document.body.classList.add("ingame", "native"); document.documentElement.classList.add("native");
+  kick(); setTimeout(kick, 120); setTimeout(kick, 500);
+  try { ANDROID.gameVisible(true); } catch { /* app gone */ }
 }
 async function ensureStream() {
   const ig = st.ingame; if (!ig) return;
-  if (stream && !["failed", "closed", "disconnected"].includes(stream.pc.connectionState)) return;
+  if (ig.native && ANDROID) { ensureNative(); return; }
+  if (stream && !stream.native && !["failed", "closed", "disconnected"].includes(stream.pc.connectionState)) return;
   if (Date.now() - lastStreamAt < 3000) return; lastStreamAt = Date.now(); stopStream();
   const root = $("game"); root.hidden = false; root.innerHTML = "";
   const video = document.createElement("video"); video.playsInline = true; video.autoplay = true; root.append(video);
@@ -227,6 +253,12 @@ async function ensureStream() {
   document.body.classList.add("ingame");
 }
 
+// ---------------------------------------------------------------- Android app extras (system files, performance overlay, NSD hints)
+if (ANDROID) {
+  $("btnSysFiles").hidden = false; $("btnSysFiles").onclick = () => ANDROID.openSystemFiles();
+  document.querySelectorAll(".devandroid").forEach((e) => { e.hidden = false; });
+  $("devOverlay").onchange = () => ANDROID.setDevOverlay($("devOverlay").checked);
+}
 // ---------------------------------------------------------------- developer menu
 let taps = 0; $("logo").onclick = () => { if (++taps >= 5) { taps = 0; document.body.classList.toggle("dev"); try { localStorage.setItem("dslink.dev", document.body.classList.contains("dev") ? "1" : "0"); } catch { /* ignore */ } location.reload(); } };
 $("devMode").onchange = () => api("POST", "/api/mp/dev/mode", { mode: $("devMode").value });

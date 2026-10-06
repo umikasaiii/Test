@@ -35,6 +35,9 @@ func (m *MpSession) decideMode() (string, string) {
 	if m.netDone && m.net.Class == "GREEN" {
 		return "distributed", ""
 	}
+	if m.srv.env.NoEncoder { // this build cannot stream a console to another device: Hosted is not available here
+		return "distributed", ""
+	}
 	_, hint := netLabel(m.net.Class)
 	if hint == "" {
 		hint = "Per maggiore stabilità verrà utilizzata la modalità Hosted."

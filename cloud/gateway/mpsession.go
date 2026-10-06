@@ -235,11 +235,15 @@ func (m *MpSession) view(dev bool) map[string]any {
 		"players": pl, "mode": map[string]any{"chosen": m.modeChosen, "effective": eff, "label": modeLabel, "note": modeNote},
 		"net": map[string]any{"done": m.netDone, "class": m.net.Class, "label": label, "hint": hint}, "step": m.step, "error": m.err, "canStart": canStart,
 		"expiresInSec": int((mpLobbyTTL - time.Since(m.created)).Seconds()),
+		"platform":     map[string]any{"native": m.srv.env.ShmPath != "", "hostedHost": !m.srv.env.NoEncoder},
 	}
 	if (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) && m.local != nil {
 		ig := map[string]any{"base": "", "code": m.local.Code, "player": 1, "token": m.local.Tokens[0]}
 		if m.role == "guest" && m.plan.Mode == "hosted" {
 			ig = map[string]any{"base": "http://" + m.hostIP + ":" + hostPortOf(m.hostAddr), "code": m.plan.HostedCode, "player": 2, "token": m.plan.HostedToken}
+		}
+		if m.srv.env.ShmPath != "" && ig["base"] == "" {
+			ig["native"] = true // the console on this device is drawn by the app itself (shared memory), not streamed to the page
 		}
 		v["ingame"] = ig
 	} else if m.role == "guest" && m.plan.Mode == "hosted" && (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) {

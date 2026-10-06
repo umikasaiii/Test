@@ -6,17 +6,26 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavutil libswscale libswresample)
+# FFmpeg only encodes the stream the gateway sends to browsers (Hosted / cloud). A local front end (Android app) reads raw frames from shared memory
+# and needs no encoder: configure with -DDSLINK_WITH_FFMPEG=OFF (what the Android build does).
+option(DSLINK_WITH_FFMPEG "Link FFmpeg (H.264/VP8/Opus encoder for the browser stream)" ON)
+if(DSLINK_WITH_FFMPEG)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavutil libswscale libswresample)
+endif()
 find_package(Threads REQUIRED)
 
 # libretro.h comes from the pinned RetroArch submodule (libretro-common, MIT) - not copied into the repo.
 set(LIBRETRO_INCLUDE "${CMAKE_SOURCE_DIR}/../upstream/retroarch/libretro-common/include" CACHE PATH "directory containing libretro.h")
 
-add_executable(dslink-runtime src/main.cpp src/libretro_host.cpp src/mp_bridge.cpp src/radio_lan.cpp src/av_pipeline.cpp src/link.cpp src/dlplay_diag.cpp)
+add_executable(dslink-runtime src/main.cpp src/libretro_host.cpp src/mp_bridge.cpp src/radio_lan.cpp src/av_pipeline.cpp src/link.cpp src/dlplay_diag.cpp src/shm_sink.cpp)
 target_include_directories(dslink-runtime PRIVATE src ${LIBRETRO_INCLUDE})
 target_compile_options(dslink-runtime PRIVATE -Wall -Wextra)
-target_link_libraries(dslink-runtime PRIVATE PkgConfig::FFMPEG Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dslink-runtime PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+if(DSLINK_WITH_FFMPEG)
+  target_compile_definitions(dslink-runtime PRIVATE DSLINK_WITH_FFMPEG=1)
+  target_link_libraries(dslink-runtime PRIVATE PkgConfig::FFMPEG)
+endif()
 
 # Test core for the multiplayer bridge (NETPACKET interface only).
 add_library(npt_testcore MODULE tests/netpacket_testcore.cpp)
@@ -34,3 +43,8 @@ add_executable(lan_test tests/lan_test.cpp src/radio_lan.cpp)
 target_include_directories(lan_test PRIVATE src)
 target_link_libraries(lan_test PRIVATE Threads::Threads)
 add_test(NAME lan COMMAND lan_test)
+
+# Reader/driver for the shared-memory front-end channel (the JNI library does the same job on Android): desktop test of the Android data path.
+add_executable(shm_probe tests/shm_probe.cpp)
+target_include_directories(shm_probe PRIVATE src)
+target_link_libraries(shm_probe PRIVATE Threads::Threads)

@@ -228,8 +228,12 @@ func (s *Slot) StartRuntime(mpPath string) error {
 	sock := filepath.Join(s.dir, "link.sock")
 	os.Remove(sock) // a killed previous console leaves its socket file behind: never mistake it for the new one
 	args := []string{"--core", env.Core, "--system", filepath.Join(s.dir, "system"), "--save", filepath.Join(s.dir, "saves"),
-		"--options", optPath, "--username", s.Nick, "--link", sock, "--av", "on", "--codec", videoCodec(), "--name", fmt.Sprintf("slot%d", s.Spec.ID),
-		"--log", s.LogPath}
+		"--options", optPath, "--username", s.Nick, "--link", sock, "--name", fmt.Sprintf("slot%d", s.Spec.ID), "--log", s.LogPath}
+	if env.ShmPath != "" && s.Spec.ID == 1 { // the console shown on this device (Android app): raw frames/audio in shared memory, no encoder
+		args = append(args, "--shm", env.ShmPath)
+	} else {
+		args = append(args, "--av", "on", "--codec", videoCodec())
+	}
 	if s.Lan != nil { // Distributed Mode: the emulated DS radio goes over the LAN transport; no Unix-socket bridge exists for this slot
 		args = append(args, s.Lan.runtimeArgs()...)
 	} else {

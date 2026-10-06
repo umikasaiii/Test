@@ -1,5 +1,6 @@
 #include "av_pipeline.hpp"
 
+#ifdef DSLINK_WITH_FFMPEG
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/channel_layout.h>
@@ -8,6 +9,7 @@ extern "C" {
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
+#endif
 
 #include <chrono>
 #include <cstring>
@@ -17,10 +19,13 @@ namespace {
 int64_t nowUs() {
     return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+#ifdef DSLINK_WITH_FFMPEG
 std::string averr(int e) { char b[128]; av_strerror(e, b, sizeof b); return b; }
+#endif
 }  // namespace
 
 AvPipeline::AvPipeline() = default;
+#ifdef DSLINK_WITH_FFMPEG
 AvPipeline::~AvPipeline() {
     if (venc_) avcodec_free_context(&venc_);
     if (aenc_) avcodec_free_context(&aenc_);
@@ -30,7 +35,11 @@ AvPipeline::~AvPipeline() {
     if (sws_) sws_freeContext(sws_);
     if (swr_) swr_free(&swr_);
 }
+#else
+AvPipeline::~AvPipeline() = default;  // built without FFmpeg (Android): no encoder, the raw frame keeper below still works
+#endif
 
+#ifdef DSLINK_WITH_FFMPEG
 bool AvPipeline::open(const AvConfig& cfg, double coreRate, std::string& err) {
     cfg_ = cfg;
     t0Us_ = nowUs();
@@ -95,6 +104,9 @@ bool AvPipeline::open(const AvConfig& cfg, double coreRate, std::string& err) {
     if (r < 0 || swr_init(swr_) < 0) { err = "swresample init failed"; return false; }
     return true;
 }
+#else
+bool AvPipeline::open(const AvConfig&, double, std::string& err) { err = "this Runtime was built without FFmpeg: no H.264/VP8/Opus encoder"; return false; }
+#endif
 
 bool AvPipeline::latestRgb(std::vector<uint8_t>& out, unsigned& w, unsigned& h) {
     std::lock_guard<std::mutex> l(rawMu_);
@@ -106,7 +118,7 @@ bool AvPipeline::latestRgb(std::vector<uint8_t>& out, unsigned& w, unsigned& h) 
 }
 
 void AvPipeline::pushVideo(const uint8_t* xrgb, unsigned w, unsigned h, size_t pitch) {
-    {   // keep the last frame as RGB24 (diagnostics, parity tests)
+    if (keepRaw_) {   // keep the last frame as RGB24 (diagnostics, parity tests)
         std::lock_guard<std::mutex> l(rawMu_);
         raw_.resize(size_t(w) * h * 3);
         for (unsigned y = 0; y < h; ++y) {
@@ -117,6 +129,7 @@ void AvPipeline::pushVideo(const uint8_t* xrgb, unsigned w, unsigned h, size_t p
         rawW_ = w;
         rawH_ = h;
     }
+#ifdef DSLINK_WITH_FFMPEG
     if (!venc_) return;
     if (!sws_ || srcW_ != w || srcH_ != h) {
         if (sws_) sws_freeContext(sws_);
@@ -133,8 +146,10 @@ void AvPipeline::pushVideo(const uint8_t* xrgb, unsigned w, unsigned h, size_t p
     vframe_->pts = vpts_++;
     if (forceKey_.exchange(false)) vframe_->pict_type = AV_PICTURE_TYPE_I; else vframe_->pict_type = AV_PICTURE_TYPE_NONE;
     encodeVideo(vframe_);
+#endif
 }
 
+#ifdef DSLINK_WITH_FFMPEG
 void AvPipeline::encodeVideo(AVFrame* f) {
     if (avcodec_send_frame(venc_, f) < 0) return;
     while (avcodec_receive_packet(venc_, pkt_) == 0) {
@@ -176,5 +191,9 @@ void AvPipeline::drainAudio() {
 void AvPipeline::flush() {
     if (venc_) { avcodec_send_frame(venc_, nullptr); while (avcodec_receive_packet(venc_, pkt_) == 0) av_packet_unref(pkt_); }
 }
+#else
+void AvPipeline::pushAudio(const int16_t*, size_t) {}
+void AvPipeline::flush() {}
+#endif
 
 }  // namespace dsrt
