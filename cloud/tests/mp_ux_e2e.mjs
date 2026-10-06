@@ -112,6 +112,8 @@ try {
   await sleep(1500); await pb.goBack(); await sleep(800);
   const backInfo = await pb.evaluate(() => [location.pathname, document.body.dataset.screen, document.getElementById('confirm').hidden, document.getElementById('confirmTitle').textContent].join('|'));
   check('Back button inside a lobby asks for confirmation instead of silently leaving', backInfo.split('|')[2] === 'false' && backInfo.includes('Uscire') && backInfo.split('|')[1] === 'lobby', backInfo);
+  await pb.click('#confirmNo');
+  check('the app\'s Back hook (window.dslinkBack) asks inside a session and does not depend on history entries', (await pb.evaluate(() => window.dslinkBack() === true && !document.getElementById('confirm').hidden)) === true);
   await pb.click('#confirmNo'); await pb.reload(); await pb.waitForFunction(() => document.body.dataset.screen);
   check('refresh in the lobby: the session continues (the UI re-reads the server state)', await until(async () => (await screenIs(pb, 'lobby')) && (await text(pb, '#lobbyCode')) === code2, 8000));
   await pb.evaluate(() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'hidden', { value: false, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });

@@ -120,7 +120,8 @@ class MainActivity : ComponentActivity(), SurfaceHolder.Callback {
         monitor = DevMonitor(this, overlay)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { if (web.canGoBack()) web.goBack() else moveTaskToBack(true) }   // the page asks before leaving a session
+            // the page decides: inside a session it asks before leaving; a sub-screen goes back home; at home the task just moves to the background
+            override fun handleOnBackPressed() { web.evaluateJavascript("(window.dslinkBack && window.dslinkBack()) === true") { v -> if (v != "true") moveTaskToBack(true) } }
         })
         startStack()
     }
@@ -162,6 +163,7 @@ class MainActivity : ComponentActivity(), SurfaceHolder.Callback {
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
             .setOnAudioFocusChangeListener { change ->
                 ui.post {
+                    if (isDestroyed || isFinishing) return@post   // a finished activity must never pause the console that its successor now owns
                     when (change) {
                         AudioManager.AUDIOFOCUS_GAIN -> if (gameVisible && resumed) Native.nativeSetPaused(false)
                         AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> if (gameVisible) Native.nativeSetPaused(true)
@@ -193,6 +195,7 @@ class MainActivity : ComponentActivity(), SurfaceHolder.Callback {
     }
 
     override fun onDestroy() {
+        abandonFocus()
         if (isFinishing) {
             monitor.enable(false)
             Native.nativeRequestQuit()

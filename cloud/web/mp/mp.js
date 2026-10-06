@@ -26,6 +26,8 @@ window.addEventListener("popstate", (e) => {
   if (busy) { history.pushState({ view }, ""); askLeave(); return; }       // Back inside a session never loses it silently
   view = (e.state && e.state.view) || "home"; if (!["home", "create", "join"].includes(view)) view = "home"; render();
 });
+// Back from the Android app (and any host that wants it): true = the page handled it. Does not depend on history entries (browsers skip entries made without a user gesture).
+window.dslinkBack = () => { if (BUSY.includes(st.state)) { askLeave(); return true; } if (view !== "home") { view = "home"; render(); return true; } return false; };
 document.querySelectorAll("[data-back]").forEach((b) => { b.onclick = () => history.back(); });
 
 function askLeave() {
