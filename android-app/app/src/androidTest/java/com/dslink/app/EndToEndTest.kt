@@ -13,8 +13,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestRule
+import org.junit.runner.Description
 import org.junit.runner.RunWith
+import org.junit.runners.model.Statement
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -31,6 +35,22 @@ import java.util.concurrent.TimeUnit
 class EndToEndTest {
     private val ctx get() = InstrumentationRegistry.getInstrumentation().targetContext
     private lateinit var scenario: ActivityScenario<MainActivity>
+
+    /** a failing test carries the gateway's, the Runtime's and the app's own log lines in its message (no other way to see them after the test APK is uninstalled) */
+    @get:Rule val logsOnFailure = TestRule { base, _: Description ->
+        object : Statement() {
+            override fun evaluate() {
+                try { base.evaluate() } catch (t: Throwable) {
+                    val sb = StringBuilder(t.toString()).append("\n")
+                    fun tail(f: File, n: Int) { if (f.exists()) sb.append("--- ${f.name} (last $n lines) ---\n").append(f.readLines().takeLast(n).joinToString("\n")).append("\n") }
+                    tail(File(ctx.filesDir, "gateway.log"), 60)
+                    File(ctx.filesDir, "work").listFiles()?.filter { it.name.startsWith("slot") }?.forEach { tail(File(it, "runtime.log"), 40) }
+                    try { sb.append("--- logcat ---\n").append(Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "120", "-s", "dslink-stack:V", "dslink-render:V", "dslink-audio:V", "dslink-jni:V", "AndroidRuntime:E")).inputStream.bufferedReader().readText()) } catch (_: Exception) { }
+                    throw AssertionError(sb.toString(), t)
+                }
+            }
+        }
+    }
 
     @Before fun setUp() {
         File(ctx.filesDir, "enable_test_hooks").writeText("1")   // before the gateway starts

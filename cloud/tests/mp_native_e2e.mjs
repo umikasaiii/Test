@@ -5,7 +5,7 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { startDevice, sleep, runtimeCount, waitState } from './mplib.mjs';
+import { startDevice, sleep, runtimeCount, runtimePidsFor, waitState } from './mplib.mjs';
 
 const [rom1, rom2, probe, shots = '/tmp/mpnative'] = process.argv.slice(2);
 fs.mkdirSync(shots, { recursive: true });
@@ -65,7 +65,8 @@ await pb.click('#btnReady'); await until(async () => !(await pa.locator('#btnSta
 const sa = await waitState(A, (s) => s.state === 'IN_GAME', 60000), sb = await waitState(B, (s) => s.state === 'IN_GAME', 60000);
 check('both phones reach IN_GAME in Distributed Mode with no encoder', sa.state === 'IN_GAME' && sb.state === 'IN_GAME' && sa.mode.effective === 'distributed', `${sa.state}/${sb.state} ${sa.mode && sa.mode.effective}`);
 check('the state tells the page to use the native display (ingame.native, platform.native)', sa.ingame && sa.ingame.native === true && sb.ingame && sb.ingame.native === true && sa.platform.native === true);
-check('exactly one console per phone, none streamed (no WebRTC: the page has no <video> and no peer connection)', runtimeCount() === 2 && (await pa.evaluate(() => document.querySelectorAll('#game video').length === 0 && window.dslinkGame && window.dslinkGame.native === true)));
+await until(() => pa.evaluate(() => !!window.dslinkGame), 8000);
+check('exactly one console per phone, none streamed (no WebRTC: the page has no <video> and no peer connection)', runtimePidsFor('A').length === 1 && runtimePidsFor('B').length === 1 && (await pa.evaluate(() => document.querySelectorAll('#game video').length === 0 && window.dslinkGame && window.dslinkGame.native === true)));
 await until(() => bA.calls.layout.length > 0, 8000);
 const lay = bA.calls.layout[bA.calls.layout.length - 1] || [];
 const [cl, ct, cr, cb, vl, vt, vr, vb] = lay;
