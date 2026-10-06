@@ -82,13 +82,14 @@ for r, n in ((C1, "c1"), (C2, "c2")):
 shot(C1, "c1_discovered"); shot(C2, "c2_discovered")
 def pick(r): tap(r, 0.5, 0.67, 0.3, 2.0); press(r, 8, 0.25, 3.0)
 def own_download_done(r, secs):
-    """the console's OWN transfer: its association was made by it (assoc_req_tx) and the bytes delivered to it stopped growing (the shared radio makes the state machine see the other client's transfer too)"""
-    end = time.time() + secs; last, since = -1, time.time()
+    """the console's OWN transfer: it associated by itself (assoc_req_tx) and ~700 KB reached it since (the shared radio makes the state machine see the other client's transfer too;
+    after the transfer the keep-alive polling goes on, so 'stopped growing' is not a signal)"""
+    end = time.time() + secs; base = None; at = 0
     while time.time() < end:
         c = r.status.get("dl_counters") or {}
         b = c.get("data_bytes_rx", 0)
-        if b != last: last, since = b, time.time()
-        if c.get("assoc_req_tx", 0) >= 1 and b > 300000 and time.time() - since > 5: return True
+        if c.get("assoc_req_tx", 0) >= 1 and base is None: base, at = b, time.time()
+        if base is not None and b - base > 650000 and time.time() - at > 8: return True
         time.sleep(0.5)
     return False
 for n, r in (("c1", C1), ("c2", C2)):          # one download after the other: every client asks for the game itself (screen-checked: the radio state is shared)

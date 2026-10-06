@@ -103,18 +103,19 @@ func (d *dlDriver) refOr(name, fallback string) string {
 }
 
 // ownDownloadDone: THIS console's own transfer is over. With several clients on one radio the state machine also sees the other clients' frames, so its state cannot tell:
-// the console associated by itself (assoc_req_tx) and the bytes delivered to it have stopped growing.
+// the console associated by itself (assoc_req_tx) and the payload (~700 KB of 292-byte frames) has been delivered to it since. (After the transfer the keep-alive polling goes on,
+// so "bytes stopped growing" is not a usable signal.)
 func (d *dlDriver) ownDownloadDone(timeout time.Duration) bool {
 	end := time.Now().Add(timeout)
-	last, since := -1.0, time.Now()
+	base, assocAt := -1.0, time.Time{}
 	for time.Now().Before(end) {
 		c, _ := d.slot.Status()["dl_counters"].(map[string]any)
 		b, _ := c["data_bytes_rx"].(float64)
 		assoc, _ := c["assoc_req_tx"].(float64)
-		if b != last {
-			last, since = b, time.Now()
+		if assoc >= 1 && base < 0 {
+			base, assocAt = b, time.Now()
 		}
-		if assoc >= 1 && b > 300000 && time.Since(since) > 5*time.Second {
+		if base >= 0 && b-base > 650000 && time.Since(assocAt) > 8*time.Second {
 			return true
 		}
 		if d.sleep(500*time.Millisecond) != nil || !d.alive() {

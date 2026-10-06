@@ -25,15 +25,23 @@ class McCodec : public H264Codec {
 public:
     ~McCodec() override { close(); }
 
+    // Configuration attempts, richest first: every codec accepts the core keys; the extras (real-time hints, colour description, profile, CBR) are what a particular
+    // vendor/software codec may refuse, so they are dropped step by step instead of failing the whole stream. The error lists every attempt (it is what the CI log and the
+    // self-test show when a device has a problem).
     bool open(int w, int h, int fps, int kbps, int keyintSec, std::string& err) override {
-        std::string last;
-        for (int fmt : {kColorYuv420SemiPlanar, kColorYuv420Planar, kColorYuv420Flexible}) {
-            for (int mode : {2 /*CBR*/, 1 /*VBR*/}) {
-                if (tryOpen(w, h, fps, kbps, keyintSec, fmt, mode, last)) return true;
-                close();
+        std::string all;
+        for (int level : {0, 1, 2}) {                                  // 0 = everything, 1 = core + profile + bitrate mode, 2 = core only
+            for (int fmt : {kColorYuv420SemiPlanar, kColorYuv420Planar, kColorYuv420Flexible}) {
+                for (int mode : {2 /*CBR*/, 1 /*VBR*/}) {
+                    if (level == 2 && mode == 1) continue;             // level 2 sets no bitrate mode: one attempt per colour format
+                    std::string why;
+                    if (tryOpen(w, h, fps, kbps, keyintSec, fmt, mode, level, why)) return true;
+                    all += " [L" + std::to_string(level) + " fmt" + std::to_string(fmt) + " m" + std::to_string(mode) + ": " + why + "]";
+                    close();
+                }
             }
         }
-        err = "MediaCodec H.264 encoder: " + last;
+        err = "MediaCodec H.264 encoder:" + all;
         return false;
     }
 
@@ -94,7 +102,7 @@ public:
     }
 
 private:
-    bool tryOpen(int w, int h, int fps, int kbps, int keyintSec, int colorFmt, int bitrateMode, std::string& err) {
+    bool tryOpen(int w, int h, int fps, int kbps, int keyintSec, int colorFmt, int bitrateMode, int level, std::string& err) {
         c_ = AMediaCodec_createEncoderByType("video/avc");
         if (!c_) { err = "no AVC encoder"; return false; }
         AMediaFormat* f = AMediaFormat_new();
@@ -105,16 +113,20 @@ private:
         AMediaFormat_setInt32(f, "frame-rate", fps);
         AMediaFormat_setInt32(f, "i-frame-interval", keyintSec);
         AMediaFormat_setInt32(f, "color-format", colorFmt);
-        AMediaFormat_setInt32(f, "bitrate-mode", bitrateMode);
-        AMediaFormat_setInt32(f, "profile", 1);                          // AVCProfileBaseline: what every browser decodes
-        AMediaFormat_setInt32(f, "priority", 0);                         // real time
-        AMediaFormat_setInt32(f, "low-latency", 1);                      // API 30; ignored before
-        AMediaFormat_setInt32(f, "max-bframes", 0);
-        AMediaFormat_setInt32(f, "operating-rate", fps);
-        AMediaFormat_setInt32(f, "prepend-sps-pps-to-idr-frames", 1);
-        AMediaFormat_setInt32(f, "color-range", 2);                      // limited
-        AMediaFormat_setInt32(f, "color-standard", 4);                   // BT.601 (NTSC): the matrix the conversion uses
-        AMediaFormat_setInt32(f, "color-transfer", 3);                   // SDR video
+        if (level <= 1) {
+            AMediaFormat_setInt32(f, "bitrate-mode", bitrateMode);
+            AMediaFormat_setInt32(f, "profile", 1);                      // AVCProfileBaseline: what every browser decodes
+            AMediaFormat_setInt32(f, "prepend-sps-pps-to-idr-frames", 1);
+        }
+        if (level == 0) {
+            AMediaFormat_setInt32(f, "priority", 0);                     // real time
+            AMediaFormat_setInt32(f, "low-latency", 1);                  // API 30; ignored before
+            AMediaFormat_setInt32(f, "max-bframes", 0);
+            AMediaFormat_setInt32(f, "operating-rate", fps);
+            AMediaFormat_setInt32(f, "color-range", 2);                  // limited
+            AMediaFormat_setInt32(f, "color-standard", 4);               // BT.601 (NTSC): the matrix the conversion uses
+            AMediaFormat_setInt32(f, "color-transfer", 3);               // SDR video
+        }
         const media_status_t st = AMediaCodec_configure(c_, f, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
         AMediaFormat_delete(f);
         if (st != AMEDIA_OK) { err = "configure failed (" + std::to_string(int(st)) + ", colour format " + std::to_string(colorFmt) + ")"; return false; }
