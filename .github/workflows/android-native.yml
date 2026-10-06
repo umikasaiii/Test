@@ -93,6 +93,8 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
+          cores: 4
+          ram-size: 4096M
           emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
           script: scripts/ci_emulator_tests.sh
       - uses: actions/upload-artifact@v4
