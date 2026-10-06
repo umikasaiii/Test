@@ -13,12 +13,17 @@ for i in $(seq 1 24); do
   [ -n "$idle" ] && [ "$idle" -ge 340 ] && break
   sleep 5
 done
-for attempt in 1 2 3; do
+# pre-warm the WebView provider (its first start on a cold emulator is what stalls the first activity of the first test for >5 s)
+adb shell am start -a android.intent.action.VIEW -d about:blank >/dev/null 2>&1
+sleep 20
+adb shell input keyevent KEYCODE_HOME >/dev/null 2>&1
+sleep 5
+for attempt in 1 2 3 4; do
   adb shell am force-stop com.google.android.googlequicksearchbox >/dev/null 2>&1
   adb shell input keyevent KEYCODE_HOME >/dev/null 2>&1
   gradle --no-daemon -Pdslink.abis=x86_64 connectedDebugAndroidTest 2>&1 | tee /tmp/gradle_android.log
   rc=${PIPESTATUS[0]}
-  if [ "$rc" = 0 ] || ! grep -q "keyDispatchingTimedOut" /tmp/gradle_android.log || [ "$attempt" = 3 ]; then break; fi
+  if [ "$rc" = 0 ] || ! grep -q "keyDispatchingTimedOut" /tmp/gradle_android.log || [ "$attempt" = 4 ]; then break; fi
   echo "=== attempt $attempt died of an emulator ANR before/while starting the first test; repeating ==="
   sleep 20
 done
