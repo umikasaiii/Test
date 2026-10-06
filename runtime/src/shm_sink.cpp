@@ -16,9 +16,11 @@ using namespace shm;
 ShmSink::~ShmSink() { close(); }
 
 bool ShmSink::open(const std::string& path, std::string& err) {
-    fd_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
+    // never O_TRUNC: a front end that still has the previous file mapped would take SIGBUS while the size is momentarily 0. The file only ever grows.
+    fd_ = ::open(path.c_str(), O_RDWR | O_CREAT, 0600);
     if (fd_ < 0) { err = "shm open: " + std::string(strerror(errno)); return false; }
-    if (ftruncate(fd_, off_t(kFileBytes)) != 0) { err = "shm ftruncate: " + std::string(strerror(errno)); close(); return false; }
+    struct stat st {};
+    if (fstat(fd_, &st) == 0 && size_t(st.st_size) < kFileBytes && ftruncate(fd_, off_t(kFileBytes)) != 0) { err = "shm ftruncate: " + std::string(strerror(errno)); ::close(fd_); fd_ = -1; return false; }
     void* m = mmap(nullptr, kFileBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
     if (m == MAP_FAILED) { err = "shm mmap: " + std::string(strerror(errno)); ::close(fd_); fd_ = -1; return false; }
     base_ = static_cast<uint8_t*>(m);

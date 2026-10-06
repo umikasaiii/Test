@@ -438,6 +438,11 @@ func discoveryAddrs() []string {
 	hintMu.Lock()
 	a = append(a, hints...)
 	hintMu.Unlock()
+	netOverride.Lock()
+	if netOverride.broadcast != "" {
+		a = append(a, netOverride.broadcast) // the subnet's directed broadcast reaches more Wi-Fi chipsets than the limited 255.255.255.255
+	}
+	netOverride.Unlock()
 	if v := os.Getenv("DSLINK_MP_DISCOVERY_ADDR"); v != "" {
 		a = append(a, strings.Split(v, ",")...)
 	}

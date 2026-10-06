@@ -66,6 +66,12 @@ func (s *Server) registerMp(mux *http.ServeMux) {
 		readBody(r, &q)
 		mpReply(w, m.Create(q.GameID, q.Mode), nil)
 	})
+	mux.HandleFunc("/api/mp/net", func(w http.ResponseWriter, r *http.Request) {
+		var q struct{ IP, Broadcast string }
+		readBody(r, &q)
+		mpSetNet(q.IP, q.Broadcast)
+		mpReply(w, nil, nil)
+	})
 	mux.HandleFunc("/api/mp/hints", func(w http.ResponseWriter, r *http.Request) { // the Android app's NSD/mDNS browse results: IPs of devices that advertise a DSLink room
 		var q struct{ Addrs []string }
 		readBody(r, &q)

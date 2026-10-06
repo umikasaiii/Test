@@ -384,6 +384,17 @@ func main() {
 		s.closeRoom()
 		os.Exit(0)
 	}()
+	if os.Getenv("DSLINK_PARENT_WATCH") == "1" { // started by the Android app: if the app process dies, never linger as an orphan holding the port and the consoles
+		ppid := os.Getppid()
+		go func() {
+			for range time.Tick(time.Second) {
+				if os.Getppid() != ppid {
+					s.closeRoom()
+					os.Exit(0)
+				}
+			}
+		}()
+	}
 	log.Printf("DSLink Cloud gateway on %s", *addr)
 	log.Fatal(srv.ListenAndServe())
 }

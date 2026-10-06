@@ -141,7 +141,32 @@ func deviceName() string {
 }
 
 // advertiseIP is what goes inside the QR (never shown): first non-loopback IPv4, or DSLINK_ADVERTISE_IP.
+// netOverride: the app (Android) tells the gateway which Wi-Fi address/broadcast to use and updates it when the network changes (a process cannot
+// enumerate interfaces on modern Android: netlink is blocked, the platform's ConnectivityManager is the source of truth).
+var netOverride struct {
+	sync.Mutex
+	ip, broadcast string
+}
+
+func mpSetNet(ip, broadcast string) {
+	netOverride.Lock()
+	defer netOverride.Unlock()
+	netOverride.ip, netOverride.broadcast = "", ""
+	if p := net.ParseIP(strings.TrimSpace(ip)); p != nil && p.To4() != nil {
+		netOverride.ip = p.String()
+	}
+	if p := net.ParseIP(strings.TrimSpace(broadcast)); p != nil && p.To4() != nil {
+		netOverride.broadcast = p.String()
+	}
+}
+
 func advertiseIP() string {
+	netOverride.Lock()
+	ov := netOverride.ip
+	netOverride.Unlock()
+	if ov != "" {
+		return ov
+	}
 	if v := os.Getenv("DSLINK_ADVERTISE_IP"); v != "" {
 		return v
 	}

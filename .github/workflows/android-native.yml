@@ -1,0 +1,60 @@
+name: android-native
+
+# DSLink Runtime + melonDS as a native Android app (arm64-v8a). Everything is built here because the NDK is not available in the authoring sandbox.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  host-tests:
+    # the platform-neutral half of the app (shared-memory front end) and the Runtime's shared-memory channel, on the desktop
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake
+      - name: Front end unit test (reader, audio ring policy, input, restart)
+        run: cmake -S android-app/native -B build/fe -G Ninja -DDSLINK_HOST_TEST=ON && cmake --build build/fe && build/fe/fe_test
+      - name: Syntax check of the Android-only native sources against stub NDK headers
+        run: |
+          sudo apt-get install -y libegl-dev libgles-dev default-jdk-headless
+          mkdir -p /tmp/stubs/android /tmp/stubs/aaudio
+          cp tests/android/stubs/android/*.h /tmp/stubs/android/ && cp tests/android/stubs/aaudio/*.h /tmp/stubs/aaudio/
+          JH=$(dirname $(dirname $(readlink -f $(which javac))))
+          for f in renderer audio_out jni_bridge; do g++ -std=c++17 -fsyntax-only -Wall -Wextra -I/tmp/stubs -I$JH/include -I$JH/include/linux -Iandroid-app/native -Iruntime/src -Idslink/include android-app/native/$f.cpp; done
+
+  apk-arm64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: cloud/gateway/go.mod }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake
+      - name: Pins
+        run: scripts/check_pins.sh
+      - name: Native build (melonDS core, Runtime, DSLink tools, JNI, gateway) for arm64-v8a
+        env: { ANDROID_NDK: "${{ env.ANDROID_NDK_LATEST_HOME }}" }
+        run: ANDROID_NDK="$ANDROID_NDK_LATEST_HOME" scripts/build_android_native.sh arm64-v8a
+      - name: JVM unit tests + debug APK
+        working-directory: android-app
+        run: gradle --no-daemon testDebugUnitTest assembleDebug
+      - name: The APK carries the code and no private content
+        run: |
+          APK=$(ls android-app/app/build/outputs/apk/debug/*.apk | head -1)
+          mkdir -p dist && cp "$APK" dist/DSLink-android-arm64-debug.apk
+          unzip -l "$APK" | tee /tmp/apk.txt
+          for l in libdslink_runtime libdslink_jni libdslink_gateway libmelondsds_libretro libdslink_cfgtool libdslink_romcheck; do grep -q "lib/arm64-v8a/$l.so" /tmp/apk.txt || { echo "missing $l"; exit 1; }; done
+          if grep -Ei '\.(nds|srl)$|bios[79]?\.bin|firmware\.bin|\.sav$' /tmp/apk.txt; then echo "private/ROM-like file inside the APK"; exit 1; fi
+          python3 scripts/check_no_private.py
+          sha256sum dist/*.apk | tee dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with: { name: DSLink-android-arm64-debug, path: dist }

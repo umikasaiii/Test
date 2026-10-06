@@ -410,3 +410,24 @@ func TestDiscoveryHintsAndNoEncoderMode(t *testing.T) {
 		t.Fatalf("a bad network still picks Hosted when an encoder exists: %s", eff)
 	}
 }
+
+func TestNetOverrideFeedsAdvertiseIPAndBroadcast(t *testing.T) {
+	mpSetNet("192.168.1.50", "192.168.1.255")
+	defer mpSetNet("", "")
+	if advertiseIP() != "192.168.1.50" {
+		t.Fatalf("advertise %s", advertiseIP())
+	}
+	found := false
+	for _, a := range discoveryAddrs() {
+		if a == "192.168.1.255" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the directed broadcast must be probed too")
+	}
+	mpSetNet("not-an-ip", "::1")
+	if advertiseIP() == "not-an-ip" {
+		t.Fatal("only IPv4 addresses are accepted")
+	}
+}
