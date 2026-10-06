@@ -24,7 +24,7 @@ constexpr uint32_t kFlagSync = 1, kFlagConfig = 2;  // BUFFER_FLAG_SYNC_FRAME / 
 // API 28 symbols, looked up at run time: the app supports Android 8 (API 26), these only improve what we report
 using GetInputFormatFn = AMediaFormat* (*)(AMediaCodec*);
 using GetNameFn = media_status_t (*)(AMediaCodec*, char**);
-using ReleaseNameFn = void (*)(char*);
+using ReleaseNameFn = void (*)(AMediaCodec*, char*);   // NDK: void AMediaCodec_releaseName(AMediaCodec*, char* name): the codec comes first
 
 class McCodec : public H264Codec {
 public:
@@ -156,7 +156,7 @@ private:
             char* n = nullptr;
             if (reinterpret_cast<GetNameFn>(sym)(c_, &n) == AMEDIA_OK && n) {
                 name_ = n;
-                if (void* rel = dlsym(RTLD_DEFAULT, "AMediaCodec_releaseName")) reinterpret_cast<ReleaseNameFn>(rel)(n);
+                if (void* rel = dlsym(RTLD_DEFAULT, "AMediaCodec_releaseName")) reinterpret_cast<ReleaseNameFn>(rel)(c_, n);
             }
         }
         hw_ = !name_.empty() && name_.rfind("c2.android.", 0) != 0 && name_.rfind("OMX.google.", 0) != 0 && name_.rfind("c2.google.", 0) != 0;
