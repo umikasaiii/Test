@@ -57,7 +57,7 @@ class LogicTest {
     }
 
     @Test fun refsFileShapeIsChecked() {
-        val h = "01".repeat(96)
+        val h = "01".repeat(128)
         fun one() = """{"top":"$h","bot":"$h"}"""
         val ok = listOf("host_main_menu", "host_find_players", "client_ds_menu", "client_dl_open", "client_discovered").joinToString(",", "{", "}") { "\"$it\":${one()}" }
         assertNull(RefsCheck.validate(ok))

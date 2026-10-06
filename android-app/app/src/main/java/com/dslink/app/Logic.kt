@@ -75,7 +75,7 @@ object DevText {
 }
 
 /**
- * The Download Play assistant's screen references (refs.json): per game, the 16x16 average-hash of the screens it must recognise (192 characters of 0/1 for each of the two screens).
+ * The Download Play assistant's screen references (refs.json): per game, the 16x16 average-hash of the screens it must recognise (256 characters of 0/1 for each of the two screens).
  * They are derived from the user's own game and stay private like the system files; only the shape is checked here.
  */
 object RefsCheck {
@@ -87,7 +87,7 @@ object RefsCheck {
         val it = o.keys()
         while (it.hasNext()) {
             val k = it.next(); val v = o.optJSONObject(k) ?: return "Riferimento non valido ($k)."
-            for (side in listOf("top", "bot")) { val h = v.optString(side); if (h.length != 192 || h.any { c -> c != '0' && c != '1' }) return "Riferimento non valido ($k)." }
+            for (side in listOf("top", "bot")) { val h = v.optString(side); if (h.length != 256 || h.any { c -> c != '0' && c != '1' }) return "Riferimento non valido ($k)." }
         }
         return null
     }
