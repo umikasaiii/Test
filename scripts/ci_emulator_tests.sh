@@ -31,6 +31,9 @@ if [ "$rc" != 0 ]; then   # an ANR kills the instrumentation (keyDispatchingTime
   adb root >/dev/null 2>&1; sleep 2
   for f in $(adb shell ls /data/anr 2>/dev/null | tr -d '\r' | head -3); do echo "--- /data/anr/$f (main thread) ---"; adb shell "grep -m1 -B2 -A25 '\"main\" prio' /data/anr/$f" 2>/dev/null | cut -c1-300; done
 fi
+echo "=================== native crashes (crash buffer / DEBUG / libc) ==================="
+adb logcat -d -b crash 2>/dev/null | cut -c1-300 | tail -60
+adb logcat -d -b all 2>/dev/null | grep -E "Fatal signal|F libc|F DEBUG|DEBUG +: +(#[0-9]+|signal|Abort message)|Abort message|CodecException|MediaCodec.*(error|fail)|c2.android.*(error|fail)" | cut -c1-300 | tail -40
 echo "=================== SUMMARY ==================="
 grep -E "FAILED|PASSED|Starting [0-9]+ tests|Tests on .* (failed|passed)" /tmp/gradle_android.log | sed 's/\x1b\[[0-9;]*m//g'
 grep -E "dslink-test: java.lang.AssertionError" /tmp/logcat_android.txt | cut -c1-3000
