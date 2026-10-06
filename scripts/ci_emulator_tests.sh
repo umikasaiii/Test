@@ -2,8 +2,17 @@
 # Runs the instrumented tests and ALWAYS prints what the app/gateway/Runtime logged (the test APK and the app are uninstalled afterwards).
 cd "$(dirname "$0")/../android-app"
 adb logcat -c
-gradle --no-daemon -Pdslink.abis=x86_64 connectedDebugAndroidTest 2>&1 | tee /tmp/gradle_android.log
-rc=${PIPESTATUS[0]}
+# A freshly booted emulator can be busy with Google-app first-run work and ANR the very first activity ("keyDispatchingTimedOut" kills the instrumentation before any test
+# body ran): that is the emulator, not the app, so such a run is repeated once. A real test failure (no ANR) is never retried.
+for attempt in 1 2; do
+  adb shell am force-stop com.google.android.googlequicksearchbox >/dev/null 2>&1
+  adb shell input keyevent KEYCODE_HOME >/dev/null 2>&1
+  gradle --no-daemon -Pdslink.abis=x86_64 connectedDebugAndroidTest 2>&1 | tee /tmp/gradle_android.log
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" = 0 ] || ! grep -q "keyDispatchingTimedOut" /tmp/gradle_android.log || [ "$attempt" = 2 ]; then break; fi
+  echo "=== attempt $attempt died of an emulator ANR before/while starting the first test; repeating once ==="
+  sleep 20
+done
 adb logcat -d -s dslink-test:V dslink-stack:V dslink-render:V dslink-audio:V dslink-jni:V dslink-nsd:V AndroidRuntime:E > /tmp/logcat_android.txt
 echo "=================== logcat (dslink tags, last 120) ==================="
 tail -120 /tmp/logcat_android.txt
