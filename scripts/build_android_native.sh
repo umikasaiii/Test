@@ -29,7 +29,7 @@ cp "$CORE" "$OUT/libmelondsds_libretro.so"
 echo "== Runtime, DSLink tools, JNI ($ABI)"
 cmake -S "$ROOT/android-app/native" -B "$ROOT/build/android-native-$ABI" -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" -DANDROID_ABI="$ABI" -DANDROID_PLATFORM=$PLATFORM -DANDROID_STL=c++_static \
-  -DLIBRETRO_INCLUDE="$ROOT/upstream/retroarch/libretro-common/include"
+  -DLIBRETRO_INCLUDE="$ROOT/upstream/retroarch/libretro-common/include" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build "$ROOT/build/android-native-$ABI" --parallel --target dslink-runtime dslink_cfgtool dslink_romcheck dslink_jni
 B="$ROOT/build/android-native-$ABI"
 cp "$B/runtime_build/dslink-runtime" "$OUT/libdslink_runtime.so"

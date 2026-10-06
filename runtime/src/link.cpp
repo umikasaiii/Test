@@ -32,6 +32,7 @@ bool Link::listen(const std::string& path, std::string& err) {
 }
 
 void Link::send(uint8_t type, uint8_t flags, const void* a, size_t an, const void* b, size_t bn) {
+    std::lock_guard<std::recursive_mutex> lk(sendMu_);
     if (peer_ < 0) return;
     std::vector<uint8_t> f(8 + an + bn);
     uint32_t len = uint32_t(an + bn);
@@ -55,6 +56,7 @@ void Link::send(uint8_t type, uint8_t flags, const void* a, size_t an, const voi
 }
 
 void Link::poll(const std::function<void(uint8_t, const uint8_t*, size_t)>& onCmd) {
+    std::lock_guard<std::recursive_mutex> lk(sendMu_);
     if (lfd_ >= 0) {
         int fd = ::accept(lfd_, nullptr, nullptr);
         if (fd >= 0) {

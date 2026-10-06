@@ -46,6 +46,7 @@ type Server struct {
 	ice       []webrtc.ICEServer
 	httpPort  int
 	mp        *MpSession
+	webg      webGuests // browsers on other devices (an iPhone) that play through this gateway: one guest session each, see mpweb.go
 	udp       *mpUDP
 	relayOnly bool // TURN-relay-only ICE policy (Cloudflare Containers: no inbound UDP)
 	mu        sync.Mutex
@@ -322,6 +323,7 @@ func main() {
 		ShmPath:       os.Getenv("DSLINK_SHM_PATH"),
 		NoEncoder:     os.Getenv("DSLINK_NO_ENCODER") == "1",
 		UILoopback:    os.Getenv("DSLINK_UI_LOOPBACK_ONLY") == "1",
+		AdvertiseLAN:  os.Getenv("DSLINK_WEBRTC_ADVERTISE") == "1",
 		TestHooks:     os.Getenv("DSLINK_TEST_HOOKS") == "1",
 	}
 	os.MkdirAll(env.WorkDir, 0o755)
@@ -376,7 +378,18 @@ func main() {
 	}
 	mux.HandleFunc("/ws", s.ws)
 	mux.Handle("/controls/", http.StripPrefix("/controls/", http.FileServer(http.Dir(*controlsDir))))
-	mux.Handle("/", http.FileServer(http.Dir(*web)))
+	files := http.FileServer(http.Dir(*web))
+	mux.HandleFunc("/guest/", func(w http.ResponseWriter, r *http.Request) { // the web page of a browser guest (iPhone Safari / Home-Screen app): the multiplayer page in guest mode
+		if r.URL.Path == "/guest/" {
+			http.ServeFile(w, r, filepath.Join(*web, "mp", "index.html"))
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("/guest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/guest/?"+r.URL.RawQuery, http.StatusFound)
+	})
+	mux.Handle("/", files)
 	srv := &http.Server{Addr: *addr, Handler: s.loopbackGuard(mux)}
 	go func() {
 		c := make(chan os.Signal, 1)

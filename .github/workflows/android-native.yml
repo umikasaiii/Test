@@ -17,12 +17,17 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ninja-build cmake
       - name: Front end unit test (reader, audio ring policy, input, restart)
         run: cmake -S android-app/native -B build/fe -G Ninja -DDSLINK_HOST_TEST=ON && cmake --build build/fe && build/fe/fe_test
+      - name: Stream encoder unit test (colour conversion into codec layouts, 48 kHz resampler, Annex-B, keyframes, SPS/PPS, drops, libopus from the pinned submodule)
+        run: cmake -S runtime -B build/enc -G Ninja -DDSLINK_WITH_FFMPEG=OFF -DDSLINK_ENC_TEST=ON && cmake --build build/enc --target enc_test && build/enc/enc_test
       - name: Syntax check of the Android-only native sources against stub NDK headers
         run: |
           sudo apt-get install -y libegl-dev libgles-dev default-jdk-headless
           mkdir -p /tmp/stubs/android /tmp/stubs/aaudio
           cp tests/android/stubs/android/*.h /tmp/stubs/android/ && cp tests/android/stubs/aaudio/*.h /tmp/stubs/aaudio/
           JH=$(dirname $(dirname $(readlink -f $(which javac))))
+          mkdir -p /tmp/stubs/media && cp tests/android/stubs/media/*.h /tmp/stubs/media/
+          g++ -std=c++17 -fsyntax-only -Wall -Wextra -D__ANDROID__ -DDSLINK_WITH_MEDIACODEC=1 -I/tmp/stubs -Iruntime/src runtime/src/mediacodec_codec.cpp runtime/src/mediacodec_selftest.cpp
+          for f in av_pipeline main; do g++ -std=c++17 -fsyntax-only -Wall -Wextra -DDSLINK_WITH_MEDIACODEC=1 -Iupstream/opus/include -Iruntime/src -Iupstream/retroarch/libretro-common/include runtime/src/$f.cpp; done
           for f in renderer audio_out jni_bridge; do g++ -std=c++17 -fsyntax-only -Wall -Wextra -I/tmp/stubs -I$JH/include -I$JH/include/linux -Iandroid-app/native -Iruntime/src -Idslink/include android-app/native/$f.cpp; done
 
   apk-arm64:
@@ -78,7 +83,7 @@ jobs:
       - name: Homebrew test ROM (own code) for the instrumented test
         run: |
           mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
-          mkdir -p android-app/app/src/androidTest/assets && cp build/rom/dslink_test_1.nds android-app/app/src/androidTest/assets/
+          mkdir -p android-app/app/src/androidTest/assets && cp build/rom/dslink_test_1.nds build/rom/dslink_test_2.nds android-app/app/src/androidTest/assets/
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

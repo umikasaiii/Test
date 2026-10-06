@@ -16,7 +16,7 @@ import java.io.File
 class DevMonitor(private val ctx: Context, private val tv: TextView) {
     private val h = Handler(Looper.getMainLooper())
     private var on = false
-    private var pids = emptyMap<String, Int>()
+    private var pids = emptyMap<String, Int>()    // "gateway" -> pid, "runtime0", "runtime1" -> pids (Hosted runs two consoles)
     private var pidsAt = 0L
     private var lastWall = 0L
     private val lastTicks = HashMap<String, Long>()
@@ -37,7 +37,7 @@ class DevMonitor(private val ctx: Context, private val tv: TextView) {
         File("/proc").listFiles()?.forEach { f ->
             val pid = f.name.toIntOrNull() ?: return@forEach
             val cmd = try { File(f, "cmdline").readText() } catch (_: Exception) { return@forEach }
-            if (cmd.contains("libdslink_runtime")) m["runtime"] = pid
+            if (cmd.contains("libdslink_runtime")) m["runtime${m.keys.count { it.startsWith("runtime") }}"] = pid
             if (cmd.contains("libdslink_gateway")) m["gateway"] = pid
         }
         pids = m
@@ -50,30 +50,45 @@ class DevMonitor(private val ctx: Context, private val tv: TextView) {
         if (now - pidsAt > 5000) { scan(); pidsAt = now }
         val wall = now - lastWall
         val me = Process.myPid()
-        val set = mapOf("app" to me, "runtime" to (pids["runtime"] ?: -1), "gateway" to (pids["gateway"] ?: -1))
+        val set = LinkedHashMap<String, Int>().apply { put("app", me); putAll(pids) }
+        var rt = 0.0
         for ((k, pid) in set) {
             val t = if (pid > 0) ticks(pid) else null
             if (t != null && lastTicks[k] != null && lastWall > 0 && wall > 0) {
                 val pct = (t - lastTicks[k]!!) * 10.0 / wall * 100.0
-                if (k == "app") cpuApp = pct else if (k == "runtime") cpuRt = pct
+                if (k == "app") cpuApp = pct else if (k.startsWith("runtime")) rt += pct
             }
             if (t != null) lastTicks[k] = t
         }
+        if (lastWall > 0) cpuRt = rt   // all consoles together
         lastWall = now
         val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val pss = am.getProcessMemoryInfo(intArrayOf(me)).firstOrNull()?.totalPss ?: 0
-        val rtRss = pids["runtime"]?.let { try { ProcStat.rssKb(File("/proc/$it/status").readText()) } catch (_: Exception) { null } } ?: 0L
+        val rtRss = pids.filterKeys { it.startsWith("runtime") }.values.sumOf { (try { ProcStat.rssKb(File("/proc/$it/status").readText()) } catch (_: Exception) { null }) ?: 0L }
         val bp = batteryPct()
         val battery = "battery $bp%" + if (batteryStart >= 0) " (${bp - batteryStart} since start)" else ""
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
         val thermal = if (android.os.Build.VERSION.SDK_INT >= 29) "thermal " + thermalName(pm.currentThermalStatus) else "thermal n/a"
-        val net = netLine()
-        tv.text = DevText.format(Native.nativeMetrics(), cpuApp, cpuRt, pss / 1024.0, rtRss / 1024.0, battery + " " + batteryTemp(), thermal, net)
+        val dev = Gw.state(true)?.optJSONObject("dev")
+        tv.text = DevText.format(Native.nativeMetrics(), cpuApp, cpuRt, pss / 1024.0, rtRss / 1024.0, battery + " " + batteryTemp(), thermal, netLine(dev), hostedStats(dev))
     }
 
-    private fun netLine(): String {
-        val d = Gw.state(true)?.optJSONObject("dev")?.optJSONObject("net") ?: return "net: -"
+    private fun netLine(dev: org.json.JSONObject?): String {
+        val d = dev?.optJSONObject("net") ?: return "net: -"
         return "net RTT %.1f ms  jitter %.1f ms  loss %.1f%%  %s".format(d.optDouble("rttMs"), d.optDouble("jitterMs"), d.optDouble("lossPct"), d.optString("class"))
+    }
+
+    /** the streamed second console of a Hosted game (slot 2 of the gateway's room) with its encoder and the guest's WebRTC link */
+    private fun hostedStats(dev: org.json.JSONObject?): DevText.Hosted? {
+        val slots = dev?.optJSONArray("slots") ?: return null
+        for (i in 0 until slots.length()) {
+            val s = slots.optJSONObject(i) ?: continue
+            if (s.optInt("id") != 2) continue
+            val e = s.optJSONObject("enc")
+            return DevText.Hosted(s.optDouble("fps"), e?.optString("codec") ?: "", e?.optBoolean("hardware") ?: false, e?.optDouble("fps") ?: 0.0, e?.optDouble("latMs") ?: 0.0,
+                e?.optDouble("latMaxMs") ?: 0.0, e?.optDouble("kbps") ?: 0.0, e?.optLong("dropped") ?: 0L, s.optDouble("peer_rtt_ms", 0.0), s.optBoolean("peer_connected"))
+        }
+        return null
     }
 
     private fun batteryIntent(): Intent? = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

@@ -60,6 +60,7 @@ class EndToEndTest {
 
     @Before fun setUp() {
         File(ctx.filesDir, "enable_test_hooks").writeText("1")   // before the gateway starts
+        InstrumentationRegistry.getInstrumentation().context.assets.open("dslink_test_2.nds").use { i -> File(ctx.filesDir, "test_guest.nds").outputStream().use { o -> i.copyTo(o) } }   // the second console's homebrew cartridge (Hosted)
         scenario = ActivityScenario.launch(MainActivity::class.java)
         assertTrue("gateway answers on loopback", Stack.waitReady(40000))
     }
@@ -69,6 +70,7 @@ class EndToEndTest {
         Stack.stop()          // synchronous: the next test must not find the previous gateway still answering
         scenario.close()
         File(ctx.filesDir, "enable_test_hooks").delete()
+        File(ctx.filesDir, "test_guest.nds").delete()
     }
 
     // ---- helpers
@@ -199,13 +201,97 @@ class EndToEndTest {
         dir.deleteRecursively()
     }
 
+    private fun runtimeProcesses() = File("/proc").listFiles()!!.count { p -> p.name.toIntOrNull() != null && runCatching { File(p, "cmdline").readText().contains("libdslink_runtime") }.getOrDefault(false) }
+    private fun jsJson(script: String): JSONObject {
+        val raw = js(script)   // evaluateJavascript hands back a JSON-encoded string
+        val v = org.json.JSONTokener(raw).nextValue()
+        return runCatching { JSONObject(if (v is String) v else raw) }.getOrDefault(JSONObject())
+    }
+
+    /** The stream encoder on THIS device: MediaCodec H.264 (hardware on a phone, the software codec on the emulator) -> access units -> decoded again and compared with the synthetic picture. */
+    @Test fun streamEncoderSelfTestPassesOnThisDevice() {
+        val j = JSONObject(Stack.encoderSelfTest(ctx))
+        android.util.Log.i("dslink-test", "encoder self-test: $j")
+        assertTrue("encoder self-test: $j", j.optBoolean("pass"))
+        assertTrue("a codec name is reported", j.optString("codec").isNotEmpty())
+        assertTrue("access units came out: $j", j.optInt("out") >= 120)
+        assertTrue("the first keyframe carries SPS+PPS+IDR: $j", j.optBoolean("firstKeyframeHasSpsPpsIdr"))
+        assertTrue("decoded picture matches the input (or the vendor layout is skipped): $j", j.optString("decode") in listOf("ok", "skipped_vendor_format"))
+    }
+
+    /**
+     * HOSTED, the iPhone case: this phone runs BOTH consoles; a browser guest (here: the app's own WebView standing in for Safari) joins through the web guest API, receives the
+     * second console as H.264 (MediaCodec) + Opus over WebRTC and sends buttons back; when the browser goes away the session ends cleanly and both consoles stop.
+     */
+    @Test fun hostedBrowserGuestReceivesTheSecondConsoleFromMediaCodecOverWebRtc() {
+        val id = uploadHomebrew()
+        assertTrue(Gw.post("/api/mp/create", JSONObject().put("gameId", id)))
+        val code = Gw.state()!!.optString("code")
+        assertEquals(6, code.length)
+        val sid = "ab12cd34".repeat(4)   // the browser's own handle
+        assertTrue("web guest joins by code", Gw.post("/g/$sid/api/mp/join", JSONObject().put("code", code)))
+        assertTrue("host sees the browser guest", until(20000) { Gw.state()!!.optString("state") in listOf("CONNECTED", "NETWORK_CHECK", "READY") })
+        assertTrue(Gw.post("/g/$sid/api/mp/ready", JSONObject().put("ready", true)))
+        assertTrue("host READY", until(20000) { Gw.state()!!.optBoolean("canStart") })
+        assertTrue(Gw.post("/api/mp/start", JSONObject()))
+        assertTrue("host IN_GAME: ${Gw.state()}", until(90000) { state() == "IN_GAME" })
+        assertEquals("a browser guest always gets Hosted", "hosted", Gw.state()!!.getJSONObject("mode").optString("effective"))
+        assertTrue("two consoles run on this phone (${runtimeProcesses()})", until(10000) { runtimeProcesses() == 2 })
+
+        // the browser: signalling over /ws, media over WebRTC
+        js("""(() => { const g = window.__g = { v: 0, vb: 0, a: 0, fd: 0, vw: 0, st: 'init', err: '', open: false };
+          fetch('/g/$sid/api/mp/state').then((r) => r.json()).then((s) => { const ig = s.ingame; if (!ig) { g.err = 'no ingame'; return; }
+            const pc = new RTCPeerConnection({ iceServers: [] }); g.pc = pc; g.dc = pc.createDataChannel('input', { ordered: true }); pc.createDataChannel('move', { ordered: false, maxRetransmits: 0 });
+            pc.addTransceiver('video', { direction: 'recvonly' }); pc.addTransceiver('audio', { direction: 'recvonly' });
+            const vid = document.createElement('video'); vid.muted = true; vid.autoplay = true; vid.playsInline = true; vid.style.display = 'none'; document.body.appendChild(vid); g.vid = vid;
+            pc.ontrack = (e) => { if (!vid.srcObject) vid.srcObject = new MediaStream(); vid.srcObject.addTrack(e.track); vid.play().catch(() => {}); };
+            const ws = new WebSocket('ws://' + location.host + '/ws?code=' + ig.code + '&player=' + ig.player + '&token=' + ig.token); g.ws = ws;
+            ws.onmessage = async (m) => { const x = JSON.parse(m.data); if (x.type === 'answer') await pc.setRemoteDescription({ type: 'answer', sdp: x.sdp }); else if (x.type === 'candidate' && x.candidate) await pc.addIceCandidate(x.candidate); };
+            pc.onicecandidate = (e) => { if (e.candidate && ws.readyState === 1) ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate.toJSON() })); };
+            ws.onopen = async () => { g.open = true; const o = await pc.createOffer(); await pc.setLocalDescription(o); ws.send(JSON.stringify({ type: 'offer', sdp: o.sdp })); };
+            ws.onerror = () => { g.err = 'ws error'; };
+            g.poll = setInterval(() => { fetch('/g/$sid/api/mp/state').catch(() => {}); }, 600);   // what the guest page does while it is open: the host hears the browser through it
+            g.timer = setInterval(async () => { g.st = pc.connectionState; const st = await pc.getStats(); st.forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'video') { g.v = r.packetsReceived; g.vb = r.bytesReceived; g.fd = r.framesDecoded || 0; } if (r.type === 'inbound-rtp' && r.kind === 'audio') g.a = r.packetsReceived; }); g.vw = vid.videoWidth; }, 500);
+          }).catch((e) => { g.err = String(e); }); return 'started'; })()""")
+        val q = "JSON.stringify({st:__g.st,v:__g.v,a:__g.a,vb:__g.vb,fd:__g.fd,vw:__g.vw,open:__g.open,err:__g.err})"
+        var last = JSONObject()
+        val flowing = until(60000, 500) { last = jsJson(q); last.optString("st") == "connected" && last.optInt("v") > 60 && last.optInt("a") > 30 }
+        assertTrue("WebRTC connects and video/audio packets arrive: $last", flowing)
+        android.util.Log.i("dslink-test", "browser guest stats: $last")
+        assertTrue("video bytes flow (H.264 from MediaCodec): $last", last.optInt("vb") > 20000)
+        if (last.optInt("fd") == 0) android.util.Log.w("dslink-test", "this WebView decoded no frame yet (packets arrived): $last")
+
+        // the second console reports its encoder; the browser's buttons reach console 2 only
+        val dev = Gw.state(true)!!.getJSONObject("dev").getJSONArray("slots")
+        var p2 = JSONObject()
+        for (i in 0 until dev.length()) { val sl = dev.getJSONObject(i); if (sl.optInt("id") == 2) p2 = sl }
+        val enc = p2.optJSONObject("enc")
+        android.util.Log.i("dslink-test", "console 2 encoder: $enc  fps ${p2.optDouble("fps")}")
+        assertNotNull("console 2 reports its encoder", enc)
+        assertTrue("encoder produced pictures: $enc", enc!!.optInt("out") > 60 && enc.optString("codec").isNotEmpty())
+        js("(() => { __g.dc.send(JSON.stringify({t:'btn',k:'a',d:true})); __g.dc.send(JSON.stringify({t:'btn',k:'a',d:false})); return 'sent'; })()")
+        assertTrue("the browser's buttons reach console 2", until(10000) {
+            val sl = Gw.state(true)!!.getJSONObject("dev").getJSONArray("slots")
+            var n2 = 0; var n1 = -1
+            for (i in 0 until sl.length()) { val o = sl.getJSONObject(i); if (o.optInt("id") == 2) n2 = o.optInt("input_events") else if (o.optInt("id") == 1) n1 = o.optInt("input_events") }
+            n2 >= 2 && n1 == 0
+        })
+
+        // the browser goes away for good: the host is told, both consoles and the stream are released
+        js("(() => { clearInterval(__g.timer); clearInterval(__g.poll); __g.ws.close(); __g.pc.close(); return 'closed'; })()")
+        assertTrue("host: peer lost -> ENDED ('Connessione con il giocatore persa.')", until(60000, 500) {
+            val s = Gw.state(); s != null && s.optString("state") == "ENDED" && s.optJSONObject("error")?.optString("message") == "Connessione con il giocatore persa."
+        })
+        assertTrue("both consoles stop", until(20000) { runtimeProcesses() == 0 })
+    }
+
     @Test fun discoveryHintsAndNetworkReachTheGateway() {
         assertTrue(Gw.post("/api/mp/hints", JSONObject().put("addrs", org.json.JSONArray(listOf("192.168.1.77")))))
         assertTrue(Gw.post("/api/mp/net", JSONObject().put("ip", "192.168.1.50").put("broadcast", "192.168.1.255")))
         val id = uploadHomebrew()
         assertTrue(Gw.post("/api/mp/create", JSONObject().put("gameId", id)))
         val s = Gw.state()!!
-        assertTrue("QR payload carries the platform's Wi-Fi address, never shown to the user", s.optString("qr").contains("h=192.168.1.50:${Stack.HTTP_PORT}"))
+        assertTrue("QR payload carries the platform's Wi-Fi address, never shown to the user", s.optString("qr").contains("http://192.168.1.50:${Stack.HTTP_PORT}/guest/?c="))
         assertEquals("host lobby open", "WAITING_FOR_PEER", s.optString("state"))
     }
 }

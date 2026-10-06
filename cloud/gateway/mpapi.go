@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/png"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ func (s *Server) initMp(addr string) {
 	}
 	s.mp = newMpSession(s)
 	s.udp = startMpUDP(s.mp.hostAnnounce)
+	go s.webGuestJanitor()
 }
 
 func (s *Server) udpPort() int {
@@ -143,6 +145,7 @@ func (s *Server) registerMp(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "image/png")
 		png.Encode(w, img)
 	})
+	mux.HandleFunc("/g/", s.handleWebGuest) // browser guests (iPhone): their own guest sessions, see mpweb.go
 	// peer protocol
 	mux.HandleFunc("/api/lobby/join", m.handleJoin)
 	mux.HandleFunc("/api/lobby/status", m.handleLobbyStatus)
@@ -153,18 +156,32 @@ func (s *Server) registerMp(mux *http.ServeMux) {
 }
 
 // loopbackGuard: on the Android app the whole UI/control API (library, create, join, start, dev menu, static files) must only answer the app itself.
-// What other devices may reach: the peer lobby protocol (/api/lobby/*, authenticated by code/secret/token) and the hosted stream signalling (/ws, token).
+// guestStatic: the web files a browser guest needs (its page, the shared scripts and styles, the touch controls, icons). The host's own UI pages stay private.
+func guestStatic(p string) bool {
+	for _, pre := range []string{"/guest/", "/mp/vendor/", "/controls/", "/icons/"} {
+		if strings.HasPrefix(p, pre) {
+			return true
+		}
+	}
+	return p == "/mp/mp.js" || p == "/mp/mp.css"
+}
+
+// What other devices may reach: the peer lobby protocol (/api/lobby/*, authenticated by code/secret/token), the hosted stream signalling (/ws, token),
+// a browser guest's own session (/g/<id>/..., see mpweb.go) and the static web files (the guest page, the touch controls: nothing private in them).
 func (s *Server) loopbackGuard(next http.Handler) http.Handler {
 	if !s.env.UILoopback {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/lobby/") || r.URL.Path == "/ws" {
+		p := r.URL.Path
+		if strings.HasPrefix(p, "/api/lobby/") || p == "/ws" || p == "/api/config" || strings.HasPrefix(p, "/g/") ||
+			((r.Method == http.MethodGet || r.Method == http.MethodHead) && guestStatic(p)) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
 		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			log.Printf("refused %s %s from %s (not the app itself)", r.Method, r.URL.Path, r.RemoteAddr)
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}

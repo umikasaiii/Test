@@ -14,6 +14,9 @@
 #include <thread>
 
 #include "av_pipeline.hpp"
+#ifdef DSLINK_WITH_MEDIACODEC
+#include "mc_encoder.hpp"
+#endif
 #include "link.hpp"
 #include "libretro_host.hpp"
 #include "mp_bridge.hpp"
@@ -74,6 +77,14 @@ void writePpm(const std::string& path, const std::vector<uint8_t>& rgb, unsigned
 
 int main(int argc, char** argv) {
     Args args = parseArgs(argc, argv);
+    if (args.has("encoder-selftest")) {  // what the stream encoder does on this device (no game, no network): see mediacodec_selftest.cpp
+#ifdef DSLINK_WITH_MEDIACODEC
+        return runEncoderSelfTest(unsigned(args.geti("out-w", 256)), unsigned(args.geti("out-h", 384)));
+#else
+        std::cout << "{\"pass\":false,\"error\":\"this Runtime has no MediaCodec encoder\"}\n";
+        return 2;
+#endif
+    }
     if (!args.has("core")) {
         std::cerr << "usage: dslink-runtime --core core.so [--content rom.nds] --system DIR --save DIR [--options FILE] [--username NAME]\n"
                      "       [--link SOCK] [--av on] [--mp-role host|client --mp-path SOCK] [--frames N] [--name LABEL] [--log FILE]\n";
@@ -133,8 +144,14 @@ int main(int argc, char** argv) {
 
     if (avOn) {
         AvConfig ac;
-        ac.outW = unsigned(args.geti("out-w", 512));
-        ac.outH = unsigned(args.geti("out-h", 768));
+#ifdef DSLINK_WITH_MEDIACODEC
+        const int defW = 256, defH = 384;  // the Android stream is the DS picture as it is (no upscale: less to convert and encode); the gateway can ask for 2x with --out-w/--out-h
+#else
+        const int defW = 512, defH = 768;
+#endif
+        ac.outW = unsigned(args.geti("out-w", defW));
+        ac.outH = unsigned(args.geti("out-h", defH));
+        ac.videoKbps = args.geti("video-kbps", ac.videoKbps);
         ac.vp8 = args.get("codec", "h264") == "vp8";
         if (!av.open(ac, host.av.timing.sample_rate, err)) { log("FATAL: " + err); return 5; }
         av.onVideo = [&](const uint8_t* d, size_t n, bool key, uint64_t pts) { link.send(L_VIDEO, key ? 1 : 0, &pts, 8, d, n); };
@@ -308,7 +325,7 @@ int main(int argc, char** argv) {
                << ",\"session_mode\":\"" << dsrt::name(plan.mode) << "\",\"radio\":\"" << mp.transportName() << "\",\"stream\":\"" << dsrt::name(plan.stream) << "\""
                << (mp.lan() ? ",\"lan\":" + mp.lan()->json() : std::string()) << (lanUri.empty() ? std::string() : ",\"lan_port\":" + std::to_string(mp.lan() ? mp.lan()->port() : 0) + ",\"lan_code\":\"" + lc.code + "\",\"lan_join_uri\":\"" + lanUri + "\"")
                << ",\"mp_ended\":" << (mpEnded ? "\"" + mpEndedReason + "\"" : std::string("null"))
-               << ",\"video_frames\":" << av.videoFrames() << ",\"video_bytes\":" << av.videoBytes() << ",\"audio_packets\":" << av.audioPackets()
+               << ",\"enc\":" << av.encoderJson() << ",\"video_frames\":" << av.videoFrames() << ",\"video_bytes\":" << av.videoBytes() << ",\"audio_packets\":" << av.audioPackets()
                << ",\"env_unhandled\":" << host.metrics.envUnhandled.load() << "," << dl.json() << "}";
             std::string s = js.str();
             link.send(L_STATUS, 0, s.data(), s.size());

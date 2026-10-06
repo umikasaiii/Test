@@ -58,7 +58,7 @@ try {
   await pa.click('#btnMakeRoom'); await pa.waitForFunction(() => document.body.dataset.screen === 'lobby', null, { timeout: 10000 });
   const code = await text(pa, '#lobbyCode');
   check('host lobby: 6-digit code, HOST ready, PLAYER 2 waiting', /^\d{6}$/.test(code) && (await text(pa, '#players li:nth-child(2)')).includes('In attesa'), code);
-  check('QR on screen decodes (jsQR) to the join payload; the payload carries no private data', await pa.evaluate(async () => { const s = await (await fetch('/api/mp/state')).json(); const c = document.getElementById('qr'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height); const r = window.jsQR(d.data, c.width, c.height); return !!r && r.data === s.qr && s.qr.startsWith('dslink://join?') && !/bios|\.nds|firmware/i.test(s.qr); }));
+  check('QR on screen decodes (jsQR) to the join payload; the payload carries no private data', await pa.evaluate(async () => { const s = await (await fetch('/api/mp/state')).json(); const c = document.getElementById('qr'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height); const r = window.jsQR(d.data, c.width, c.height); return !!r && r.data === s.qr && s.qr.includes('/guest/?c=') && !/bios|\.nds|firmware/i.test(s.qr); }));
   await shot(pa, '03-lobby-host');
   await pb.click('#btnJoin'); await pb.waitForFunction(() => document.body.dataset.screen === 'join');
   const nearby = await until(async () => (await pb.locator('#nearbyList li').count()) === 1 && (await text(pb, '#nearbyList li')), 12000);

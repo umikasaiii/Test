@@ -139,6 +139,7 @@ type joinReq struct {
 	Proof string `json:"proof"`
 	Via   string `json:"via"` // code | qr | nearby
 	Dev   string `json:"dev"` // this device's own random id: the same device asking twice is idempotent, anyone else finds the room full
+	Web   bool   `json:"web"` // the guest is a browser on another device playing through the host's gateway (Hosted only)
 }
 
 func (m *MpSession) hostAnnounce() (mpAnnounce, bool) {
@@ -207,7 +208,7 @@ func (m *MpSession) handleJoin(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, 409, map[string]string{"error": "room_full"})
 		return
 	}
-	g := &MpPlayer{Name: q.Name, Role: "guest", Connected: true, token: randHexN(16), lastSeen: now, addr: addr, dev: q.Dev}
+	g := &MpPlayer{Name: q.Name, Role: "guest", Connected: true, token: randHexN(16), lastSeen: now, addr: addr, dev: q.Dev, web: q.Web}
 	if q.Via == "nearby" {
 		g.Pending, g.Connected = true, false
 	}
@@ -464,18 +465,23 @@ func (m *MpSession) Join(req JoinRequest) *MpErr {
 		m.mu.Unlock()
 		return mpErr("busy")
 	}
-	m.srv.mu.Lock()
-	busy := m.srv.room != nil
-	m.srv.mu.Unlock()
-	if busy {
-		m.mu.Unlock()
-		return mpErr("busy")
+	if !m.web { // a web guest owns no console: the host's room in the same gateway is not "busy" for it
+		m.srv.mu.Lock()
+		busy := m.srv.room != nil
+		m.srv.mu.Unlock()
+		if busy {
+			m.mu.Unlock()
+			return mpErr("busy")
+		}
 	}
 	m.resetLocked()
 	m.role = "guest"
 	m.go_(MpJoining)
 	m.step = "Cerco la partita…"
 	name := deviceName()
+	if m.web {
+		name = webDeviceName(m.webUA)
+	}
 	m.mu.Unlock()
 
 	fail := func(code string) *MpErr { // a failed join returns to the Join screen with the message inline (no dead-end error screen)
@@ -488,41 +494,49 @@ func (m *MpSession) Join(req JoinRequest) *MpErr {
 
 	var code, secret, hostAddr, room, via string
 	hostUDP := 0
-	switch {
-	case req.Payload != "":
-		c, s, h, r, u, ok := parseJoinPayload(req.Payload)
-		if !ok {
+	if m.web { // the host is this very gateway: no discovery, the code (or the QR's secret) is still what proves the guest knows the room
+		c, sct, ha, rm, vi, hu, e := m.resolveLocalHost(req)
+		if e != nil {
+			return fail(e.Code)
+		}
+		code, secret, hostAddr, room, via, hostUDP = c, sct, ha, rm, vi, hu
+	} else {
+		switch {
+		case req.Payload != "":
+			c, s, h, r, u, ok := parseJoinPayload(req.Payload)
+			if !ok {
+				return fail("bad_code")
+			}
+			code, secret, hostAddr, room, via, hostUDP = c, s, h, r, "qr", u
+		case req.Room != "":
+			via = "nearby"
+			for _, n := range m.Nearby() {
+				if n["room"] == req.Room {
+					hostAddr, room = n["addr"].(string), req.Room
+					hostUDP, _ = n["udp"].(int)
+				}
+			}
+			if hostAddr == "" {
+				return fail("peer_not_found")
+			}
+		case req.Addr != "": // developer menu: manual address + code
+			via, code, hostAddr = "code", req.Code, req.Addr
+		case len(req.Code) == 6:
+			via, code = "code", req.Code
+			found := mpDiscover(discoveryAddrs(), mpPort(), codeTag(code), 2000*time.Millisecond)
+			if len(found) == 0 {
+				if len(mpDiscover(discoveryAddrs(), mpPort(), "", 1000*time.Millisecond)) > 0 {
+					return fail("bad_code") // rooms exist here, none with this code
+				}
+				return fail("peer_not_found")
+			}
+			hostAddr, room, hostUDP = net.JoinHostPort(found[0].Addr, fmt.Sprint(found[0].HTTP)), found[0].Room, found[0].UDP
+		default:
 			return fail("bad_code")
 		}
-		code, secret, hostAddr, room, via, hostUDP = c, s, h, r, "qr", u
-	case req.Room != "":
-		via = "nearby"
-		for _, n := range m.Nearby() {
-			if n["room"] == req.Room {
-				hostAddr, room = n["addr"].(string), req.Room
-				hostUDP, _ = n["udp"].(int)
-			}
-		}
-		if hostAddr == "" {
-			return fail("peer_not_found")
-		}
-	case req.Addr != "": // developer menu: manual address + code
-		via, code, hostAddr = "code", req.Code, req.Addr
-	case len(req.Code) == 6:
-		via, code = "code", req.Code
-		found := mpDiscover(discoveryAddrs(), mpPort(), codeTag(code), 2000*time.Millisecond)
-		if len(found) == 0 {
-			if len(mpDiscover(discoveryAddrs(), mpPort(), "", 1000*time.Millisecond)) > 0 {
-				return fail("bad_code") // rooms exist here, none with this code
-			}
-			return fail("peer_not_found")
-		}
-		hostAddr, room, hostUDP = net.JoinHostPort(found[0].Addr, fmt.Sprint(found[0].HTTP)), found[0].Room, found[0].UDP
-	default:
-		return fail("bad_code")
 	}
 	nonce := randHexN(8)
-	body := joinReq{Room: room, Name: name, Nonce: nonce, Via: via, Dev: m.devID}
+	body := joinReq{Room: room, Name: name, Nonce: nonce, Via: via, Dev: m.devID, Web: m.web}
 	if via == "qr" {
 		body.Proof = hmacHex(secretKey(secret), "join", room, nonce, name)
 	} else if via == "code" {

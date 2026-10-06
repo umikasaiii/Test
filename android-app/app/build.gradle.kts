@@ -39,6 +39,7 @@ android {
 val webAssets = tasks.register<Sync>("copyWebAssets") {
     into(layout.buildDirectory.dir("generated/webassets"))
     from("../../cloud/web/mp") { into("web/mp") }
+    from("../../cloud/web/guest") { into("web/guest") }   // the iPhone's guest page assets (manifest, icons); the page itself is mp/index.html
     from("../../cloud/worker/public/controls") { into("controls") }
 }
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach { dependsOn(webAssets) }

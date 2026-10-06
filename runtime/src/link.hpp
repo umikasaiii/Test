@@ -6,6 +6,7 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@ public:
 
 private:
     int lfd_ = -1, peer_ = -1;
+    std::recursive_mutex sendMu_;  // the stream encoder sends from its own thread: one frame at a time on the socket (poll() holds it too: its callbacks log through send())
     std::string path_;
     std::vector<uint8_t> rx_;
 };

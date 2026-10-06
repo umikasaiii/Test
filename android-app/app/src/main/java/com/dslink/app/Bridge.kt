@@ -22,4 +22,7 @@ class Bridge(private val act: MainActivity) {
     @JavascriptInterface fun openSystemFiles() = act.openSystemFiles()
     @JavascriptInterface fun setDevOverlay(on: Boolean) = act.setDevOverlay(on)
     @JavascriptInterface fun version(): String = BuildConfig.VERSION_NAME
+
+    /** Developer menu: encodes synthetic frames with this phone's H.264 encoder, decodes them again and reports codec/hardware/fps/latency/bitrate as one JSON line (takes a few seconds). */
+    @JavascriptInterface fun encoderSelfTest(): String = Stack.encoderSelfTest(act)
 }

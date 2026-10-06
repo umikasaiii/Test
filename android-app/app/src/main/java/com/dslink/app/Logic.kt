@@ -48,10 +48,23 @@ object Words {
 
 /** the developer overlay text (only shown from the developer menu) */
 object DevText {
-    fun format(m: DoubleArray, cpuApp: Double, cpuRuntime: Double, ramAppMb: Double, ramRuntimeMb: Double, battery: String, thermal: String, net: String): String {
+    /** Hosted: the second console that is streamed to another device (an iPhone) and the encoder that feeds it. */
+    data class Hosted(val p2Fps: Double, val codec: String, val hardware: Boolean, val encFps: Double, val latMs: Double, val latMaxMs: Double, val kbps: Double, val dropped: Long, val rttMs: Double, val connected: Boolean)
+
+    fun hosted(h: Hosted?): List<String> {
+        h ?: return emptyList()
+        val codec = if (h.codec.isEmpty()) "no encoder" else "${h.codec} (${if (h.hardware) "hardware" else "software"})"
+        return listOf(
+            "P2 emu %.1f fps  guest %s  RTT %s".format(h.p2Fps, if (h.connected) "connected" else "not connected", if (h.rttMs > 0) "%.1f ms".format(h.rttMs) else "-"),
+            "encoder $codec  %.1f fps  latency %.1f ms (max %.1f)  %.0f kbps  dropped %d".format(h.encFps, h.latMs, h.latMaxMs, h.kbps, h.dropped),
+        )
+    }
+
+    fun format(m: DoubleArray, cpuApp: Double, cpuRuntime: Double, ramAppMb: Double, ramRuntimeMb: Double, battery: String, thermal: String, net: String, hosted: Hosted? = null): String {
         fun d(i: Int) = if (i < m.size) m[i] else 0.0
         val lines = ArrayList<String>()
-        lines += "FPS emu %.1f  render %.1f  frame %.1f ms (max %.1f)".format(d(12), d(0), d(13), d(14))
+        lines += "FPS P1 emu %.1f  render %.1f  frame %.1f ms (max %.1f)".format(d(12), d(0), d(13), d(14))
+        lines += hosted(hosted)
         lines += "frame %dx%d  surface %dx%d".format(d(4).toInt(), d(5).toInt(), d(2).toInt(), d(3).toInt())
         lines += "CPU app %.0f%%  runtime %.0f%%   RAM %.0f + %.0f MB".format(cpuApp, cpuRuntime, ramAppMb, ramRuntimeMb)
         lines += "audio %s %d Hz  underrun %d  xrun %d  skip %d  lat %.0f ms".format(if (d(6) > 0) "on" else "off", d(7).toInt(), d(8).toLong(), d(10).toLong(), d(9).toLong(), d(11))

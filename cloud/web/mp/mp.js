@@ -2,16 +2,25 @@
 import { mountControls } from "/controls/controls.js";
 
 const $ = (id) => document.getElementById(id);
+// GUEST WEB PAGE (/guest/): a browser on another device (the iPhone's Safari or Home-Screen web app) that plays through the HOST's gateway. It owns no console:
+// the host streams it video/audio and takes its buttons/touch. Its session lives in the host's gateway under /g/<id>/ (the id is this browser's own random handle).
+const GUEST = location.pathname.startsWith("/guest");
+const SID = (() => {
+  const mk = () => { const a = new Uint8Array(16); (self.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach((_, i) => { a[i] = Math.floor(Math.random() * 256); }); return [...a].map((b) => b.toString(16).padStart(2, "0")).join(""); };
+  try { let v = localStorage.getItem("dslink.guest.sid"); if (!/^[0-9a-f]{32}$/.test(v || "")) { v = mk(); localStorage.setItem("dslink.guest.sid", v); } return v; } catch { return mk(); }
+})();
+if (GUEST) document.body.classList.add("guest");
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const api = async (method, path, body) => {
   const init = { method };
   if (body instanceof FormData) init.body = body; else if (body) { init.headers = { "content-type": "application/json" }; init.body = JSON.stringify(body); }
-  const r = await fetch(path, init); let j = {}; try { j = await r.json(); } catch { /* empty */ }
+  const r = await fetch(GUEST && path.startsWith("/api/mp/") ? "/g/" + SID + path : path, init); let j = {}; try { j = await r.json(); } catch { /* empty */ }
   return { ok: r.ok, status: r.status, j };
 };
 const DEV = new URLSearchParams(location.search).has("dev") || (() => { try { return localStorage.getItem("dslink.dev") === "1"; } catch { return false; } })();
 if (DEV) document.body.classList.add("dev");
 
-let st = { state: "IDLE" }, view = "home", games = [], selected = null, stream = null, lastDump = "", streamTries = 0, lastStreamAt = 0, pendingLeave = null;
+let st = { state: "IDLE" }, view = GUEST ? "join" : "home", games = [], selected = null, stream = null, lastDump = "", streamTries = 0, lastStreamAt = 0, pendingLeave = null;
 const RECENT_KEY = "dslink.mp.recent";
 const recent = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; } };
 const remember = (g) => { try { const r = [{ id: g.id, title: g.title, ts: Date.now() }, ...recent().filter((x) => x.id !== g.id)].slice(0, 4); localStorage.setItem(RECENT_KEY, JSON.stringify(r)); } catch { /* ignore */ } };
@@ -110,7 +119,7 @@ $("btnMakeRoom").onclick = async () => {
 let nearbyTimer = 0;
 function renderJoin() { clearTimeout(nearbyTimer); refreshNearby(); }
 async function refreshNearby() {
-  if (document.body.dataset.screen !== "join" || st.state !== "IDLE") return;
+  if (GUEST || document.body.dataset.screen !== "join" || st.state !== "IDLE") return;   // a browser guest never discovers rooms: it joins the host it opened the page from
   const r = await api("GET", "/api/mp/nearby"); const rooms = r.j.rooms || [];
   const ul = $("nearbyList"); ul.innerHTML = "";
   rooms.forEach((n) => { const li = document.createElement("li"); li.innerHTML = `<div><span></span><small></small></div><button>UNISCITI</button>`; li.querySelector("span").textContent = n.title; li.querySelector("small").textContent = `Host: ${n.host}`; li.querySelector("button").onclick = () => doJoin({ room: n.room }); ul.append(li); });
@@ -192,7 +201,7 @@ $("btnScan").onclick = async () => {
   const tick = async () => {
     if (!alive) return; let raw = "";
     try { if (det) { const f = await det.detect(v); raw = f[0] ? f[0].rawValue : ""; } else if (v.videoWidth && typeof jsQR === "function") { cv.width = v.videoWidth; cv.height = v.videoHeight; const g = cv.getContext("2d"); g.drawImage(v, 0, 0); const r = jsQR(g.getImageData(0, 0, cv.width, cv.height).data, cv.width, cv.height); raw = r ? r.data : ""; } } catch { /* next frame */ }
-    if (raw.startsWith("dslink://join?")) { scanStop(); doJoin({ payload: raw }); return; }
+    if (raw.startsWith("dslink://join?") || /^http:\/\/[^/]+\/guest\/\?/.test(raw)) { scanStop(); doJoin({ payload: raw }); return; }
     requestAnimationFrame(tick);
   };
   tick();
@@ -238,6 +247,11 @@ async function ensureStream() {
   if (Date.now() - lastStreamAt < 3000) return; lastStreamAt = Date.now(); stopStream();
   const root = $("game"); root.hidden = false; root.innerHTML = "";
   const video = document.createElement("video"); video.playsInline = true; video.autoplay = true; root.append(video);
+  if (GUEST || IOS) {   // iOS lets a page autoplay only muted video; the first touch on the controls (a user gesture) switches the sound on
+    video.muted = true;
+    const unmute = () => { video.muted = false; video.play().catch(() => {}); root.removeEventListener("pointerdown", unmute, true); root.removeEventListener("touchend", unmute, true); };
+    root.addEventListener("pointerdown", unmute, true); root.addEventListener("touchend", unmute, true);
+  }
   const remote = ig.base ? new URL(ig.base) : location, host = remote.host;
   let ice = []; if (!ig.base) { const c = await fetch("/api/config").then((r) => r.json()).catch(() => ({})); ice = c.iceServers || []; }
   const pc = new RTCPeerConnection({ iceServers: ice });
@@ -255,11 +269,25 @@ async function ensureStream() {
   document.body.classList.add("ingame");
 }
 
+// A stream that dropped (Wi-Fi blip, Safari back from the background) is rebuilt while the session is still IN_GAME: the host keeps the console running for the grace period.
+setInterval(() => { if (st.state === "IN_GAME" && stream && !stream.native && stream.pc && ["failed", "closed", "disconnected"].includes(stream.pc.connectionState)) ensureStream(); }, 2000);
+
+// ---------------------------------------------------------------- guest page: the QR the host shows is a web address (the iPhone's Camera opens it here); the page joins with it once
+if (GUEST) {
+  const q = new URLSearchParams(location.search);
+  if (q.get("c") && q.get("s")) {
+    const payload = location.href;
+    history.replaceState({ view: "join" }, "", "/guest/");   // the secret does not stay in the address bar / history
+    setTimeout(() => { if (st.state === "IDLE") doJoin({ payload }); }, 150);
+  }
+}
+
 // ---------------------------------------------------------------- Android app extras (system files, performance overlay, NSD hints)
 if (ANDROID) {
   $("btnSysFiles").hidden = false; $("btnSysFiles").onclick = () => ANDROID.openSystemFiles();
   document.querySelectorAll(".devandroid").forEach((e) => { e.hidden = false; });
   $("devOverlay").onchange = () => ANDROID.setDevOverlay($("devOverlay").checked);
+  $("devEncTest").onclick = () => { $("devEncOut").textContent = "Test in corso (qualche secondo)…"; setTimeout(() => { try { $("devEncOut").textContent = ANDROID.encoderSelfTest(); } catch { $("devEncOut").textContent = "non disponibile"; } }, 60); };
 }
 // ---------------------------------------------------------------- developer menu
 let taps = 0; $("logo").onclick = () => { if (++taps >= 5) { taps = 0; document.body.classList.toggle("dev"); try { localStorage.setItem("dslink.dev", document.body.classList.contains("dev") ? "1" : "0"); } catch { /* ignore */ } location.reload(); } };

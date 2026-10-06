@@ -68,3 +68,9 @@ body.ingame #app { display:none; }
 html.native, html.native body { background: transparent !important; }
 #game.native, #game.native .ctl-clip, #game.native .ctl-clip > * { background: transparent !important; }
 .cta.ghost { background: transparent; border-style: dashed; }
+
+/* guest web page (iPhone Safari / Home-Screen web app): a guest only joins, it never creates or browses the host's library */
+.guestonly { display: none; } body.guest .guestonly { display: block; }
+body.guest .hostonly, body.guest #btnCreate, body.guest #recent, body.guest #btnSysFiles, body.guest #btnScan, body.guest #devJoin, body.guest .netrow, body.guest #netHint { display: none !important; }
+body.guest [data-screen=home] .sub::after { content: " · Ospite"; }
+html, body { overscroll-behavior: none; }

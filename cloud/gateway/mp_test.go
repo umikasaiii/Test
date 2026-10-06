@@ -210,7 +210,7 @@ func TestLobbyCreateJoinReady(t *testing.T) {
 		t.Fatal(e)
 	}
 	v := d.host.mp.view(false)
-	if v["state"] != MpWaitingForPeer || len(v["code"].(string)) != 6 || !strings.HasPrefix(v["qr"].(string), "dslink://join?") {
+	if v["state"] != MpWaitingForPeer || len(v["code"].(string)) != 6 || !strings.Contains(v["qr"].(string), "/guest/?c=") {
 		t.Fatalf("host view: %+v", v)
 	}
 	if strings.Contains(v["qr"].(string), "bios") || strings.Contains(v["qr"].(string), ".nds") {
@@ -286,7 +286,7 @@ func TestLobbyJoinByQRPayloadAndNearbyApproval(t *testing.T) {
 	// a forged QR (wrong secret) is refused even with the right code
 	d.guest.mp.Reset()
 	waitFor(t, "slot free", func() bool { return stateOf(d.host) == MpWaitingForPeer })
-	forged := strings.Replace(payload, "s="+payload[strings.Index(payload, "s=")+2:strings.Index(payload, "&h=")], "s=00000000000000000000000000000000", 1)
+	forged := strings.Replace(payload, "s="+payload[strings.Index(payload, "s=")+2:strings.Index(payload, "&r=")], "s=00000000000000000000000000000000", 1)
 	if e := d.guest.mp.Join(JoinRequest{Payload: forged}); e == nil || e.Code != "bad_code" {
 		t.Fatalf("forged QR secret must be refused: %v", e)
 	}
@@ -381,9 +381,14 @@ func TestLoopbackGuardOnlyOpensThePeerProtocolToTheLAN(t *testing.T) {
 			t.Errorf("%s must work for the app itself", p)
 		}
 	}
-	for _, p := range []string{"/api/lobby/join", "/api/lobby/status", "/ws"} {
+	for _, p := range []string{"/api/lobby/join", "/api/lobby/status", "/ws", "/api/config", "/g/0123456789abcdef/api/mp/state", "/guest/", "/guest/manifest.webmanifest", "/mp/mp.js", "/mp/mp.css", "/mp/vendor/qrcode.js", "/controls/controls.js"} {
 		if code(p, "192.168.1.9:5555") != 204 {
 			t.Errorf("%s must stay reachable for the other device", p)
+		}
+	}
+	for _, p := range []string{"/", "/mp/index.html", "/api/mp/state", "/api/mp/join"} {
+		if code(p, "192.168.1.9:5555") != 403 {
+			t.Errorf("%s must be refused to a LAN peer", p)
 		}
 	}
 	off := &Server{}

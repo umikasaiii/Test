@@ -144,7 +144,7 @@ func (l *RuntimeLink) Stats() map[string]any {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := map[string]any{"runtime_link_open": !l.closed, "mac": l.mac, "core_multiplayer": l.mp}
-	for _, k := range []string{"frames", "fps", "mp_active", "mp_peers", "mp_role", "mp_in", "mp_out", "video_frames", "audio_packets", "slowest_frame_ms", "width", "height", "dl_state", "dl_counters", "dl_hist", "session_mode", "radio", "stream", "lan", "lan_code", "lan_join_uri", "lan_port", "mp_ended"} {
+	for _, k := range []string{"frames", "fps", "mp_active", "mp_peers", "mp_role", "mp_in", "mp_out", "video_frames", "audio_packets", "slowest_frame_ms", "width", "height", "dl_state", "dl_counters", "dl_hist", "session_mode", "radio", "stream", "enc", "lan", "lan_code", "lan_join_uri", "lan_port", "mp_ended"} {
 		if v, ok := l.status[k]; ok {
 			out[k] = v
 		}

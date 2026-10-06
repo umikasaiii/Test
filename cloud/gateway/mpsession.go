@@ -26,6 +26,7 @@ type MpPlayer struct {
 	lastSeen  time.Time
 	addr      string
 	dev       string
+	web       bool   // a browser (e.g. Safari on an iPhone) joined through this gateway's web guest page: it only ever plays Hosted (streamed console)
 	lobbyOnly string // the peer's own state as it reports it (guest -> host)
 }
 
@@ -39,10 +40,11 @@ type mpPlan struct {
 }
 
 const (
-	mpPeerDeadMs     = 5000  // no heartbeat for this long = peer unreachable
-	mpSetupAttempts  = 2     // the Download Play setup is redone once, quietly, before the user is told
-	mpReconnectGrace = 12000 // how long a vanished peer may come back before the session ends
-	mpLobbyTTL       = 15 * time.Minute
+	mpPeerDeadMs      = 5000  // no heartbeat for this long = peer unreachable
+	mpSetupAttempts   = 2     // the Download Play setup is redone once, quietly, before the user is told
+	mpReconnectGrace  = 12000 // how long a vanished peer may come back before the session ends
+	mpLobbyTTL        = 15 * time.Minute
+	mpWebBrowserGrace = 5 * time.Second // a web guest whose browser has not asked anything for this long is treated as gone
 )
 
 type MpSession struct {
@@ -88,6 +90,11 @@ type MpSession struct {
 	keepEnded                   bool
 	radioSeen                   bool // host: the guest's radio link has been up at least once in this game
 	hostDriverOK, guestDriverOK bool
+
+	// web guest (a browser on another device that plays through THIS gateway, see mpweb.go): a guest session that lives inside the host's gateway
+	web     bool
+	webUA   string
+	webSeen time.Time // the last request from the browser: a browser that went away (Safari in the background) stops the heartbeat the host watches
 
 	// game
 	stopSuper chan struct{}
@@ -185,16 +192,31 @@ func (m *MpSession) qrPayload() string {
 	if m.role != "host" || m.code == "" {
 		return ""
 	}
-	return fmt.Sprintf("dslink://join?c=%s&s=%s&h=%s:%d&r=%s&u=%d", m.code, m.secret, advertiseIP(), m.srv.httpPort, m.roomID, m.srv.udpPort())
+	// a plain web address: the iPhone's Camera app opens it in Safari (the guest page), the DSLink app on another phone reads the same parameters
+	return fmt.Sprintf("http://%s:%d/guest/?c=%s&s=%s&r=%s&u=%d", advertiseIP(), m.srv.httpPort, m.code, m.secret, m.roomID, m.srv.udpPort())
 }
 
-// parseJoinPayload: dslink://join?c=CODE&s=SECRET&h=IP:PORT&r=ROOM (the QR content).
+// parseJoinPayload: the QR content, http://IP:PORT/guest/?c=CODE&s=SECRET&h=IP:PORT&r=ROOM&u=UDP (or the older dslink://join?... with the same parameters).
 func parseJoinPayload(p string) (code, secret, host, room string, udp int, ok bool) {
 	p = strings.TrimSpace(p)
-	if !strings.HasPrefix(p, "dslink://join?") {
+	q := ""
+	switch {
+	case strings.HasPrefix(p, "dslink://join?"):
+		q = p[len("dslink://join?"):]
+	case strings.HasPrefix(p, "http://"):
+		i := strings.Index(p, "/guest/?")
+		if i < 0 {
+			return
+		}
+		host = p[len("http://"):i] // the address the page was opened at is the host's
+		q = p[i+len("/guest/?"):]
+		if j := strings.IndexByte(q, '#'); j >= 0 {
+			q = q[:j]
+		}
+	default:
 		return
 	}
-	for _, kv := range strings.Split(p[len("dslink://join?"):], "&") {
+	for _, kv := range strings.Split(q, "&") {
 		i := strings.IndexByte(kv, '=')
 		if i < 0 {
 			continue
@@ -206,7 +228,9 @@ func parseJoinPayload(p string) (code, secret, host, room string, udp int, ok bo
 		case "s":
 			secret = v
 		case "h":
-			host = v
+			if host == "" {
+				host = v
+			}
 		case "r":
 			room = v
 		case "u":
@@ -261,19 +285,19 @@ func (m *MpSession) view(dev bool) map[string]any {
 		"players": pl, "mode": map[string]any{"chosen": m.modeChosen, "effective": eff, "label": modeLabel, "note": modeNote},
 		"net": map[string]any{"done": m.netDone, "class": m.net.Class, "label": label, "hint": hint}, "step": m.step, "error": m.err, "canStart": canStart,
 		"expiresInSec": int((mpLobbyTTL - time.Since(m.created)).Seconds()),
-		"platform":     map[string]any{"native": m.srv.env.ShmPath != "", "hostedHost": !m.srv.env.NoEncoder},
+		"platform":     map[string]any{"native": m.srv.env.ShmPath != "" && !m.web, "hostedHost": !m.srv.env.NoEncoder, "web": m.web},
 	}
 	if (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) && m.local != nil {
 		ig := map[string]any{"base": "", "code": m.local.Code, "player": 1, "token": m.local.Tokens[0]}
 		if m.role == "guest" && m.plan.Mode == "hosted" {
-			ig = map[string]any{"base": "http://" + m.hostIP + ":" + hostPortOf(m.hostAddr), "code": m.plan.HostedCode, "player": 2, "token": m.plan.HostedToken}
+			ig = map[string]any{"base": m.hostedBase(), "code": m.plan.HostedCode, "player": 2, "token": m.plan.HostedToken}
 		}
 		if m.srv.env.ShmPath != "" && ig["base"] == "" {
 			ig["native"] = true // the console on this device is drawn by the app itself (shared memory), not streamed to the page
 		}
 		v["ingame"] = ig
 	} else if m.role == "guest" && m.plan.Mode == "hosted" && (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) {
-		v["ingame"] = map[string]any{"base": "http://" + m.hostIP + ":" + hostPortOf(m.hostAddr), "code": m.plan.HostedCode, "player": 2, "token": m.plan.HostedToken}
+		v["ingame"] = map[string]any{"base": m.hostedBase(), "code": m.plan.HostedCode, "player": 2, "token": m.plan.HostedToken}
 	}
 	if dev {
 		d := map[string]any{"net": m.net, "plan": m.plan, "log": m.devLog, "roomId": m.roomID, "hostAddr": m.hostAddr}
@@ -289,6 +313,14 @@ func (m *MpSession) view(dev bool) map[string]any {
 		v["dev"] = d
 	}
 	return v
+}
+
+// hostedBase: where a Hosted guest's page opens the stream. A browser guest got its page FROM the host's gateway: same origin ("" = relative).
+func (m *MpSession) hostedBase() string {
+	if m.web {
+		return ""
+	}
+	return "http://" + m.hostIP + ":" + hostPortOf(m.hostAddr)
 }
 
 func hostPortOf(addr string) string {
@@ -328,5 +360,8 @@ func (m *MpSession) teardownGameLocked() {
 		m.stopDrv = nil
 	}
 	m.local = nil
+	if m.web { // a web guest owns no console: the room belongs to the host session that lives in the same gateway
+		return
+	}
 	m.srv.closeRoom() // stops the runtimes (process groups), closes the WebRTC peers, removes the scratch directory
 }

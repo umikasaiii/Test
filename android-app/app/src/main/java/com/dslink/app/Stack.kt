@@ -55,11 +55,15 @@ object Stack {
             put("DSLINK_LIBRARY", File(root, "library").path)
             put("DSLINK_FIRMWARE_DIR", systemDir(ctx).path)
             put("DSLINK_SHM_PATH", shmPath(ctx))
-            put("DSLINK_NO_ENCODER", "1")            // no H.264/Opus encoder in the app: Hosted *host* is not available yet, Distributed is
+            put("DSLINK_WEBRTC_ADVERTISE", "1")      // Hosted: the stream to another device (an iPhone) advertises the Wi-Fi/hotspot address the app reported
             put("DSLINK_UI_LOOPBACK_ONLY", "1")      // other phones may only reach the peer lobby protocol
             put("DSLINK_PARENT_PID", android.os.Process.myPid().toString())   // never outlive the app
             put("DSLINK_DEVICE_NAME", Words.deviceName(Build.MODEL))
-            if (File(root, "enable_test_hooks").exists()) put("DSLINK_TEST_HOOKS", "1")   // instrumented tests only (the marker is created by the test)
+            if (File(root, "enable_test_hooks").exists()) {   // instrumented tests only (the marker is created by the test)
+                put("DSLINK_TEST_HOOKS", "1")
+                put("DSLINK_LOOPBACK", "1")   // the browser of the test (a WebView on this device) reaches the stream over the device's own addresses
+                File(root, "test_guest.nds").takeIf { it.exists() }?.let { put("DSLINK_TEST_GUEST_ROM", it.path) }   // homebrew cartridge for the second console
+            }
             wifi?.let { put("DSLINK_ADVERTISE_IP", it.ip); it.broadcast?.let { b -> put("DSLINK_MP_DISCOVERY_ADDR", b) } }
         }
         proc = try { pb.start() } catch (e: Exception) { Log.e(TAG, "gateway start failed", e); null }
@@ -75,6 +79,23 @@ object Stack {
             Thread.sleep(100)
         }
         return false
+    }
+
+    /**
+     * The stream encoder's self-test (Hosted mode sends the second console to another device through this phone's MediaCodec): runs the Runtime with --encoder-selftest
+     * and returns its one JSON line. Needs no game and no gateway. Blocking: call from a background thread.
+     */
+    fun encoderSelfTest(ctx: Context): String {
+        val rt = File(ctx.applicationInfo.nativeLibraryDir, "libdslink_runtime.so")
+        if (!rt.canExecute()) return "{\"pass\":false,\"error\":\"runtime missing\"}"
+        return try {
+            val p = ProcessBuilder(rt.path, "--encoder-selftest").redirectErrorStream(true).start()
+            val out = StringBuilder()
+            val t = Thread { p.inputStream.bufferedReader().forEachLine { out.appendLine(it) } }.apply { start() }
+            if (!p.waitFor(40, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); t.join(1000); return "{\"pass\":false,\"error\":\"timeout\"}" }
+            t.join(2000)
+            out.lines().lastOrNull { it.startsWith("{") } ?: "{\"pass\":false,\"error\":\"no result\"}"
+        } catch (e: Exception) { "{\"pass\":false,\"error\":\"${e.javaClass.simpleName}\"}" }
     }
 
     @Synchronized

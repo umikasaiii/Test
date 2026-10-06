@@ -30,10 +30,11 @@ type Env struct {
 	Backend       string // "runtime" (default) or "retroarch" (reference implementation)
 	// Android app (local front end): the console shown on THIS device writes raw frames/audio into a shared-memory file that the app renders natively
 	// (no encoder, no WebRTC for the local player), takes buttons/touch from the same file, and the UI API answers loopback requests only.
-	ShmPath    string // DSLINK_SHM_PATH
-	NoEncoder  bool   // DSLINK_NO_ENCODER=1: this build has no H.264/VP8/Opus encoder, so it cannot stream a console to another device (Hosted host)
-	TestHooks  bool   // DSLINK_TEST_HOOKS=1: instrumented-test endpoints (see mptest_hooks.go)
-	UILoopback bool   // DSLINK_UI_LOOPBACK_ONLY=1: everything except the peer lobby protocol and the hosted stream answers loopback only
+	ShmPath      string // DSLINK_SHM_PATH
+	NoEncoder    bool   // DSLINK_NO_ENCODER=1: this build has no H.264/VP8/Opus encoder, so it cannot stream a console to another device (Hosted host)
+	TestHooks    bool   // DSLINK_TEST_HOOKS=1: instrumented-test endpoints (see mptest_hooks.go)
+	AdvertiseLAN bool   // DSLINK_WEBRTC_ADVERTISE=1: WebRTC host candidates advertise the LAN address the platform reported (advertiseIP)
+	UILoopback   bool   // DSLINK_UI_LOOPBACK_ONLY=1: everything except the peer lobby protocol and the hosted stream answers loopback only
 }
 
 const (
@@ -77,6 +78,8 @@ type Slot struct {
 	rt          *RuntimeLink
 	Lan         *LanSpec      // Distributed Mode: LAN RadioTransport instead of the in-process bridge
 	Events      atomic.Uint64 // input messages received from the browser
+	peerRttUs   atomic.Int64  // the browser's WebRTC round trip (ICE candidate pair), microseconds; 0 = not measured yet
+	peerLive    atomic.Int32  // browsers currently connected to this slot's stream
 }
 
 var (
@@ -338,6 +341,10 @@ func (s *Slot) Status() map[string]any {
 		"has_cartridge": s.Spec.ROM != "", "netplay_joined": s.Joined, "core_multiplayer": s.CoreMP, "mac": s.MAC, "expected_mac": s.ExpectedMAC, "nick": s.Nick,
 		"netplay_port": s.Spec.NetPort, "input_events": s.Events.Load()}
 	st["backend"] = s.Backend
+	if rtt := s.peerRttUs.Load(); rtt > 0 && s.peerLive.Load() > 0 {
+		st["peer_rtt_ms"] = float64(rtt) / 1000.0
+	}
+	st["peer_connected"] = s.peerLive.Load() > 0
 	if s.rt != nil {
 		for k, v := range s.rt.Stats() {
 			st[k] = v

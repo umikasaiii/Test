@@ -22,12 +22,14 @@ if(DSLINK_HOST_TEST)
 endif()
 
 # ---- Android: everything the APK carries as native code, built with ONE toolchain call (scripts/build_android_native.sh)
-#  * dslink-runtime    the existing C++ Runtime (no FFmpeg: the app reads raw frames from shared memory)   -> libdslink_runtime.so (executable)
+#  * dslink-runtime    the existing C++ Runtime (no FFmpeg: the app reads raw frames from shared memory; a streamed console uses MediaCodec + libopus) -> libdslink_runtime.so (executable)
 #  * dslink_cfgtool / dslink_romcheck  the existing DSLink C++ tools (identity, options, ROM check)         -> libdslink_cfgtool.so / libdslink_romcheck.so
 #  * dslink_jni        JNI: GL renderer, AAudio output, input, metrics, private-file validation
 set(DSLINK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${REPO}/dslink dslink_build)
 set(DSLINK_WITH_FFMPEG OFF CACHE BOOL "" FORCE)
+# Hosted mode (a console streamed to another device, e.g. an iPhone): the phone's MediaCodec (hardware H.264) + libopus replace FFmpeg
+set(DSLINK_WITH_MEDIACODEC ON CACHE BOOL "" FORCE)
 add_subdirectory(${REPO}/runtime runtime_build)
 
 add_library(dslink_jni SHARED jni_bridge.cpp renderer.cpp audio_out.cpp)

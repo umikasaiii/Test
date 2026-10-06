@@ -11,7 +11,9 @@ extern "C" {
 }
 #endif
 
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 
 namespace dsrt {
@@ -35,9 +37,18 @@ AvPipeline::~AvPipeline() {
     if (sws_) sws_freeContext(sws_);
     if (swr_) swr_free(&swr_);
 }
+#elif defined(DSLINK_WITH_MEDIACODEC)
+AvPipeline::~AvPipeline() { flush(); }
 #else
-AvPipeline::~AvPipeline() = default;  // built without FFmpeg (Android): no encoder, the raw frame keeper below still works
+AvPipeline::~AvPipeline() = default;  // built without any encoder: only the raw frame keeper below works
 #endif
+
+void AvPipeline::requestKeyframe() {
+    forceKey_ = true;
+#ifdef DSLINK_WITH_MEDIACODEC
+    if (mvenc_) mvenc_->requestKey();
+#endif
+}
 
 #ifdef DSLINK_WITH_FFMPEG
 bool AvPipeline::open(const AvConfig& cfg, double coreRate, std::string& err) {
@@ -104,8 +115,25 @@ bool AvPipeline::open(const AvConfig& cfg, double coreRate, std::string& err) {
     if (r < 0 || swr_init(swr_) < 0) { err = "swresample init failed"; return false; }
     return true;
 }
+#elif defined(DSLINK_WITH_MEDIACODEC)
+bool AvPipeline::open(const AvConfig& cfg, double coreRate, std::string& err) {
+    cfg_ = cfg;
+    t0Us_ = nowUs();
+    if (cfg.vp8) { err = "the Android Runtime streams H.264 only"; return false; }
+    mvenc_ = std::make_unique<McVideoEncoder>(makeMediaCodecH264());
+    const int keySec = std::max(1, cfg.keyintFrames / std::max(1, cfg.fps));
+    if (!mvenc_->open(cfg.outW, cfg.outH, cfg.fps, cfg.videoKbps, keySec, err)) { mvenc_.reset(); return false; }
+    mvenc_->onVideo = [this](const uint8_t* d, size_t n, bool key, uint64_t pts) {
+        ++vFrames_; vBytes_ += n;
+        if (onVideo) onVideo(d, n, key, pts);
+    };
+    mopus_ = std::make_unique<OpusStream>();
+    if (!mopus_->open(coreRate, 96, err)) { mvenc_->close(); mvenc_.reset(); mopus_.reset(); return false; }
+    mopus_->onPacket = [this](const uint8_t* d, size_t n, uint64_t pts) { ++aPackets_; if (onAudio) onAudio(d, n, pts); };
+    return true;
+}
 #else
-bool AvPipeline::open(const AvConfig&, double, std::string& err) { err = "this Runtime was built without FFmpeg: no H.264/VP8/Opus encoder"; return false; }
+bool AvPipeline::open(const AvConfig&, double, std::string& err) { err = "this Runtime was built without an encoder (no FFmpeg, no MediaCodec)"; return false; }
 #endif
 
 bool AvPipeline::latestRgb(std::vector<uint8_t>& out, unsigned& w, unsigned& h) {
@@ -129,6 +157,9 @@ void AvPipeline::pushVideo(const uint8_t* xrgb, unsigned w, unsigned h, size_t p
         rawW_ = w;
         rawH_ = h;
     }
+#ifdef DSLINK_WITH_MEDIACODEC
+    if (mvenc_) mvenc_->push(xrgb, w, h, pitch);  // copies and returns: the emulation thread never waits for the encoder
+#endif
 #ifdef DSLINK_WITH_FFMPEG
     if (!venc_) return;
     if (!sws_ || srcW_ != w || srcH_ != h) {
@@ -191,9 +222,26 @@ void AvPipeline::drainAudio() {
 void AvPipeline::flush() {
     if (venc_) { avcodec_send_frame(venc_, nullptr); while (avcodec_receive_packet(venc_, pkt_) == 0) av_packet_unref(pkt_); }
 }
+#elif defined(DSLINK_WITH_MEDIACODEC)
+void AvPipeline::pushAudio(const int16_t* stereo, size_t frames) { if (mopus_) mopus_->push(stereo, frames); }
+void AvPipeline::flush() { if (mvenc_) mvenc_->close(); }
 #else
 void AvPipeline::pushAudio(const int16_t*, size_t) {}
 void AvPipeline::flush() {}
 #endif
+
+std::string AvPipeline::encoderJson() const {
+#ifdef DSLINK_WITH_MEDIACODEC
+    if (mvenc_) {
+        const EncStats e = mvenc_->stats();
+        char b[512];
+        std::snprintf(b, sizeof b, "{\"codec\":\"%s\",\"hardware\":%s,\"w\":%u,\"h\":%u,\"fps\":%.1f,\"latMs\":%.1f,\"latMaxMs\":%.1f,\"kbps\":%.0f,\"convMs\":%.2f,\"in\":%llu,\"out\":%llu,\"dropped\":%llu,\"keys\":%llu}",
+                      mvenc_->codecName().c_str(), mvenc_->hardware() ? "true" : "false", mvenc_->width(), mvenc_->height(), e.fps, e.latAvgMs, e.latMaxMs, e.kbps, e.convertMs,
+                      (unsigned long long)e.in, (unsigned long long)e.out, (unsigned long long)e.dropped, (unsigned long long)e.keyframes);
+        return b;
+    }
+#endif
+    return "null";
+}
 
 }  // namespace dsrt

@@ -44,4 +44,13 @@ class LogicTest {
         val t = DevText.format(m, 31.0, 55.0, 120.0, 210.0, "battery 80% (-1)", "thermal none", "RTT 0.4 ms")
         for (w in listOf("FPS", "CPU", "RAM", "audio", "underrun", "RTT", "battery", "thermal")) assertTrue("missing $w", t.contains(w))
     }
+
+    @Test fun hostedOverlayShowsTheSecondConsoleAndTheEncoder() {
+        val m = DoubleArray(17) { 0.0 }
+        val h = DevText.Hosted(59.7, "c2.qti.avc.encoder", true, 59.2, 7.4, 16.0, 2310.0, 3, 3.1, true)
+        val t = DevText.format(m, 30.0, 90.0, 100.0, 300.0, "battery 80%", "thermal none", "net", h)
+        for (w in listOf("P2 emu 59.7", "connected", "RTT 3.1 ms", "c2.qti.avc.encoder (hardware)", "59.2 fps", "latency 7.4", "2310 kbps", "dropped 3")) assertTrue("missing $w in\n$t", t.contains(w))
+        assertTrue(DevText.format(m, 0.0, 0.0, 0.0, 0.0, "", "", "").lines().none { it.startsWith("P2") })
+        assertTrue(DevText.hosted(DevText.Hosted(0.0, "", false, 0.0, 0.0, 0.0, 0.0, 0, 0.0, false)).any { it.contains("no encoder") })
+    }
 }

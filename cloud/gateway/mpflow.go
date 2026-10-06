@@ -26,6 +26,9 @@ func testGuestRom() string { return os.Getenv("DSLINK_TEST_GUEST_ROM") } // test
 
 // decideMode: the user normally gets AUTOMATIC. Distributed only on a clearly good network; otherwise Hosted. The developer menu can force either.
 func (m *MpSession) decideMode() (string, string) {
+	if g := m.players[1]; g != nil && g.web { // a browser (iPhone) cannot run a console: the consoles stay here and it gets video/audio (Hosted)
+		return "hosted", ""
+	}
 	switch m.modeChosen {
 	case "distributed":
 		return "distributed", ""
@@ -55,6 +58,10 @@ func (m *MpSession) Start() *MpErr {
 	if m.game.Profile != "" && !m.srv.firmwareOK() {
 		m.mu.Unlock()
 		return mpErr("no_firmware")
+	}
+	if g := m.players[1]; g != nil && g.web && m.srv.env.NoEncoder { // a browser can only be given a streamed console
+		m.mu.Unlock()
+		return mpErr("start_failed")
 	}
 	eff, note := m.decideMode()
 	m.modeEffective, m.modeNote = eff, note
@@ -284,7 +291,11 @@ func (m *MpSession) guestLoop(stop chan struct{}, nonce string) {
 		}
 		m.mu.Lock()
 		addr, tok, st := m.hostAddr, m.token, m.state
+		browserGone := m.web && time.Since(m.webSeen) > mpWebBrowserGrace
 		m.mu.Unlock()
+		if browserGone { // the browser (Safari in the background, a closed tab) is not there: the host stops hearing this guest and handles the loss like any other
+			continue
+		}
 		if st == MpIdle || st == MpEnded || st == MpError && m.err != nil && st != MpError {
 			return
 		}
@@ -447,6 +458,17 @@ func (m *MpSession) guestRuntimeEnded() bool {
 }
 
 func (m *MpSession) guestNetCheck(addr, tok string, udp int) {
+	if m.web { // a browser guest streams from this very gateway: there is no radio link to measure (the video travels over WebRTC)
+		res := MpNetResult{Samples: 1, Received: 1, RttMs: 1, Reachable: true, Class: "GREEN"}
+		m.mu.Lock()
+		m.net, m.netDone = res, true
+		if m.state == MpNetworkCheck {
+			m.go_(MpConnected)
+		}
+		m.mu.Unlock()
+		peerPost(addr, "/api/lobby/net", map[string]any{"token": tok, "net": res}, nil)
+		return
+	}
 	host := strings.Split(addr, ":")[0]
 	if udp == 0 {
 		udp = mpPort()

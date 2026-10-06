@@ -4,9 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#060b17">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DSLink">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="/guest/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/guest/apple-touch-icon.png">
 <title>DSLink · Multiplayer</title>
 <link rel="stylesheet" href="/controls/controls.css">
-<link rel="stylesheet" href="mp.css">
+<link rel="stylesheet" href="/mp/mp.css">
 </head>
 <body>
 <main id="app" aria-live="polite">
@@ -36,14 +43,15 @@
   <section class="screen" data-screen="join">
     <button class="back" data-back aria-label="Indietro">‹</button>
     <h1>Unisciti</h1>
+    <p class="hint guestonly">Inserisci il codice a 6 cifre mostrato sull'altro dispositivo, oppure inquadra il suo QR con la fotocamera.</p>
     <label class="field">Codice partita
       <input id="codeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="000000" aria-label="Codice partita">
     </label>
     <button class="cta primary" id="btnJoinCode" disabled>UNISCITI</button>
     <button class="cta" id="btnScan">SCANSIONA QR</button>
-    <h2>Partite vicine</h2>
-    <ul class="rooms" id="nearbyList"></ul>
-    <p class="hint" id="nearbyEmpty">Cerco partite sulla stessa rete Wi-Fi…</p>
+    <h2 class="hostonly">Partite vicine</h2>
+    <ul class="rooms hostonly" id="nearbyList"></ul>
+    <p class="hint hostonly" id="nearbyEmpty">Cerco partite sulla stessa rete Wi-Fi…</p>
     <p class="err" id="joinErr"></p>
     <details class="devonly" id="devJoin"><summary>Sviluppatore</summary>
       <label class="field small">Indirizzo host (solo debug)<input id="devAddr" placeholder="192.168.1.20:8080"></label>
@@ -124,6 +132,8 @@
       <select id="devMode"><option value="auto">Automatico</option><option value="distributed">Distributed</option><option value="hosted">Hosted</option></select>
     </label>
     <label class="field small devandroid" hidden><input type="checkbox" id="devOverlay"> Overlay prestazioni (FPS, CPU, RAM, audio, rete, batteria)</label>
+    <button class="cta ghost devandroid" id="devEncTest" hidden>Test encoder Hosted (MediaCodec H.264)</button>
+    <pre id="devEncOut"></pre>
     <pre id="devDump"></pre>
   </aside>
 </main>
@@ -138,8 +148,8 @@
 </div>
 <div id="confirm" class="overlay" hidden><div class="card"><h2 id="confirmTitle">Annullare la partita?</h2><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ANNULLA</button></div></div></div>
 <div id="game" hidden></div>
-<script src="vendor/qrcode.js"></script>
-<script src="vendor/jsQR.js"></script>
-<script type="module" src="mp.js"></script>
+<script src="/mp/vendor/qrcode.js"></script>
+<script src="/mp/vendor/jsQR.js"></script>
+<script type="module" src="/mp/mp.js"></script>
 </body>
 </html>

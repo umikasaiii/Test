@@ -9,15 +9,18 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
 
-func (s *Server) initWebRTC() error {
+// buildAPI: the WebRTC stack. natIP (optional) is the address advertised in the gateway's host candidates.
+func buildAPI(natIP string) (*webrtc.API, error) {
 	m := &webrtc.MediaEngine{}
 	if err := m.RegisterDefaultCodecs(); err != nil {
-		return err
+		return nil, err
 	}
 	se := webrtc.SettingEngine{}
 	if os.Getenv("DSLINK_LOOPBACK") == "1" {
@@ -25,13 +28,23 @@ func (s *Server) initWebRTC() error {
 	}
 	if ip := os.Getenv("DSLINK_PUBLIC_IP"); ip != "" {
 		se.SetNAT1To1IPs([]string{ip}, webrtc.ICECandidateTypeHost)
+	} else if natIP != "" {
+		se.SetNAT1To1IPs([]string{natIP}, webrtc.ICECandidateTypeHost)
 	}
 	if lo, hi := os.Getenv("DSLINK_UDP_MIN"), os.Getenv("DSLINK_UDP_MAX"); lo != "" && hi != "" {
 		a, _ := strconv.Atoi(lo)
 		b, _ := strconv.Atoi(hi)
 		se.SetEphemeralUDPPortRange(uint16(a), uint16(b))
 	}
-	s.api = webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(se))
+	return webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(se)), nil
+}
+
+func (s *Server) initWebRTC() error {
+	api, err := buildAPI("")
+	if err != nil {
+		return err
+	}
+	s.api = api
 	// ICE servers handed to browsers and used by the gateway: DSLINK_ICE='[{"urls":["stun:..."],"username":"","credential":""}]'
 	// (a Cloudflare TURN adapter would fill this; see docs/CLOUD_MIGRATION.md - Cloudflare APIs are UNVERIFIED).
 	if raw := os.Getenv("DSLINK_ICE"); raw != "" {
@@ -124,11 +137,13 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	ok := room != nil && strings.EqualFold(room.Code, q.Get("code")) && (player == 1 || player == 2) && room.Tokens[player-1] == q.Get("token")
 	s.mu.Unlock()
 	if !ok {
+		log.Printf("ws refused: room=%v code=%q player=%d", room != nil, q.Get("code"), player)
 		http.Error(w, "stanza o token non validi", http.StatusForbidden)
 		return
 	}
 	conn, err := s.up.Upgrade(w, r, nil)
 	if err != nil {
+		log.Printf("ws upgrade failed: %v", err)
 		return
 	}
 	defer conn.Close()
@@ -140,7 +155,13 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 		cfg.ICETransportPolicy = webrtc.ICETransportPolicyRelay
 	}
 	s.mu.Unlock()
-	pc, err := s.api.NewPeerConnection(cfg)
+	api := s.api
+	if s.env.AdvertiseLAN { // Android: the app tells the gateway its Wi-Fi/hotspot address (ConnectivityManager); native code cannot enumerate interfaces reliably
+		if a, e := buildAPI(advertiseIP()); e == nil {
+			api = a
+		}
+	}
+	pc, err := api.NewPeerConnection(cfg)
 	if err != nil {
 		return
 	}
@@ -179,8 +200,39 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 			send(sigMsg{Type: "candidate", Candidate: &j})
 		}
 	})
+	var live atomic.Bool
+	setLive := func(on bool) {
+		if live.Swap(on) != on {
+			if on {
+				slot.peerLive.Add(1)
+			} else {
+				slot.peerLive.Add(-1)
+			}
+		}
+	}
+	defer setLive(false)
+	statsStop := make(chan struct{})
+	defer close(statsStop)
+	go func() { // the developer overlay shows the round trip of the browser's WebRTC link
+		for {
+			select {
+			case <-statsStop:
+				return
+			case <-time.After(2 * time.Second):
+			}
+			if pc.ConnectionState() != webrtc.PeerConnectionStateConnected {
+				continue
+			}
+			for _, v := range pc.GetStats() {
+				if cp, ok := v.(webrtc.ICECandidatePairStats); ok && cp.Nominated && cp.CurrentRoundTripTime > 0 {
+					slot.peerRttUs.Store(int64(cp.CurrentRoundTripTime * 1e6))
+				}
+			}
+		}
+	}()
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
 		log.Printf("room %s player %d: %s", room.Code, player, st)
+		setLive(st == webrtc.PeerConnectionStateConnected)
 		if st == webrtc.PeerConnectionStateFailed || st == webrtc.PeerConnectionStateClosed || st == webrtc.PeerConnectionStateDisconnected {
 			peer.Close()
 		}
