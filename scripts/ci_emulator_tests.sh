@@ -11,5 +11,5 @@ echo "=================== SUMMARY ==================="
 grep -E "FAILED|PASSED|Starting [0-9]+ tests|Tests on .* (failed|passed)" /tmp/gradle_android.log | sed 's/\x1b\[[0-9;]*m//g'
 grep -E "dslink-test: java.lang.AssertionError" /tmp/logcat_android.txt | cut -c1-600
 echo "--- failures from the test result XML ---"
-find app/build/outputs -name "*.xml" -path "*androidTest*" 2>/dev/null | xargs -r grep -h -A6 "<failure" | cut -c1-700 | head -40
+find app/build/outputs -name "*.xml" -path "*androidTest*" -print0 2>/dev/null | xargs -0 -r grep -h -A6 "<failure" | cut -c1-700 | head -40
 exit $rc
