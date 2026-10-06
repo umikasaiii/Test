@@ -304,7 +304,8 @@ func (m *MpSession) view(dev bool) map[string]any {
 			ig["native"] = true // the console on this device is drawn by the app itself (shared memory), not streamed to the page
 		}
 		v["ingame"] = ig
-	} else if m.role == "guest" && m.plan.Mode == "hosted" && (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) {
+	} else if m.role == "guest" && m.plan.Mode == "hosted" && m.plan.HostedToken != "" && m.plan.HostedPlayer >= 2 && (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) {
+		// only once the host's plan for THIS guest (its console number and stream token) has arrived: a page that connects earlier would be told "player 2" and a token that is not its own
 		v["ingame"] = map[string]any{"base": m.hostedBase(), "code": m.plan.HostedCode, "player": m.hostedPlayer(), "token": m.plan.HostedToken}
 	}
 	if dev {

@@ -227,7 +227,7 @@ class EndToEndTest {
 
     /** the browser side of one guest (the app's own WebView stands in for Safari): its guest session heartbeat, signalling over /ws, media over WebRTC, counters in window.<name> */
     private fun guestJs(name: String, sid: String) = """(() => { const g = window.$name = { v: 0, vb: 0, a: 0, fd: 0, vw: 0, st: 'init', err: '', open: false };
-          fetch('/g/$sid/api/mp/state').then((r) => r.json()).then((s) => { const ig = s.ingame; if (!ig) { g.err = 'no ingame'; return; } g.player = ig.player;
+          const begin = (n) => fetch('/g/$sid/api/mp/state').then((r) => r.json()).then((s) => { const ig = s.ingame; if (!ig || !ig.token) { if (n > 0) { setTimeout(() => begin(n - 1), 300); } else { g.err = 'no ingame'; } return; } g.player = ig.player;
             const pc = new RTCPeerConnection({ iceServers: [] }); g.pc = pc; g.dc = pc.createDataChannel('input', { ordered: true }); pc.createDataChannel('move', { ordered: false, maxRetransmits: 0 });
             pc.addTransceiver('video', { direction: 'recvonly' }); pc.addTransceiver('audio', { direction: 'recvonly' });
             const vid = document.createElement('video'); vid.muted = true; vid.autoplay = true; vid.playsInline = true; vid.style.display = 'none'; document.body.appendChild(vid); g.vid = vid;
@@ -239,7 +239,7 @@ class EndToEndTest {
             ws.onerror = () => { g.err = 'ws error'; };
             g.poll = setInterval(() => { fetch('/g/$sid/api/mp/state').catch(() => {}); }, 600);   // what the guest page does while it is open: the host hears the browser through it
             g.timer = setInterval(async () => { g.st = pc.connectionState; const st = await pc.getStats(); st.forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'video') { g.v = r.packetsReceived; g.vb = r.bytesReceived; g.fd = r.framesDecoded || 0; } if (r.type === 'inbound-rtp' && r.kind === 'audio') g.a = r.packetsReceived; }); g.vw = vid.videoWidth; }, 500);
-          }).catch((e) => { g.err = String(e); }); return 'started'; })()"""
+          }).catch((e) => { g.err = String(e); }); begin(100); return 'started'; })()"""
     private fun guestQ(name: String) = "JSON.stringify({st:$name.st,v:$name.v,a:$name.a,vb:$name.vb,fd:$name.fd,vw:$name.vw,open:$name.open,err:$name.err,player:$name.player})"
     private fun slotsOf() = Gw.state(true)!!.getJSONObject("dev").getJSONArray("slots")
     private fun slotById(id: Int): JSONObject { val sl = slotsOf(); for (i in 0 until sl.length()) if (sl.getJSONObject(i).optInt("id") == id) return sl.getJSONObject(i); return JSONObject() }
