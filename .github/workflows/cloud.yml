@@ -139,6 +139,15 @@ jobs:
           DSLINK_CFGTOOL: ${{ github.workspace }}/build/dslink/dslink_cfgtool
           DSLINK_ROMCHECK: ${{ github.workspace }}/build/dslink/dslink_romcheck
         run: cd cloud/tests && node mp_hosted_phone_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" "$PWD/../../build/rt/shm_probe" "$(hostname -I | awk '{print $1}')" /tmp/mphosted
+      - name: Hosted V0 with TWO iPhone-like browser guests (PLAYER 2 + PLAYER 3, three consoles on the host, one drops) (gateway started as the Android app starts it, guest page on the LAN address, WebRTC video/audio/input; homebrew only)
+        env:
+          CHROME: /opt/google/chrome/chrome
+          DSLINK_GATEWAY: ${{ github.workspace }}/build/dslink-gateway
+          DSLINK_RUNTIME: ${{ github.workspace }}/build/rt/dslink-runtime
+          DSLINK_CORE: ${{ github.workspace }}/build/core/src/libretro/melondsds_libretro.so
+          DSLINK_CFGTOOL: ${{ github.workspace }}/build/dslink/dslink_cfgtool
+          DSLINK_ROMCHECK: ${{ github.workspace }}/build/dslink/dslink_romcheck
+        run: cd cloud/tests && node mp_hosted_two_phones_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" "$PWD/../../build/rt/shm_probe" "$(hostname -I | awk '{print $1}')" /tmp/mphosted2
       - name: "Cloudflare Containers media path (no inbound UDP): browsers <-> TURN relay <-> gateway, relay-only"
         env: { CHROME: /opt/google/chrome/chrome, DSLINK_VIDEO_CODEC: h264 }
         run: |
