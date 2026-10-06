@@ -55,14 +55,15 @@ jobs:
       - name: The APK carries the code and no private content
         run: |
           APK=$(ls android-app/app/build/outputs/apk/debug/*.apk | head -1)
-          mkdir -p dist && cp "$APK" dist/DSLink-android-arm64-debug.apk
+          mkdir -p dist && cp "$APK" dist/DSLink-Hosted-iPhone-V0-arm64-debug.apk
           unzip -l "$APK" | tee /tmp/apk.txt
           for l in libdslink_runtime libdslink_jni libdslink_gateway libmelondsds_libretro libdslink_cfgtool libdslink_romcheck; do grep -q "lib/arm64-v8a/$l.so" /tmp/apk.txt || { echo "missing $l"; exit 1; }; done
+          for a in assets/web/guest/manifest.webmanifest assets/web/mp/index.html assets/controls/controls.js; do grep -q "$a" /tmp/apk.txt || { echo "missing $a"; exit 1; }; done   # the guest page the iPhone is served
           if grep -Ei '\.(nds|srl)$|bios[79]?\.bin|firmware\.bin|\.sav$' /tmp/apk.txt; then echo "private/ROM-like file inside the APK"; exit 1; fi
           python3 scripts/check_no_private.py
           sha256sum dist/*.apk | tee dist/SHA256SUMS
       - uses: actions/upload-artifact@v4
-        with: { name: DSLink-android-arm64-debug, path: dist }
+        with: { name: DSLink-Hosted-iPhone-V0-arm64-debug, path: dist }
 
   emulator-x86_64:
     # The whole app on an Android EMULATOR (x86_64 build of the same code) with homebrew test content: Runtime + melonDS core from the APK, native GL surface, AAudio,

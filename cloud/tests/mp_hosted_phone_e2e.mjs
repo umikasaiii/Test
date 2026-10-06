@@ -27,12 +27,12 @@ const screenIs = (p, name) => p.evaluate((n) => document.body.dataset.screen ===
 
 function bridgeFor(dev) {   // what the app's Kotlin + JNI do with the page's calls (P1, the host's own console)
   const calls = { layout: [], visible: [], btn: 0, touch: 0 };
-  let buttons = 0;
+  let buttons = 0, tseq = 0;
   const wr = (off, buf) => { const fd = fs.openSync(shmOf(dev), 'r+'); fs.writeSync(fd, buf, 0, buf.length, off); fs.closeSync(fd); };
   const u32 = (v) => { const b = Buffer.alloc(4); b.writeUInt32LE(v >>> 0); return b; };
   return { calls,
     btn: (k, d) => { calls.btn++; if (!(k in PAD)) return; buttons = d ? (buttons | (1 << PAD[k])) : (buttons & ~(1 << PAD[k])); wr(OFF.buttons, u32(buttons)); },
-    touch: () => { calls.touch++; },
+    touch: (x, y, d) => { calls.touch++; const q = (v) => BigInt(Math.round(Math.max(0, Math.min(1, v)) * 65535)); const t = (d ? 1n : 0n) | (q(x) << 1n) | (q(y) << 17n); const b = Buffer.alloc(8); b.writeBigUInt64LE(t); wr(OFF.touch, b); wr(OFF.touchSeq, u32(++tseq)); },
     layout: (a) => calls.layout.push(a), visible: (v) => calls.visible.push(v) };
 }
 

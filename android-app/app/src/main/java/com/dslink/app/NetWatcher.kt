@@ -97,6 +97,18 @@ class NetWatcher(private val ctx: Context) {
         }.start()
     }
 
+    private var gameLock: WifiManager.WifiLock? = null
+
+    /** While a game runs the Wi-Fi radio is kept in its low-latency mode (the stream to another device and the DS radio link both depend on it); released afterwards. */
+    fun gameWifi(on: Boolean) {
+        try {
+            if (on) {
+                if (gameLock == null) gameLock = wifi.createWifiLock(if (android.os.Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY else WifiManager.WIFI_MODE_FULL_HIGH_PERF, "dslink-game").apply { setReferenceCounted(false) }
+                if (gameLock?.isHeld == false) gameLock?.acquire()
+            } else if (gameLock?.isHeld == true) gameLock?.release()
+        } catch (_: Exception) { /* no Wi-Fi radio / permission: nothing to hold */ }
+    }
+
     private fun acquireMulticast() {
         if (lock == null) lock = wifi.createMulticastLock("dslink-lan").apply { setReferenceCounted(false) }
         if (lock?.isHeld == false) lock?.acquire()

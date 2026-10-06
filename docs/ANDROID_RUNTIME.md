@@ -19,7 +19,7 @@ DEVICE VERIFIED: NO** — nothing here has run on a physical phone yet; speed (5
 ```
 
 * **No second runtime.** The C++ Runtime, the Go gateway, the web UI and the touch-controls module are the same sources as on the desktop; the Android build only adds a thin front end.
-* **SessionMode / RadioTransport / GameStreamTransport** are unchanged: the app runs **Distributed** (`RadioTransport LAN`, `GameStreamTransport NONE`). Hosted needs an encoder the app does not carry yet (see §9).
+* **SessionMode / RadioTransport / GameStreamTransport** are unchanged: phone-to-phone play is **Distributed** (`RadioTransport LAN`, `GameStreamTransport NONE`). **Hosted** (the phone runs both consoles and streams the second to a browser, e.g. an iPhone) is described in [`ANDROID_HOSTED_IPHONE.md`](ANDROID_HOSTED_IPHONE.md).
 * The Runtime gained one option, `--shm FILE`: it writes the raw XRGB frame (triple buffer, seqlock), the audio (lock-free ring) and a status block into a memory-mapped file and reads buttons / touch / pause / quit from it. No encoder, no socket, no copy through JavaScript. The same file layout (`runtime/src/shm_layout.hpp`) is used by the Runtime and the JNI library; on the desktop `shm_probe` plays the front end (`tests/runtime/test_shm_frontend.py`).
 * The page does not draw the picture. The unchanged touch-controls engine lays the picture out exactly as before and the page hands the two rectangles (visible clip, picture) to the app; the native renderer draws the frame there (GL scissor + quad). The true 2:3 DS proportions, FOCUS views, portrait/landscape and safe areas therefore come from the approved layout engine, not from a copy of it.
 
@@ -66,11 +66,9 @@ The gateway starts `libdslink_runtime.so --core libmelondsds_libretro.so --shm �
 | Back | the page's own Back guard (history) asks before leaving a session; at the home screen the task moves to the background |
 | close | leaving from the in-game menu ends the session; finishing the activity stops the gateway and its Runtime (and a parent-death watchdog covers a killed app) |
 
-## 9. Hosted on Android — PARTIAL
+## 9. Hosted on Android — see ANDROID_HOSTED_IPHONE.md
 
-* Not available as a **host**: streaming a console to another device needs H.264/Opus encoders (FFmpeg), which the app does not ship yet; `DSLINK_NO_ENCODER=1` makes the automatic choice always Distributed.
-* The architecture is ready: the same Runtime can run two consoles and the gateway already serves WebRTC; what is missing is an encoder for the Android build and a device test.
-* A guest phone viewing a Hosted game from a desktop host uses the WebView's WebRTC over the existing page code (not tested on a device).
+Hosted host is now available: the phone runs two consoles (its own in shared memory + the guest's), encodes the guest's picture with **MediaCodec H.264** and its sound with **libopus**, and a **browser guest** (iPhone Safari / Home-Screen web app) plays through the host's gateway over WebRTC on the LAN. Everything about it (architecture, encoder, guest page, Safari specifics, tests, limits, device procedure) is in [`ANDROID_HOSTED_IPHONE.md`](ANDROID_HOSTED_IPHONE.md). `DSLINK_NO_ENCODER=1` still exists for builds without an encoder.
 
 ## 10. Developer overlay (off by default)
 
@@ -103,7 +101,7 @@ The emulator proves the pipeline, **not** arm64 performance. Mario Party DS (pri
 ## 13. Known limitations
 
 * **Not verified on a phone**: fps, thermals, battery, audio latency and real Wi-Fi/NSD behaviour are unknown. Software rendering (no OpenGL renderer in the core on Android) may not reach 60 fps on every phone.
-* Hosted host is not available (no encoder). Internet play, PS1, iOS are not part of this milestone.
+* Internet play, PS1, iOS-native are not part of this milestone (Hosted for a browser guest: see ANDROID_HOSTED_IPHONE.md).
 * The camera QR scan depends on the WebView's camera support; the room code and PARTITE VICINE are the fallback.
 * Background emulation is paused (no long screen-off gameplay).
 * Touch UI is the web one inside a WebView: touch latency is the WebView's pointer-event latency plus one JNI call; to be measured on a phone.

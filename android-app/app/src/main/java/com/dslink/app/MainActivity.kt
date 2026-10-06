@@ -148,6 +148,7 @@ class MainActivity : ComponentActivity(), SurfaceHolder.Callback {
         ui.post {
             gameVisible = v
             Native.nativeSetVisible(v)
+            net.gameWifi(v)
             if (v) { window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); requestFocus(); if (resumed) Native.nativeSetPaused(false) }
             else { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); abandonFocus(); Native.nativeSetPaused(false); Native.nativeReleaseAll() }
         }
