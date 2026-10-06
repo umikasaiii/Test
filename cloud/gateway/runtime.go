@@ -144,7 +144,7 @@ func (l *RuntimeLink) Stats() map[string]any {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := map[string]any{"runtime_link_open": !l.closed, "mac": l.mac, "core_multiplayer": l.mp}
-	for _, k := range []string{"frames", "fps", "mp_active", "mp_peers", "mp_role", "mp_in", "mp_out", "video_frames", "audio_packets", "slowest_frame_ms", "width", "height", "dl_state", "dl_counters", "dl_hist"} {
+	for _, k := range []string{"frames", "fps", "mp_active", "mp_peers", "mp_role", "mp_in", "mp_out", "video_frames", "audio_packets", "slowest_frame_ms", "width", "height", "dl_state", "dl_counters", "dl_hist", "session_mode", "radio", "stream", "lan", "lan_code", "lan_join_uri"} {
 		if v, ok := l.status[k]; ok {
 			out[k] = v
 		}
@@ -228,11 +228,16 @@ func (s *Slot) StartRuntime(mpPath string) error {
 	sock := filepath.Join(s.dir, "link.sock")
 	args := []string{"--core", env.Core, "--system", filepath.Join(s.dir, "system"), "--save", filepath.Join(s.dir, "saves"),
 		"--options", optPath, "--username", s.Nick, "--link", sock, "--av", "on", "--codec", videoCodec(), "--name", fmt.Sprintf("slot%d", s.Spec.ID),
-		"--log", s.LogPath, "--mp-path", mpPath}
-	if s.Spec.Host {
-		args = append(args, "--mp-role", "host")
+		"--log", s.LogPath}
+	if s.Lan != nil { // Distributed Mode: the emulated DS radio goes over the LAN transport; no Unix-socket bridge exists for this slot
+		args = append(args, s.Lan.runtimeArgs()...)
 	} else {
-		args = append(args, "--mp-role", "client", "--mp-timeout", "60000")
+		args = append(args, "--mp-path", mpPath)
+		if s.Spec.Host {
+			args = append(args, "--mp-role", "host")
+		} else {
+			args = append(args, "--mp-role", "client", "--mp-timeout", "60000")
+		}
 	}
 	if s.Spec.ROM != "" {
 		args = append(args, "--content", s.Spec.ROM)

@@ -1,6 +1,7 @@
 // devturn: a tiny TURN server (UDP) for LOCAL TESTS ONLY, to exercise the relay-only media path that Cloudflare Containers require
 // (no inbound UDP) without Cloudflare. Static long-term credentials. Never shipped in the production image.
-//   go run ./cmd/devturn -public-ip 127.0.0.1 -user dslink -pass secret
+//
+//	go run ./cmd/devturn -public-ip 127.0.0.1 -user dslink -pass secret
 package main
 
 import (

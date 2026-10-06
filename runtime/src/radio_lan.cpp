@@ -219,11 +219,11 @@ void LanLink::sendData(uint16_t peerId, uint16_t dest, uint16_t src, const void*
     rawSend(pe->addr, T_DATA, myId_, pe->txSeq++, dest, src, p, n, true, pe->ks);
 }
 
-void LanLink::deliverInOrder(Peer& p, double now) {
+void LanLink::deliverInOrder(Peer& p, double now, bool filledGap) {
     while (!p.reseq.empty()) {
         auto it = p.reseq.begin();
         if (it->first == p.nextRx) {
-            st_.reordered++;                                    // it was buffered, i.e. it arrived behind a later packet
+            if (filledGap) st_.reordered++;                     // it was held back and a late arrival just closed the gap: re-sequenced (not counted when the gap was given up on)
             Buffered b = std::move(it->second); p.reseq.erase(it); p.nextRx++;
             if (onData_) onData_(p.id, b.dest, b.src, b.payload.data(), b.payload.size());
         } else if (now - it->second.at >= cfg_.reorderMs) {
@@ -288,11 +288,11 @@ void LanLink::handleDatagram(const uint8_t* d, size_t n, const sockaddr_in& from
             if (seq == pe->nextRx) {
                 pe->nextRx++;
                 if (onData_) onData_(pe->id, dest, src, pl, pn);
-                deliverInOrder(*pe, now);
+                deliverInOrder(*pe, now, true);
             } else if (int32_t(seq - pe->nextRx) > 0) {
                 if (pe->reseq.count(seq)) { st_.duplicates++; return; }
                 pe->reseq[seq] = Buffered{std::vector<uint8_t>(pl, pl + pn), dest, src, now};
-                deliverInOrder(*pe, now);
+                deliverInOrder(*pe, now, false);
             } else st_.lateDropped++;                          // behind the window (or a duplicate of something already delivered)
             break;
         }
@@ -336,7 +336,7 @@ void LanLink::poll() {
     st_.queueMax = std::max(st_.queueMax, q); st_.queueAvg += (double(q) - st_.queueAvg) / double(++st_.queueN > 1000 ? 1000 : st_.queueN);
     for (size_t i = 0; i < peers_.size();) {
         Peer& p = peers_[i];
-        deliverInOrder(p, now);
+        deliverInOrder(p, now, false);
         if (now - p.lastPing >= 500) { uint32_t ts = uint32_t(now); rawSend(p.addr, T_PING, myId_, ctlSeq_++, 0, 0, &ts, 4, true, p.ks); p.lastPing = now; }
         if (now - p.lastRx > cfg_.peerTimeoutMs) { dropPeer(i, false); continue; }
         ++i;

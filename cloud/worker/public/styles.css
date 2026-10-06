@@ -18,7 +18,7 @@ input:focus { outline:none; border-color:var(--accent); }
 .dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:6px; background:var(--muted); } .dot.ONLINE { background:var(--ok); } .dot.IN_GAME { background:var(--warn); } .dot.OFFLINE { background:var(--muted); opacity:.5; }
 .err { color:var(--bad); margin:.5em 0; } .hint { color:var(--muted); font-size:.85rem; }
 .progress { height:6px; border-radius:3px; background:var(--panel2); overflow:hidden; margin-top:8px; } .progress > i { display:block; height:100%; width:0; background:var(--accent); }
-#toast { position:fixed; left:50%; bottom:max(20px,env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--panel2); color:var(--text); padding:12px 18px; border-radius:12px; box-shadow:0 6px 24px #0007; z-index:50; max-width:90vw; }
+#toast { position:fixed; left:50%; bottom:max(20px,env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--panel2); color:var(--text); padding:12px 18px; border-radius:12px; box-shadow:0 6px 24px #0007; z-index:50; pointer-events:none; max-width:90vw; }
 .modal { position:fixed; inset:0; background:#000a; display:grid; place-items:center; z-index:40; padding:20px; } .modal .box { background:var(--panel); border-radius:18px; padding:20px; max-width:420px; width:100%; }
 .modal .box .row { margin-top:16px; } .modal .box button { flex:1; }
 .badge { background:var(--bad); color:#fff; border-radius:10px; padding:1px 8px; font-size:.75rem; margin-left:6px; }

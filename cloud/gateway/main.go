@@ -35,18 +35,19 @@ type Room struct {
 	FirmwareDirs [2]string // cloud sessions: each slot's own firmware
 	ContentBase  string    // cloud sessions: where to persist saves
 	Ticket       string
-	Compat       bool // test-only "Multi-ROM compatibility mode": slot 2 also gets a cartridge
+	Lan          *LanSpec // Distributed Mode: this device's single runtime is a LAN host/guest (no Unix-socket bridge, no second slot)
+	Compat       bool     // test-only "Multi-ROM compatibility mode": slot 2 also gets a cartridge
 	peers        [2]*Peer
 }
 
 type Server struct {
-	env  Env
-	api  *webrtc.API
-	ice  []webrtc.ICEServer
+	env       Env
+	api       *webrtc.API
+	ice       []webrtc.ICEServer
 	relayOnly bool // TURN-relay-only ICE policy (Cloudflare Containers: no inbound UDP)
-	mu   sync.Mutex
-	room *Room
-	up   websocket.Upgrader
+	mu        sync.Mutex
+	room      *Room
+	up        websocket.Upgrader
 }
 
 func randHex(n int) string {
@@ -101,6 +102,10 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 	dir := filepath.Join(s.env.WorkDir, "room")
 	os.RemoveAll(dir)
 	os.MkdirAll(dir, 0o755)
+	if lan := lanSpecFromForm(r); lan != nil { // Distributed Mode (or auto): this device runs ONE runtime; only the emulated DS radio crosses the LAN
+		s.createLanRoom(w, r, dir, lan)
+		return
+	}
 	rom1 := filepath.Join(dir, "player1.nds")
 	if ok, err := s.saveUpload(r, "rom", rom1); !ok || err != nil {
 		jsonOut(w, 400, map[string]string{"error": "manca il file .nds"})
@@ -202,6 +207,11 @@ func (s *Server) startSlots(room *Room, rom1, rom2 string) error {
 	}
 	if runtimeBackend {
 		mp := filepath.Join(s.env.WorkDir, "mp.sock")
+		if room.Lan != nil { // Distributed: this device runs one console only
+			room.Slots[0].Lan = room.Lan
+			room.Slots[0].Spec.Host = room.Lan.Role == "host"
+			room.Slots[1] = nil
+		}
 		if err := room.Slots[0].StartRuntime(mp); err != nil {
 			return fmt.Errorf("slot 1: %w", err)
 		}
@@ -283,9 +293,10 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonOut(w, 200, map[string]any{"room": map[string]any{
 		"code": s.room.Code, "title": s.room.Title, "compat_mode": s.room.Compat,
-		"slots": []any{s.room.Slots[0].Status(), s.room.Slots[1].Status()}, "peers": peers,
-		"macs_differ":            s.room.Slots[0].ExpectedMAC != "" && s.room.Slots[0].ExpectedMAC != s.room.Slots[1].ExpectedMAC,
-		"core_macs_match_dslink": (s.room.Slots[0].MAC == "" || s.room.Slots[0].MAC == s.room.Slots[0].ExpectedMAC) && (s.room.Slots[1].MAC == "" || s.room.Slots[1].MAC == s.room.Slots[1].ExpectedMAC),
+		"slots": slotStatuses(s.room), "peers": peers,
+		"macs_differ":            s.room.Slots[1] != nil && s.room.Slots[0].ExpectedMAC != "" && s.room.Slots[0].ExpectedMAC != s.room.Slots[1].ExpectedMAC,
+		"core_macs_match_dslink": (s.room.Slots[0].MAC == "" || s.room.Slots[0].MAC == s.room.Slots[0].ExpectedMAC) && (s.room.Slots[1] == nil || s.room.Slots[1].MAC == "" || s.room.Slots[1].MAC == s.room.Slots[1].ExpectedMAC),
+		"session_mode":           sessionModeOf(s.room),
 	}})
 }
 

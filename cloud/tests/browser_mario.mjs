@@ -27,6 +27,12 @@ await B.goto(base + '/#' + sess.code); await B.click('#btnEnter');
 await Promise.all([A, B].map((p) => p.waitForFunction(() => window.dslink && window.dslink.pc.connectionState === 'connected', null, { timeout: 40000 })));
 await Promise.all([A, B].map((p) => p.waitForFunction(() => window.dslink.video.videoWidth > 0, null, { timeout: 40000 })));
 check('both browsers connected over WebRTC and receive video', true);
+const rtcStats = (p) => p.evaluate(async () => { const r = await window.dslink.pc.getStats(); const o = {}; r.forEach((x) => {
+  if (x.type === 'inbound-rtp' && x.kind === 'video') Object.assign(o, { vBytes: x.bytesReceived, frames: x.framesDecoded, jitter: x.jitter, lost: x.packetsLost, t: x.timestamp });
+  if (x.type === 'inbound-rtp' && x.kind === 'audio') o.aBytes = x.bytesReceived;
+  if (x.type === 'candidate-pair' && x.state === 'succeeded' && x.nominated) { o.rtt = x.currentRoundTripTime; o.pair = [x.localCandidateId, x.remoteCandidateId]; } });
+  if (o.pair) o.path = o.pair.map((id) => r.get(id)?.candidateType).join('<->'); return o; });
+const rtc0 = [await rtcStats(A), await rtcStats(B)];
 
 // ---- in-page helpers: 16x16 average-hash of the top / bottom screen of the received video, identical sampling to the Python tests (video = 2x)
 const hash = (p) => p.evaluate(() => {
@@ -112,6 +118,10 @@ const [gA, gB] = [await rms(A), await rms(B)];
 check('game audio reaches both browsers during the match', gA > -60 && gB > -60, `A ${gA.toFixed(0)} dB  B ${gB.toFixed(0)} dB`);
 const fin = await status();
 check('both consoles real-time during the whole run (>= 55 fps)', fin.slots.every((x) => x.fps >= 55), fin.slots.map((x) => x.fps && x.fps.toFixed(1)).join(' / '));
+const rtc1 = [await rtcStats(A), await rtcStats(B)];
+const summary = rtc1.map((b, i) => { const a = rtc0[i], dt = (b.t - a.t) / 1000; return { fps: +((b.frames - a.frames) / dt).toFixed(1), videoKbps: Math.round(((b.vBytes - a.vBytes) * 8) / dt / 1000), audioKbps: Math.round(((b.aBytes - a.aBytes) * 8) / dt / 1000), jitterMs: +(b.jitter * 1000).toFixed(2), packetsLost: b.lost, rttMs: b.rtt != null ? +(b.rtt * 1000).toFixed(1) : null, icePath: b.path, seconds: Math.round(dt) }; });
+console.log('WEBRTC_STATS ' + JSON.stringify(summary));
+check('direct WebRTC on the LAN: selected ICE pair is host<->host (no TURN/relay, no Cloudflare)', summary.every((x) => x.icePath === 'host<->host'), summary.map((x) => x.icePath).join(' | '));
 const bad = results.filter((r) => !r.ok).length;
 console.log(`${results.length - bad}/${results.length} checks passed`);
 await browser.close();

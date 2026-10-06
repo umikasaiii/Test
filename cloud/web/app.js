@@ -4,6 +4,13 @@
   const $ = (id) => document.getElementById(id);
   const show = (...ids) => ['menu', 'create', 'join', 'lobby'].forEach((i) => ($(i).hidden = !ids.includes(i)));
   let session = null; // {code, player, token}
+  // MULTIPLAYER MODE (developer menu). auto = distributed first, hosted stays a manual fallback. Hosted = the original path (unchanged).
+  const modeSel = $('mpMode');
+  try { modeSel.value = localStorage.getItem('dslink.mpmode') || 'auto'; } catch { /* storage unavailable */ }
+  modeSel.onchange = () => { try { localStorage.setItem('dslink.mpmode', modeSel.value); } catch { /* ignore */ } syncMode(); };
+  const distributed = () => modeSel.value !== 'hosted' && location.hash.length <= 1;   // a room link (#CODE) is always a Hosted room
+  function syncMode() { $('joinHelp').textContent = distributed() ? 'Inserisci il codice della partita (6 cifre). DSLink trova da solo chi l\'ha creata sulla stessa rete.' : 'Inserisci il codice stanza.'; $('code').maxLength = distributed() ? 6 : 5; }
+  syncMode();
 
   $('btnCreate').onclick = () => { $('menu').hidden = true; show('create'); };
   $('btnJoin').onclick = () => { show('join'); $('code').focus(); };
@@ -13,17 +20,32 @@
     if (!f) { $('createMsg').innerHTML = '<div class="err">Scegli prima un file .nds</div>'; return; }
     $('createMsg').textContent = 'Creazione stanza… (avvio degli emulatori)';
     const fd = new FormData(); fd.append('rom', f);
+    if (distributed()) { fd.append('mode', modeSel.value); fd.append('lan_role', 'host'); }
     const r = await fetch('/api/room', { method: 'POST', body: fd });
     const j = await r.json();
     if (!r.ok) { $('createMsg').innerHTML = '<div class="err"></div>'; $('createMsg').firstChild.textContent = j.error; return; }
     session = j;
-    $('roomCode').textContent = j.code;
-    $('roomLink').textContent = location.origin + '/#' + j.code;
+    if (j.mode === 'distributed') { // the code is all the other player needs; the link/QR text carries the one-time secret for the strong join
+      $('roomCode').textContent = j.lan_code || '…';
+      $('roomLinkLabel').textContent = 'Codice partita (solo per il debug: link di join con segreto):';
+      $('roomLink').textContent = j.lan_uri || '';
+    } else {
+      $('roomCode').textContent = j.code;
+      $('roomLink').textContent = location.origin + '/#' + j.code;
+    }
     show('lobby');
   };
   $('btnStart').onclick = () => start();
 
   async function enter(code) {
+    if (distributed()) { // Distributed guest: start THIS device's own console as a DS Download Play client; discovery finds the host on the LAN
+      $('joinMsg').textContent = 'Cerco la partita sulla rete…';
+      const fd = new FormData(); fd.append('mode', modeSel.value); fd.append('lan_role', 'guest'); fd.append('lan_code', code.trim());
+      if (location.search.includes('lan_discovery_addr=')) { const q = new URLSearchParams(location.search); fd.append('lan_discovery_addr', q.get('lan_discovery_addr')); if (q.get('lan_discovery_port')) fd.append('lan_discovery_port', q.get('lan_discovery_port')); }
+      const r = await fetch('/api/room', { method: 'POST', body: fd }); const j = await r.json();
+      if (!r.ok) { $('joinMsg').innerHTML = '<div class="err"></div>'; $('joinMsg').firstChild.textContent = j.error; return; }
+      session = j; start(); return;
+    }
     const r = await fetch('/api/join', { method: 'POST', body: JSON.stringify({ code }) });
     const j = await r.json();
     if (!r.ok) { $('joinMsg').innerHTML = '<div class="err"></div>'; $('joinMsg').firstChild.textContent = j.error; return; }

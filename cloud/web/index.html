@@ -15,6 +15,7 @@
   button.primary { background:var(--accent); color:#fff; }
   input[type=text] { width:100%; min-height:56px; border-radius:14px; border:1px solid #2a2f3a; background:var(--card); color:var(--fg);
     font-size:24px; letter-spacing:6px; text-transform:uppercase; text-align:center; }
+  select { width:100%; min-height:48px; border-radius:12px; background:var(--card); color:var(--fg); border:1px solid #2a2f3a; font-size:15px; padding:0 8px; margin:8px 0; }
   .err { color:var(--err); margin:10px 0; } .code { font-size:44px; letter-spacing:8px; font-weight:800; color:var(--accent); }
   #player { display:none; position:fixed; inset:0; background:#000; flex-direction:column; align-items:center; }
   #player.on { display:flex; }
@@ -33,7 +34,11 @@
   <div class="muted">Nintendo DS nel browser</div>
   <div id="menu">
     <button class="primary" id="btnCreate">CREA PARTITA</button>
-    <button id="btnJoin">ENTRA</button>
+    <button id="btnJoin">UNISCITI</button>
+    <details id="dev"><summary class="muted">Sviluppatore</summary>
+      <label class="muted" for="mpMode">MULTIPLAYER MODE</label>
+      <select id="mpMode"><option value="auto">Automatico (distribuito, hosted manuale)</option><option value="distributed">Distribuito (una console per dispositivo, solo radio via LAN)</option><option value="hosted">Hosted (un dispositivo emula, l'altro riceve video)</option></select>
+    </details>
   </div>
   <div id="create" hidden>
     <p>Scegli la ROM <b>.nds</b> (resta sul server solo finché la stanza è aperta).</p>
@@ -42,14 +47,14 @@
     <div id="createMsg"></div>
   </div>
   <div id="join" hidden>
-    <p>Inserisci il codice stanza.</p>
-    <input type="text" id="code" maxlength="5" autocomplete="off" autocapitalize="characters">
+    <p id="joinHelp">Inserisci il codice stanza.</p>
+    <input type="text" id="code" maxlength="6" autocomplete="off" autocapitalize="characters" inputmode="text">
     <button class="primary" id="btnEnter">Entra</button>
     <div id="joinMsg"></div>
   </div>
   <div id="lobby" hidden>
     <p class="muted">Codice stanza</p><div class="code" id="roomCode"></div>
-    <p class="muted">Link per l'altro giocatore:</p><p id="roomLink" style="word-break:break-all"></p>
+    <p class="muted" id="roomLinkLabel">Link per l'altro giocatore:</p><p id="roomLink" style="word-break:break-all"></p>
     <button class="primary" id="btnStart">Avvia schermo</button>
   </div>
 </main>

@@ -69,6 +69,7 @@ type Slot struct {
 	VideoTrack  webrtc.TrackLocal
 	AudioTrack  webrtc.TrackLocal
 	rt          *RuntimeLink
+	Lan         *LanSpec      // Distributed Mode: LAN RadioTransport instead of the in-process bridge
 	Events      atomic.Uint64 // input messages received from the browser
 }
 

@@ -93,7 +93,7 @@ private:
     bool openSocket(const std::string& bind, int port, std::string& err);
     void rawSend(const sockaddr_in& to, uint8_t type, uint16_t peerId, uint32_t seq, uint16_t dest, uint16_t src, const void* p, size_t n, bool impair, const uint8_t* key);
     void handleDatagram(const uint8_t* d, size_t n, const sockaddr_in& from, double now);
-    void deliverInOrder(Peer& p, double now);
+    void deliverInOrder(Peer& p, double now, bool filledGap);
     void dropPeer(size_t idx, bool tellPeer);
     void discoveryTick();
     Peer* peerById(uint16_t id);
