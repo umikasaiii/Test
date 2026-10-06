@@ -533,9 +533,8 @@ func (m *MpSession) runGuestDriver(slot *Slot, profile string, stop chan struct{
 	m.mu.Lock()
 	multi := m.hostedGuests > 1
 	m.mu.Unlock()
-	if multi && idx > 0 && !m.waitGuestsDownloaded(idx, 400*time.Second, stop) { // two guests: the downloads go one after the other
-		return errors.New("guest: the previous guest never finished its download")
-	}
+	// two guests ask for the game AT THE SAME TIME: the host serves both in one transfer. (A second guest that asks after the first one's transfer is over is not accepted by the
+	// emulated radio: it never associates, so the downloads must not be serialized.)
 	for i := 0; i < 12; i++ {
 		if multi { // the radio is shared: the state machine would already report the other guest's transfer, so look at the screen
 			if ok, _ := d.screenIs("client_downloading", "bot", 60); ok {

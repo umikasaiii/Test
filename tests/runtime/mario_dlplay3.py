@@ -92,7 +92,17 @@ def own_download_done(r, secs):
         if base is not None and b - base > 650000 and time.time() - at > 8: return True
         time.sleep(0.5)
     return False
-for n, r in (("c1", C1), ("c2", C2)):          # one download after the other: every client asks for the game itself (screen-checked: the radio state is shared)
+if "--simul" in sys.argv:   # both clients ask for the game at the same moment
+    for i in range(8):
+        if screen_is(C1, "client_downloading", "bot", 30) and screen_is(C2, "client_downloading", "bot", 30): break
+        tap(C1, 0.5, 0.67, 0.3, 0.1); tap(C2, 0.5, 0.67, 0.3, 1.6); press(C1, 8, 0.25, 0.1); press(C2, 8, 0.25, 2.5)
+    mark("simultaneous request", c1=screen_is(C1, "client_downloading", "bot", 30), c2=screen_is(C2, "client_downloading", "bot", 30))
+    for k in range(8):
+        time.sleep(5); mark("poll", c1=(C1.status.get("dl_counters") or {}).get("assoc_req_tx"), c2=(C2.status.get("dl_counters") or {}).get("assoc_req_tx"),
+                            c1b=(C1.status.get("dl_counters") or {}).get("data_bytes_rx"), c2b=(C2.status.get("dl_counters") or {}).get("data_bytes_rx"),
+                            s1=screen_is(C1, "client_downloading", "bot", 30), s2=screen_is(C2, "client_downloading", "bot", 30))
+        shot(C2, f"c2_poll{k}"); shot(C1, f"c1_poll{k}")
+for n, r in (("c1", C1), ("c2", C2)) if "--simul" not in sys.argv else ():          # one download after the other: every client asks for the game itself (screen-checked: the radio state is shared)
     for i in range(12):
         if screen_is(r, "client_downloading", "bot", 60): break
         pick(r)
