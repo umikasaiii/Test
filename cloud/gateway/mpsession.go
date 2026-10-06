@@ -25,6 +25,7 @@ type MpPlayer struct {
 	token     string
 	lastSeen  time.Time
 	addr      string
+	dev       string
 	lobbyOnly string // the peer's own state as it reports it (guest -> host)
 }
 
@@ -34,10 +35,12 @@ type mpPlan struct {
 	HostedCode  string `json:"hostedCode,omitempty"`
 	HostedToken string `json:"hostedToken,omitempty"`
 	Seq         int    `json:"seq"`
+	Attempt     int    `json:"attempt,omitempty"` // which try of the DS-level setup the host is on (the guest restarts its console when it grows)
 }
 
 const (
 	mpPeerDeadMs     = 5000  // no heartbeat for this long = peer unreachable
+	mpSetupAttempts  = 2     // the Download Play setup is redone once, quietly, before the user is told
 	mpReconnectGrace = 12000 // how long a vanished peer may come back before the session ends
 	mpLobbyTTL       = 15 * time.Minute
 )
@@ -56,6 +59,9 @@ type MpSession struct {
 	modeEffective        string
 	modeNote             string
 	hostName             string
+	devID                string // random per gateway process, sent when joining
+	attempt              int    // host: current try of the DS-level setup (1..mpSetupAttempts)
+	guestAttempt         int    // guest: the host's attempt this device has acted on
 	players              [2]*MpPlayer
 	net                  MpNetResult
 	netDone              bool
@@ -89,7 +95,7 @@ type MpSession struct {
 }
 
 func newMpSession(s *Server) *MpSession {
-	return &MpSession{srv: s, state: MpIdle, modeChosen: "auto"}
+	return &MpSession{srv: s, state: MpIdle, modeChosen: "auto", devID: randHexN(8)}
 }
 
 func (m *MpSession) logf(format string, a ...any) {
@@ -279,6 +285,7 @@ func (m *MpSession) resetLocked() {
 	m.players = [2]*MpPlayer{}
 	m.net, m.netDone, m.step, m.err = MpNetResult{}, false, "", nil
 	m.modeEffective, m.modeNote, m.plan, m.started = "", "", mpPlan{}, false
+	m.attempt, m.guestAttempt = 0, 0
 	m.hostState = ""
 	m.hostDriverOK, m.guestDriverOK, m.radioSeen, m.keepEnded = false, false, false, false
 	m.badJoins, m.lockedUntil = nil, time.Time{}

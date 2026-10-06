@@ -101,9 +101,18 @@ func (d *dlDriver) alive() bool {
 
 // snapshotHash grabs the console's current picture and returns the 16x16 average-hash of both screens (the picture is deleted at once; nothing is kept).
 func (d *dlDriver) snapshotHash() (top, bot string, err error) {
+	w, h, px, err := d.capture()
+	if err != nil {
+		return "", "", err
+	}
+	return hashScreens(w, h, px)
+}
+
+// capture asks the Runtime for its current raw frame (256x384: both DS screens) and deletes the file at once.
+func (d *dlDriver) capture() (w, h int, px []byte, err error) {
 	rt := d.slot.rt
 	if rt == nil {
-		return "", "", errors.New("runtime not running")
+		return 0, 0, nil, errors.New("runtime not running")
 	}
 	path := filepath.Join(d.slot.dir, fmt.Sprintf("drv_%d.ppm", drvSeq.Add(1)))
 	os.Remove(path)
@@ -111,7 +120,7 @@ func (d *dlDriver) snapshotHash() (top, bot string, err error) {
 	var data []byte
 	for i := 0; i < 60; i++ {
 		if err := d.sleep(80 * time.Millisecond); err != nil {
-			return "", "", err
+			return 0, 0, nil, err
 		}
 		if st, e := os.Stat(path); e == nil && st.Size() > 100 {
 			d.sleep(60 * time.Millisecond)
@@ -121,19 +130,22 @@ func (d *dlDriver) snapshotHash() (top, bot string, err error) {
 	}
 	os.Remove(path)
 	if len(data) == 0 {
-		return "", "", errors.New("no snapshot")
+		return 0, 0, nil, errors.New("no snapshot")
 	}
 	parts := strings.SplitN(string(data[:min(len(data), 40)]), "\n", 4)
 	if len(parts) < 4 {
-		return "", "", errors.New("bad snapshot")
+		return 0, 0, nil, errors.New("bad snapshot")
 	}
-	var w, h int
 	fmt.Sscanf(parts[1], "%d %d", &w, &h)
 	hdr := len(parts[0]) + len(parts[1]) + len(parts[2]) + 3
-	px := data[hdr:]
+	px = data[hdr:]
 	if w < 256 || h < 384 || len(px) < w*h*3 {
-		return "", "", errors.New("unexpected snapshot size")
+		return 0, 0, nil, errors.New("unexpected snapshot size")
 	}
+	return w, h, px, nil
+}
+
+func hashScreens(w, h int, px []byte) (top, bot string, err error) {
 	hash := func(y0 int) string {
 		var g []int
 		sum := 0
@@ -167,6 +179,25 @@ func dist(a, b string) int {
 		}
 	}
 	return n
+}
+
+// nearest: the reference screen closest to the current picture (developer log only: "name distance").
+func (d *dlDriver) nearest(which string) string {
+	t, b, err := d.snapshotHash()
+	if err != nil {
+		return "?"
+	}
+	best, bd := "none", 1<<30
+	for name, ref := range d.refs {
+		x := dist(b, ref.Bot)
+		if which == "top" {
+			x = dist(t, ref.Top)
+		}
+		if x < bd {
+			best, bd = name, x
+		}
+	}
+	return best + " " + itoa(bd)
 }
 
 // screenIs: does the console show the reference screen? which = "top" | "bot" | "both".
@@ -248,6 +279,12 @@ func (d *dlDriver) ifScreen(name, which string, tol int, fn func() error) error 
 	return nil
 }
 
+func (m *MpSession) note(format string, a ...any) {
+	m.mu.Lock()
+	m.logf("driver: "+format, a...)
+	m.mu.Unlock()
+}
+
 func ms(n int) time.Duration { return time.Duration(n) * time.Millisecond }
 
 // ---------------------------------------------------------------- Mario Party DS profile (single-card Download Play)
@@ -295,6 +332,7 @@ func (m *MpSession) runHostDriver(room *Room, mode, profile string, stop chan st
 		return fmt.Errorf("host: multiplayer menu: %v", err)
 	}
 	m.setStep("Ricerca partita…")
+	m.note("host: waiting for the other console")
 	if !d.waitState([]string{"DOWNLOAD_HANDSHAKE", "DOWNLOAD_TRANSFER", "DOWNLOAD_VERIFY"}, 240*time.Second) {
 		return errors.New("host: the other console never asked for the game")
 	}
@@ -302,16 +340,49 @@ func (m *MpSession) runHostDriver(room *Room, mode, profile string, stop chan st
 	if !d.waitState([]string{"DOWNLOAD_VERIFY"}, 400*time.Second) {
 		return errors.New("host: transfer did not complete")
 	}
+	m.note("host: transfer complete")
+	if os.Getenv("DSLINK_MP_TEST_FAIL_FIRST") == "1" { // tests only: proves that a failed first setup is redone quietly
+		m.mu.Lock()
+		first := m.attempt == 1
+		m.mu.Unlock()
+		if first {
+			return errors.New("test: forced failure of the first attempt")
+		}
+	}
+	if err := d.sleep(12 * time.Second); err != nil { // let the other console finish verifying what it received: starting before that leaves it waiting forever
+		return err
+	}
 	if !d.waitScreen("host_p2_joined", "bot", 60, 40*time.Second) {
 		return errors.New("host: player 2 not listed")
 	}
-	if err := d.tap(0.88, 0.97, ms(400), 3*time.Second); err != nil { // OK -> start
-		return err
-	}
 	m.setStep("Avvio partita…")
-	if !d.waitState([]string{"CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 240*time.Second) || !d.waitState([]string{"GAME_HANDSHAKE", "LOBBY"}, 240*time.Second) {
-		return errors.New("host: game did not start")
+	started := false
+	for try := 0; try < 10 && !started; try++ { // OK -> start; state-aware and quick: a tap that is ignored must not leave the other console waiting long enough to be dropped
+		if onP1, _ := d.screenIs("host_you_are_p1", "bot", 40); onP1 && try > 0 {
+			break // the game already started on this console: tapping again would go somewhere else
+		}
+		m.note("host: OK (try %d, state %s, screen %s)", try+1, d.state(), d.nearest("bot"))
+		var err error
+		switch try % 3 { // the OK button sits at the very edge of the touch screen: vary the touch point, and use the A button as the same "OK"
+		case 0:
+			err = d.tap(0.88, 0.97, ms(400), 1500*time.Millisecond)
+		case 1:
+			err = d.tap(0.85, 0.94, ms(500), 1500*time.Millisecond)
+		default:
+			err = d.press("a", ms(300), 1500*time.Millisecond)
+		}
+		if err != nil {
+			return err
+		}
+		started = d.waitState([]string{"CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 6*time.Second)
 	}
+	if !started {
+		return errors.New("host: the game did not start after OK")
+	}
+	if !d.waitState([]string{"GAME_HANDSHAKE", "LOBBY"}, 100*time.Second) {
+		return errors.New("host: game handshake did not complete")
+	}
+	m.note("host: game handshake reached")
 	d.waitScreen("host_you_are_p1", "bot", 40, 60*time.Second)
 	for i := 0; i < 8; i++ {
 		if ok, _ := d.screenIs("host_select_mode", "bot", 60); ok {
@@ -347,6 +418,7 @@ func (m *MpSession) runGuestDriver(slot *Slot, profile string, stop chan struct{
 		return fmt.Errorf("guest: Download Play: %v", err)
 	}
 	m.setStep("Ricerca partita…")
+	m.note("guest: Download Play open, waiting for the host")
 	if !d.waitState([]string{"GAME_DISCOVERED", "DOWNLOAD_HANDSHAKE", "DOWNLOAD_TRANSFER", "DOWNLOAD_VERIFY"}, 300*time.Second) {
 		return errors.New("guest: no game found")
 	}
@@ -365,10 +437,12 @@ func (m *MpSession) runGuestDriver(slot *Slot, profile string, stop chan struct{
 		}
 	}
 	m.setStep("Download Play…")
+	m.note("guest: download requested (state %s)", d.state())
 	if !d.waitState([]string{"DOWNLOAD_VERIFY", "CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 500*time.Second) {
 		return errors.New("guest: download did not complete")
 	}
 	m.setStep("Avvio partita…")
+	m.note("guest: waiting for the host to start (state %s)", d.state())
 	if !d.waitState([]string{"CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 400*time.Second) || !d.waitState([]string{"GAME_HANDSHAKE", "LOBBY"}, 400*time.Second) {
 		return errors.New("guest: game did not start")
 	}

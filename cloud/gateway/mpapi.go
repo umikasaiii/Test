@@ -6,8 +6,12 @@ package main
 
 import (
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -92,6 +96,33 @@ func (s *Server) registerMp(mux *http.ServeMux) {
 		}
 		m.mu.Unlock()
 		mpReply(w, nil, nil)
+	})
+	mux.HandleFunc("/api/mp/dev/snapshot", func(w http.ResponseWriter, r *http.Request) { // developer only: this device's console picture, loopback requests only
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if os.Getenv("DSLINK_DEV") != "1" || (host != "127.0.0.1" && host != "::1") {
+			http.NotFound(w, r)
+			return
+		}
+		m.mu.Lock()
+		room := m.local
+		m.mu.Unlock()
+		idx, _ := strconv.Atoi(r.URL.Query().Get("slot"))
+		if room == nil || idx < 0 || idx > 1 || room.Slots[idx] == nil {
+			http.NotFound(w, r)
+			return
+		}
+		d := &dlDriver{slot: room.Slots[idx], stop: make(chan struct{})}
+		wd, ht, px, err := d.capture()
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		img := image.NewRGBA(image.Rect(0, 0, wd, ht))
+		for i := 0; i < wd*ht; i++ {
+			img.Pix[i*4], img.Pix[i*4+1], img.Pix[i*4+2], img.Pix[i*4+3] = px[i*3], px[i*3+1], px[i*3+2], 255
+		}
+		w.Header().Set("Content-Type", "image/png")
+		png.Encode(w, img)
 	})
 	// peer protocol
 	mux.HandleFunc("/api/lobby/join", m.handleJoin)

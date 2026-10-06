@@ -60,6 +60,7 @@ def spawn(role, name, rom):
     if LAN:
         extra = ["--session-mode", "distributed", "--lan-role", "host" if role == "host" else "guest", "--lan-code", "482731", "--lan-discovery-port", str(DISC), "--lan-discovery-addr", "127.0.0.1", "--lan-bind", "127.0.0.1", "--lan-name", name]
         if IMPAIR: extra += ["--lan-impair", IMPAIR]
+        if role == "host" and "--grace-test" in sys.argv: extra += ["--mp-peer-grace-ms", "10000"]
         return Runtime(rt, core, rom, d, name=name, username=g("nick"), opts=f"{work}/{name}.opts", av=AV, extra=extra)
     return Runtime(rt, core, rom, d, name=name, username=g("nick"), opts=f"{work}/{name}.opts", mp=(role, sock), av=AV)
 
@@ -156,7 +157,10 @@ t.check("DOWNLOAD_TRANSFER: the game's download payload is sent (hundreds of 292
 t.check("DOWNLOAD_VERIFY: payload complete, client holds the software and waits for the host", wait_state(C, {"DOWNLOAD_VERIFY"}, 90), dl(C))
 t.check("client screen: 'Downloading...' (waiting for the host to start)", wait_screen(C, "client_downloading", 10, "bot"))
 t.check("host's lobby lists the client as a player (screen)", wait_screen(H, "host_p2_joined", 10, "bot", 60))
-tap(H, 0.88, 0.97, 0.4, 3)                                    # host: OK -> start
+for _try in range(8):                                          # host: OK -> start; an ignored tap is repeated quickly (state-aware), as the product's assistant does
+    if screen_is(H, "host_you_are_p1", "bot", 40) and _try > 0: break
+    tap(H, 0.88, 0.97, 0.4, 1.5)
+    if wait_state(C, {"CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 6): break
 t.check("CLIENT_GAME_BOOT: the client reboots into the downloaded software (blank replies)", wait_state(C, {"CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 60), dl(C))
 t.check("GAME_HANDSHAKE: regular replies from the downloaded game", wait_state(C, {"GAME_HANDSHAKE", "LOBBY"}, 90), dl(C))
 t.check("GAME_HANDSHAKE (screen): client 'You are P2' (downloaded game, no ROM)", wait_screen(C, "client_you_are_p2", 60, "bot"))
@@ -170,6 +174,14 @@ if "--game" not in sys.argv and "--blind-game" not in sys.argv:
     for f, r in (("host", H), ("client", C)):
         open(os.path.join(out, f"dlplay_{f}.txt"), "w").write("\n".join(l for l in r.log().splitlines() if "DLPLAY" in l))
     t.check("neither console process crashed or powered off during the whole Download Play flow", H.proc.poll() is None and C.proc.poll() is None)
+    if "--grace-test" in sys.argv:                                    # the known 6-7 fps problem: with the peer gone the host must end the multiplayer session by itself and run at full speed again
+        C.kill(); time.sleep(3)
+        slow = H.status.get("fps")
+        time.sleep(14)
+        hs = H.status
+        print(f"INFO  host fps right after the peer vanished: {slow}; after the grace window: {hs.get('fps')}", flush=True)
+        t.check("peer lost: the host ended the multiplayer session by itself (grace window) and keeps running", H.proc.poll() is None and hs.get("mp_ended") == "peer_lost" and hs.get("mp_role") == "none", f"ended={hs.get('mp_ended')} role={hs.get('mp_role')}")
+        t.check("peer lost: the host console is back at full speed (>= 55 fps), not stuck at ~6 fps", hs.get("fps", 0) >= 55, f"fps={hs.get('fps')} (during the stall: {slow})")
     if "--disconnect-test" in sys.argv:                              # TEST E at game level: the guest device vanishes mid-session (SIGKILL: no BYE), then a new guest process joins
         C.kill(); time.sleep(7)
         hs = H.status
@@ -188,7 +200,7 @@ if "--game" not in sys.argv and "--blind-game" not in sys.argv:
         except Exception: rch = "hang"
     else:
         rcc = C.stop(); rch = H.stop()
-    t.check("both consoles shut down cleanly after a real Download Play session (exit code 0, no crash)", rcc == 0 and rch == 0, f"client rc={rcc} host rc={rch}")
+    t.check("both consoles shut down cleanly after a real Download Play session (exit code 0, no crash)", (rcc == 0 or ("--grace-test" in sys.argv and rcc == -9)) and rch == 0, f"client rc={rcc} (the grace test kills it on purpose) host rc={rch}")
     sys.exit(t.done())
 if "--blind-game" not in sys.argv:
     t.check("host picks Puzzle Mode; both consoles enter it", goto(H, "host_puzzle_menu", lambda: if_screen(H, "host_select_mode", "bot", lambda: (tap(H, 0.28, 0.80), tap(H, 0.88, 0.965, 0.5, 14))), "top", 4, 4, 60) and goto(C, "client_lobby", lambda: None, "top", 1) is not None)

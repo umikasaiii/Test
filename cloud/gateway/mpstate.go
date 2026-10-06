@@ -32,7 +32,7 @@ var mpAllowed = map[MpState][]MpState{
 	MpNetworkCheck:   {MpConnected, MpReady, MpWaitingForPeer, MpEnded, MpError},
 	MpReady:          {MpStarting, MpConnected, MpNetworkCheck, MpWaitingForPeer, MpEnded, MpError},
 	MpStarting:       {MpDownloadPlay, MpInGame, MpError, MpEnded, MpReconnecting},
-	MpDownloadPlay:   {MpInGame, MpReconnecting, MpError, MpEnded},
+	MpDownloadPlay:   {MpInGame, MpReconnecting, MpStarting, MpError, MpEnded}, // STARTING again = the setup is redone once, quietly
 	MpInGame:         {MpReconnecting, MpEnded, MpConnected, MpWaitingForPeer, MpError},
 	MpReconnecting:   {MpInGame, MpDownloadPlay, MpStarting, MpConnected, MpWaitingForPeer, MpEnded, MpError},
 	MpEnded:          {MpIdle},

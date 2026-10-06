@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +20,7 @@ func TestStateMachineRejectsImpossibleTransitions(t *testing.T) {
 		}
 	}
 	good := [][2]MpState{{MpIdle, MpCreatingRoom}, {MpCreatingRoom, MpWaitingForPeer}, {MpWaitingForPeer, MpConnected}, {MpConnected, MpNetworkCheck}, {MpNetworkCheck, MpReady}, {MpReady, MpStarting},
-		{MpStarting, MpDownloadPlay}, {MpDownloadPlay, MpInGame}, {MpInGame, MpReconnecting}, {MpReconnecting, MpInGame}, {MpReconnecting, MpEnded}, {MpEnded, MpIdle}}
+		{MpStarting, MpDownloadPlay}, {MpDownloadPlay, MpStarting}, {MpDownloadPlay, MpInGame}, {MpInGame, MpReconnecting}, {MpReconnecting, MpInGame}, {MpReconnecting, MpEnded}, {MpEnded, MpIdle}}
 	for _, g := range good {
 		if !mpCanGo(g[0], g[1]) {
 			t.Errorf("%s -> %s must be possible", g[0], g[1])
@@ -337,5 +338,26 @@ func TestLobbyHostCancelGuestLeaveExpiryAndLockout(t *testing.T) {
 	}
 	if e := d.guest.mp.Join(JoinRequest{Code: code, Addr: addr}); e == nil || e.Code != "locked" {
 		t.Fatalf("lockout: %v", e)
+	}
+}
+
+// The DS-level setup is redone once, quietly; an old attempt's failure is ignored; the last attempt's failure reaches the user.
+func TestSetupFailedRetriesOnceThenTellsTheUser(t *testing.T) {
+	s := &Server{env: Env{WorkDir: t.TempDir()}}
+	s.mp = newMpSession(s)
+	m := s.mp
+	m.mu.Lock()
+	m.role, m.state, m.attempt = "host", MpDownloadPlay, mpSetupAttempts
+	m.mu.Unlock()
+	m.setupFailed("distributed", mpSetupAttempts-1, errors.New("old attempt")) // not the current attempt: ignored
+	if stateOf(s) != MpDownloadPlay {
+		t.Fatalf("a failure of an older attempt must be ignored, state %s", stateOf(s))
+	}
+	m.setupFailed("distributed", mpSetupAttempts, errors.New("last attempt"))
+	if st := stateOf(s); st != MpError {
+		t.Fatalf("the last attempt's failure must reach the user, state %s", st)
+	}
+	if e := m.view(false)["error"].(*MpErr); e.Code != "setup_timeout" {
+		t.Fatalf("error %v", e)
 	}
 }

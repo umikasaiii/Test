@@ -137,6 +137,7 @@ type joinReq struct {
 	Nonce string `json:"nonce"`
 	Proof string `json:"proof"`
 	Via   string `json:"via"` // code | qr | nearby
+	Dev   string `json:"dev"` // this device's own random id: the same device asking twice is idempotent, anyone else finds the room full
 }
 
 func (m *MpSession) hostAnnounce() (mpAnnounce, bool) {
@@ -198,14 +199,14 @@ func (m *MpSession) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	addr, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if g := m.players[1]; g != nil { // duplicate join: the same device asking again gets the same answer; anyone else finds the room full
-		if g.addr == addr && g.Name == q.Name {
+		if g.addr == addr && g.dev == q.Dev {
 			jsonOut(w, 200, m.joinAnswer(q, g))
 			return
 		}
 		jsonOut(w, 409, map[string]string{"error": "room_full"})
 		return
 	}
-	g := &MpPlayer{Name: q.Name, Role: "guest", Connected: true, token: randHexN(16), lastSeen: now, addr: addr}
+	g := &MpPlayer{Name: q.Name, Role: "guest", Connected: true, token: randHexN(16), lastSeen: now, addr: addr, dev: q.Dev}
 	if q.Via == "nearby" {
 		g.Pending, g.Connected = true, false
 	}
@@ -317,6 +318,7 @@ func (m *MpSession) handleLobbyReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g.lobbyOnly, g.lastSeen = string(q.State), time.Now()
+	m.checkInGameLocked() // the guest may be the last of the two to finish its setup
 	jsonOut(w, 200, map[string]any{"ok": true})
 }
 
@@ -449,13 +451,12 @@ func (m *MpSession) Join(req JoinRequest) *MpErr {
 	name := deviceName()
 	m.mu.Unlock()
 
-	fail := func(code string) *MpErr {
+	fail := func(code string) *MpErr { // a failed join returns to the Join screen with the message inline (no dead-end error screen)
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		m.go_(MpError)
-		m.err = mpErr(code)
-		m.step = ""
-		return m.err
+		m.logf("join failed: %s", code)
+		m.resetLocked()
+		return mpErr(code)
 	}
 
 	var code, secret, hostAddr, room, via string
@@ -494,7 +495,7 @@ func (m *MpSession) Join(req JoinRequest) *MpErr {
 		return fail("bad_code")
 	}
 	nonce := randHexN(8)
-	body := joinReq{Room: room, Name: name, Nonce: nonce, Via: via}
+	body := joinReq{Room: room, Name: name, Nonce: nonce, Via: via, Dev: m.devID}
 	if via == "qr" {
 		body.Proof = hmacHex(secretKey(secret), "join", room, nonce, name)
 	} else if via == "code" {

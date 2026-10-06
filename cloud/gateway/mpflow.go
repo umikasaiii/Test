@@ -57,7 +57,9 @@ func (m *MpSession) Start() *MpErr {
 	m.modeEffective, m.modeNote = eff, note
 	m.go_(MpStarting)
 	m.step = "Preparazione partita…"
-	m.plan = mpPlan{Mode: eff, Seq: m.plan.Seq + 1}
+	m.attempt = 1
+	m.guestAttempt = 0
+	m.plan = mpPlan{Mode: eff, Seq: m.plan.Seq + 1, Attempt: 1}
 	m.radioSeen = false
 	m.stopDrv = make(chan struct{})
 	stop := m.stopDrv
@@ -85,7 +87,7 @@ func (m *MpSession) failStart(code string, why error) {
 
 func (m *MpSession) hostLaunch(mode string, stop chan struct{}) {
 	m.mu.Lock()
-	rom, title, profile, code, secret := m.gamePath, m.game.Title, m.game.Profile, m.code, m.secret
+	rom, title, profile, code, secret, gen := m.gamePath, m.game.Title, m.game.Profile, m.code, m.secret, m.attempt
 	m.mu.Unlock()
 	room := &Room{Code: roomCode(), Title: title, Created: time.Now()}
 	m.setStep("Avvio Nintendo DS…")
@@ -151,7 +153,7 @@ func (m *MpSession) hostLaunch(mode string, stop chan struct{}) {
 			select {
 			case <-stop:
 			default:
-				m.failStart("setup_timeout", err)
+				m.setupFailed(mode, gen, err)
 			}
 			return
 		}
@@ -163,13 +165,44 @@ func (m *MpSession) hostLaunch(mode string, stop chan struct{}) {
 				select {
 				case <-stop:
 				default:
-					m.failStart("setup_timeout", err)
+					m.setupFailed(mode, gen, err)
 				}
 				return
 			}
 			m.driverDone(false)
 		}()
 	}
+}
+
+// setupFailed: the DS-level setup (Download Play) did not complete. The first time the whole setup is redone quietly (consoles restarted, same session,
+// the guest device follows when it sees the attempt grow); the second time the user is told. Older attempts and a session that moved on are ignored.
+func (m *MpSession) setupFailed(mode string, gen int, err error) {
+	m.mu.Lock()
+	if gen != m.attempt || m.state != MpDownloadPlay {
+		m.mu.Unlock()
+		return
+	}
+	if m.attempt >= mpSetupAttempts {
+		m.mu.Unlock()
+		m.failStart("setup_timeout", err)
+		return
+	}
+	m.logf("setup attempt %d failed: %v - trying again", m.attempt, err)
+	if m.stopDrv != nil {
+		close(m.stopDrv)
+	}
+	m.stopDrv = make(chan struct{})
+	stop := m.stopDrv
+	m.attempt++
+	m.plan.Attempt, m.plan.LanPort = m.attempt, 0
+	m.plan.Seq++
+	m.hostDriverOK, m.guestDriverOK, m.radioSeen = false, false, false
+	m.local = nil
+	m.go_(MpStarting)
+	m.step = "Preparazione partita…"
+	m.mu.Unlock()
+	m.srv.closeRoom()
+	go m.hostLaunch(mode, stop)
 }
 
 // driverDone: host side reaches IN_GAME when the host's driver finished and the guest side too (hosted: its own driver; distributed: the guest reports).
@@ -305,6 +338,20 @@ func (m *MpSession) guestLoop(stop chan struct{}, nonce string) {
 		m.net, m.netDone = MpNetResult{Class: hs.Net.Class}, hs.Net.Done
 		m.modeChosen, m.modeEffective, m.modeNote = hs.Mode.Chosen, hs.Mode.Effective, hs.Mode.Note
 		m.hostState, m.plan = hs.State, hs.Plan
+		if hs.Plan.Attempt > m.guestAttempt { // the host redoes the setup: this device's console is restarted too (it relaunches below once the new port is published)
+			if m.started && hs.Plan.Mode == "distributed" {
+				m.logf("host restarts the setup (attempt %d)", hs.Plan.Attempt)
+				if m.stopDrv != nil {
+					close(m.stopDrv)
+					m.stopDrv = nil
+				}
+				m.local, m.started = nil, false
+				m.mu.Unlock() // stopping the console takes a moment: keep answering the host's heartbeat meanwhile
+				m.srv.closeRoom()
+				m.mu.Lock()
+			}
+			m.guestAttempt = hs.Plan.Attempt
+		}
 		if hs.State == MpEnded || hs.State == MpError {
 			reason := "host_closed"
 			if hs.Error != nil && hs.Error.Code != "" {
@@ -326,8 +373,17 @@ func (m *MpSession) guestLoop(stop chan struct{}, nonce string) {
 			m.go_(MpNetworkCheck)
 			go m.guestNetCheck(addr, tok, m.hostUDP)
 		}
+		// the guest's lobby state mirrors the host's READY (both ready, network checked)
+		if hs.State == MpReady && m.state == MpConnected {
+			m.go_(MpReady)
+		} else if hs.State == MpConnected && m.state == MpReady {
+			m.go_(MpConnected)
+		}
 		launch := (hs.State == MpStarting || hs.State == MpDownloadPlay || hs.State == MpInGame) && hs.Plan.Mode != "" && !m.started
 		if launch && m.state != MpStarting && m.state != MpDownloadPlay && m.state != MpInGame {
+			if m.state == MpConnected || m.state == MpNetworkCheck {
+				m.go_(MpReady) // a poll can miss the READY moment: pass through it so the machine stays honest
+			}
 			m.go_(MpStarting)
 			m.step = "Preparazione partita…"
 		}
@@ -383,7 +439,8 @@ func (m *MpSession) guestRuntimeEnded() bool {
 	}
 	st := m.local.Slots[0].Status()
 	e, _ := st["mp_ended"].(string)
-	return e != ""
+	open, _ := st["runtime_link_open"].(bool)
+	return e != "" || !open // the radio session ended, or this device's own console process died
 }
 
 func (m *MpSession) guestNetCheck(addr, tok string, udp int) {

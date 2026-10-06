@@ -53,6 +53,8 @@ jobs:
         run: python3 tests/runtime/test_peer_loss.py build/rt/dslink-runtime build/rt/dslink_npt_libretro.so 8
       - name: Download Play diagnostics state machine (synthetic frames)
         run: build/rt/dlplay_test
+      - name: "Multiplayer gateway (Go): session state machine, lobby, QR payload, discovery, network pre-check, join auth/lockout/expiry"
+        run: cd cloud/gateway && go vet ./... && go test ./...
       - name: LAN RadioTransport unit tests (discovery, authenticated join, resequencer, loss/jitter, lockout)
         run: build/rt/lan_test
       - name: Distributed Mode - real DS wireless frames ONLY over the LAN transport (two Runtime processes, discovery, reconnect, crash)
@@ -108,7 +110,16 @@ jobs:
       - name: Touch controls in real Chrome (4 layouts, multitouch, stylus, FOCUS)
         env: { CHROME: /opt/google/chrome/chrome }
         run: cd cloud/tests && node controls_e2e.mjs http://localhost:8787
-      - name: Cloudflare Containers media path (no inbound UDP): browsers <-> TURN relay <-> gateway, relay-only
+      - name: Multiplayer UX end to end (two devices = two gateways, two browsers, only through the UI; LAN only, no cloud)
+        env:
+          CHROME: /opt/google/chrome/chrome
+          DSLINK_GATEWAY: ${{ github.workspace }}/build/dslink-gateway
+          DSLINK_RUNTIME: ${{ github.workspace }}/build/rt/dslink-runtime
+          DSLINK_CORE: ${{ github.workspace }}/build/core/src/libretro/melondsds_libretro.so
+          DSLINK_CFGTOOL: ${{ github.workspace }}/build/dslink/dslink_cfgtool
+          DSLINK_ROMCHECK: ${{ github.workspace }}/build/dslink/dslink_romcheck
+        run: cd cloud/tests && node mp_ux_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/mpshots
+      - name: "Cloudflare Containers media path (no inbound UDP): browsers <-> TURN relay <-> gateway, relay-only"
         env: { CHROME: /opt/google/chrome/chrome, DSLINK_VIDEO_CODEC: h264 }
         run: |
           pkill -x dslink-gateway || true; sleep 1
@@ -117,7 +128,7 @@ jobs:
         run: tail -60 /tmp/gw.log /tmp/wrangler.log || true
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: pwa-e2e-screenshots, path: "/tmp/pwa_*_game.png" }
+        with: { name: pwa-e2e-screenshots, path: "/tmp/pwa_*_game.png\n/tmp/mpshots/*.png" }
 
   retroarch-parity:
     # RetroArch is REFERENCE ONLY: built here solely to compare behaviour (bridge routing, A/B frontend parity).

@@ -226,6 +226,7 @@ func (s *Slot) StartRuntime(mpPath string) error {
 		return err
 	}
 	sock := filepath.Join(s.dir, "link.sock")
+	os.Remove(sock) // a killed previous console leaves its socket file behind: never mistake it for the new one
 	args := []string{"--core", env.Core, "--system", filepath.Join(s.dir, "system"), "--save", filepath.Join(s.dir, "saves"),
 		"--options", optPath, "--username", s.Nick, "--link", sock, "--av", "on", "--codec", videoCodec(), "--name", fmt.Sprintf("slot%d", s.Spec.ID),
 		"--log", s.LogPath}

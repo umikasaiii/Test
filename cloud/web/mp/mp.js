@@ -22,7 +22,7 @@ function show(name) { screens().forEach((s) => s.classList.toggle("on", s.datase
 function go(next, push = true) { view = next; if (push) history.pushState({ view: next }, ""); render(); }
 history.replaceState({ view: "home" }, "");
 window.addEventListener("popstate", (e) => {
-  const busy = ["WAITING_FOR_PEER", "JOINING", "CONNECTED", "NETWORK_CHECK", "READY", "STARTING", "DOWNLOAD_PLAY", "IN_GAME", "RECONNECTING", "CREATING_ROOM"].includes(st.state);
+  const busy = BUSY.includes(st.state);
   if (busy) { history.pushState({ view }, ""); askLeave(); return; }       // Back inside a session never loses it silently
   view = (e.state && e.state.view) || "home"; if (!["home", "create", "join"].includes(view)) view = "home"; render();
 });
@@ -52,8 +52,12 @@ window.addEventListener("online", poll);
 
 // ---------------------------------------------------------------- rendering
 const STEP_LIST = ["Preparazione partita…", "Connessione al secondo giocatore…", "Avvio Nintendo DS…", "Ricerca partita…", "Download Play…", "Avvio partita…"];
+const BUSY = ["WAITING_FOR_PEER", "JOINING", "CONNECTED", "NETWORK_CHECK", "READY", "STARTING", "DOWNLOAD_PLAY", "IN_GAME", "RECONNECTING", "CREATING_ROOM"];
+let guard = false;
 function render() {
   const s = st.state;
+  if (BUSY.includes(s) && !guard) { history.pushState({ guard: true }, ""); guard = true; }   // Back inside a session must stay in the app and ask, even after a reload
+  if (!BUSY.includes(s)) guard = false;
   $("reconnect").hidden = s !== "RECONNECTING";
   document.body.classList.toggle("ingame", !!stream && (s === "IN_GAME" || s === "RECONNECTING"));
   if (s !== "IN_GAME" && s !== "RECONNECTING") stopStream();
