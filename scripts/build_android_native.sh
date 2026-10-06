@@ -38,13 +38,14 @@ cp "$B/dslink_build/dslink_romcheck" "$OUT/libdslink_romcheck.so"
 cp "$B/libdslink_jni.so"             "$OUT/libdslink_jni.so"
 
 echo "== gateway (Go)"
+# GOOS=android matters: with GOOS=linux Go uses pidfd_send_signal, which Android's app seccomp filter kills with SIGSYS.
 case "$ABI" in
-  arm64-v8a) GOOS=android GOARCH=arm64 ;;
-  x86_64)    GOOS=linux   GOARCH=amd64 ;;   # emulator only: a static linux binary (no NDK cgo needed)
+  arm64-v8a)  GOARCH=arm64 ;  CGO=0 ; CCBIN="" ;;
+  x86_64)     GOARCH=amd64 ;  CGO=1 ; CCBIN=$(ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/x86_64-linux-android${PLATFORM}-clang | head -n1) ;;   # android/amd64 needs external (cgo) linking; emulator only
   *) echo "unsupported ABI $ABI" >&2; exit 1 ;;
 esac
 # github.com/wlynxg/anet (pion's Android network-interface workaround) needs go:linkname access to net internals
-(cd "$ROOT/cloud/gateway" && CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags="-checklinkname=0 -s -w" -o "$OUT/libdslink_gateway.so" .)
+(cd "$ROOT/cloud/gateway" && CGO_ENABLED=$CGO CC="$CCBIN" GOOS=android GOARCH=$GOARCH go build -trimpath -ldflags="-checklinkname=0 -s -w" -o "$OUT/libdslink_gateway.so" .)
 
 # executables ship stripped
 STRIP=$(ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-strip | head -n1)

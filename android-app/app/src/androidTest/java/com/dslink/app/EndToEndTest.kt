@@ -42,10 +42,15 @@ class EndToEndTest {
             override fun evaluate() {
                 try { base.evaluate() } catch (t: Throwable) {
                     val sb = StringBuilder(t.toString()).append("\n")
-                    fun tail(f: File, n: Int) { if (f.exists()) sb.append("--- ${f.name} (last $n lines) ---\n").append(f.readLines().takeLast(n).joinToString("\n")).append("\n") }
-                    tail(File(ctx.filesDir, "gateway.log"), 60)
-                    File(ctx.filesDir, "work").listFiles()?.filter { it.name.startsWith("slot") }?.forEach { tail(File(it, "runtime.log"), 40) }
-                    try { sb.append("--- logcat ---\n").append(Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "120", "-s", "dslink-stack:V", "dslink-render:V", "dslink-audio:V", "dslink-jni:V", "AndroidRuntime:E")).inputStream.bufferedReader().readText()) } catch (_: Exception) { }
+                    fun tail(f: File, n: Int) {
+                        if (!f.exists()) return
+                        val all = f.readLines()
+                        val key = all.filter { Regex("fatal error|panic:|SIG[A-Z]+|unexpected signal|exit status").containsMatchIn(it) }.take(6)
+                        sb.append("--- ${f.name}: ${all.size} lines; key lines + last $n ---\n").append((key + all.takeLast(n)).joinToString("\n")).append("\n")
+                    }
+                    tail(File(ctx.filesDir, "gateway.log"), 15)
+                    File(ctx.filesDir, "work").listFiles()?.filter { it.name.startsWith("slot") }?.forEach { tail(File(it, "runtime.log"), 15) }
+                    try { sb.append("--- logcat ---\n").append(Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "60", "-s", "dslink-stack:V", "dslink-render:V", "dslink-audio:V", "dslink-jni:V", "AndroidRuntime:E")).inputStream.bufferedReader().readText()) } catch (_: Exception) { }
                     sb.lines().forEach { android.util.Log.e("dslink-test", it) }
                     throw AssertionError(sb.toString(), t)
                 }
