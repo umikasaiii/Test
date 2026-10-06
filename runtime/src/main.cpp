@@ -178,6 +178,12 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Peer-loss policy: a melonDS core whose peer vanished blocks up to 25 ms per command waiting for replies (~6 fps). After a grace window with no peer the
+    // bridge ends the multiplayer session cleanly (core stop(), sockets closed) so the console runs at full speed again.
+    const int peerGraceMs = args.geti("mp-peer-grace-ms", 0);
+    bool hadPeer = false, mpEnded = false, wasActive = false;
+    std::string mpEndedReason;
+    Clock::time_point noPeerSince{};
     const double fps = host.av.timing.fps > 1 ? host.av.timing.fps : 60.0;
     const auto frameDur = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / fps));
     const uint64_t maxFrames = uint64_t(args.geti("frames", 0));
@@ -236,6 +242,7 @@ int main(int argc, char** argv) {
                     args.kv["_dumppath"] = path;
                 }
                 break;
+            case L_MP_STOP: if (!mpEnded) { mp.stop(); mpEnded = true; mpEndedReason = "stopped"; log("multiplayer session ended (requested)"); } break;
             case L_QUIT: g_quit = 1; break;
         }
     };
@@ -243,6 +250,15 @@ int main(int argc, char** argv) {
     while (!g_quit && !host.shutdownRequested()) {
         link.poll(onCmd);
         mp.pump();
+        if (mp.sessionActive()) wasActive = true;
+        if (!mpEnded && mp.role() == MpBridge::Role::Host && peerGraceMs > 0) {
+            if (mp.peers() > 0) { hadPeer = true; noPeerSince = Clock::time_point{}; }
+            else if (hadPeer) {
+                if (noPeerSince == Clock::time_point{}) noPeerSince = Clock::now();
+                else if (Clock::now() - noPeerSince >= std::chrono::milliseconds(peerGraceMs)) { mp.stop(); mpEnded = true; mpEndedReason = "peer_lost"; log("multiplayer session ended: peer lost"); }
+            }
+        }
+        if (!mpEnded && mp.role() == MpBridge::Role::Client && wasActive && !mp.sessionActive()) { mpEnded = true; mpEndedReason = "host_lost"; }
         auto t0 = Clock::now();
         host.runFrame();
         double ms = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
@@ -266,7 +282,8 @@ int main(int argc, char** argv) {
                << ",\"mp_role\":\"" << (mp.role() == MpBridge::Role::Host ? "host" : mp.role() == MpBridge::Role::Client ? "client" : "none")
                << "\",\"mp_peers\":" << mp.peers() << ",\"mp_in\":" << mp.packetsIn() << ",\"mp_out\":" << mp.packetsOut()
                << ",\"session_mode\":\"" << dsrt::name(plan.mode) << "\",\"radio\":\"" << mp.transportName() << "\",\"stream\":\"" << dsrt::name(plan.stream) << "\""
-               << (mp.lan() ? ",\"lan\":" + mp.lan()->json() : std::string()) << (lanUri.empty() ? std::string() : ",\"lan_code\":\"" + lc.code + "\",\"lan_join_uri\":\"" + lanUri + "\"")
+               << (mp.lan() ? ",\"lan\":" + mp.lan()->json() : std::string()) << (lanUri.empty() ? std::string() : ",\"lan_port\":" + std::to_string(mp.lan() ? mp.lan()->port() : 0) + ",\"lan_code\":\"" + lc.code + "\",\"lan_join_uri\":\"" + lanUri + "\"")
+               << ",\"mp_ended\":" << (mpEnded ? "\"" + mpEndedReason + "\"" : std::string("null"))
                << ",\"video_frames\":" << av.videoFrames() << ",\"video_bytes\":" << av.videoBytes() << ",\"audio_packets\":" << av.audioPackets()
                << ",\"env_unhandled\":" << host.metrics.envUnhandled.load() << "," << dl.json() << "}";
             std::string s = js.str();

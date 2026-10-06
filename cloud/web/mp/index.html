@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#060b17">
+<title>DSLink · Multiplayer</title>
+<link rel="stylesheet" href="/controls/controls.css">
+<link rel="stylesheet" href="mp.css">
+</head>
+<body>
+<main id="app" aria-live="polite">
+
+  <section class="screen" data-screen="home">
+    <header class="brand"><span class="logo" id="logo">DS<b>Link</b></span><span class="sub">Multiplayer locale</span></header>
+    <h1>MULTIPLAYER</h1>
+    <button class="cta primary" id="btnCreate">CREA PARTITA</button>
+    <button class="cta" id="btnJoin">UNISCITI</button>
+    <section class="recent" id="recent" hidden>
+      <h2>Partite recenti</h2>
+      <ul id="recentList"></ul>
+    </section>
+  </section>
+
+  <section class="screen" data-screen="create">
+    <button class="back" data-back aria-label="Indietro">‹</button>
+    <h1>Crea partita</h1>
+    <p class="hint">Scegli il gioco dalla tua libreria.</p>
+    <ul class="games" id="gameList"></ul>
+    <label class="cta file" id="addGame"><input type="file" id="romFile" accept=".nds" hidden>＋ Aggiungi un gioco</label>
+    <p class="err" id="createErr"></p>
+    <button class="cta primary" id="btnMakeRoom" disabled>CREA STANZA</button>
+  </section>
+
+  <section class="screen" data-screen="join">
+    <button class="back" data-back aria-label="Indietro">‹</button>
+    <h1>Unisciti</h1>
+    <label class="field">Codice partita
+      <input id="codeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="000000" aria-label="Codice partita">
+    </label>
+    <button class="cta primary" id="btnJoinCode" disabled>UNISCITI</button>
+    <button class="cta" id="btnScan">SCANSIONA QR</button>
+    <h2>Partite vicine</h2>
+    <ul class="rooms" id="nearbyList"></ul>
+    <p class="hint" id="nearbyEmpty">Cerco partite sulla stessa rete Wi-Fi…</p>
+    <p class="err" id="joinErr"></p>
+    <details class="devonly" id="devJoin"><summary>Sviluppatore</summary>
+      <label class="field small">Indirizzo host (solo debug)<input id="devAddr" placeholder="192.168.1.20:8080"></label>
+      <textarea id="payloadInput" rows="2" placeholder="Incolla il contenuto del QR"></textarea>
+      <button class="cta" id="btnJoinPayload">Unisciti con contenuto QR</button>
+    </details>
+  </section>
+
+  <section class="screen" data-screen="joining">
+    <div class="spinner" aria-hidden="true"></div>
+    <h1 id="joiningTitle">Mi collego…</h1>
+    <p class="hint" id="joiningStep"></p>
+    <button class="cta" id="btnJoiningCancel">ANNULLA</button>
+  </section>
+
+  <section class="screen" data-screen="lobby">
+    <header class="lobbyhead"><span class="gamename" id="lobbyGame"></span><span class="chip" id="lobbyMode"></span></header>
+    <div class="lobbygrid">
+      <div class="codebox">
+        <div class="label">CODICE</div>
+        <div class="code" id="lobbyCode">------</div>
+        <canvas id="qr" width="220" height="220" aria-label="QR code per unirsi"></canvas>
+        <div class="hint" id="qrHint">Il codice e il QR bastano: non serve altro.</div>
+      </div>
+      <div class="panel">
+        <ul class="players" id="players"></ul>
+        <div class="netrow"><span class="label">Rete</span><span id="netBadge" class="badge">In verifica…</span></div>
+        <p class="hint" id="netHint"></p>
+        <p class="notice" id="lobbyNotice"></p>
+        <div class="approve" id="approveBox" hidden>
+          <span id="approveName"></span>
+          <div class="row"><button class="cta primary" id="btnApprove">ACCETTA</button><button class="cta" id="btnReject">RIFIUTA</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="cta primary" id="btnStart" disabled>AVVIA PARTITA</button>
+      <button class="cta primary" id="btnReady" hidden>PRONTO</button>
+      <button class="cta danger" id="btnCancel">ANNULLA PARTITA</button>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="netcheck">
+    <div class="spinner" aria-hidden="true"></div>
+    <h1>Controllo della rete…</h1>
+    <ul class="steps static">
+      <li class="done">Trovo l'altro dispositivo</li>
+      <li class="doing">Misuro la qualità della connessione</li>
+      <li>Scelgo la modalità migliore</li>
+    </ul>
+  </section>
+
+  <section class="screen" data-screen="starting">
+    <h1 id="startTitle">Avvio della partita</h1>
+    <ul class="steps" id="startSteps">
+      <li data-step="Preparazione partita…">Preparazione partita…</li>
+      <li data-step="Connessione al secondo giocatore…">Connessione al secondo giocatore…</li>
+      <li data-step="Avvio Nintendo DS…">Avvio Nintendo DS…</li>
+      <li data-step="Ricerca partita…">Ricerca partita…</li>
+      <li data-step="Download Play…">Download Play…</li>
+      <li data-step="Avvio partita…">Avvio partita…</li>
+    </ul>
+    <p class="notice" id="startNote"></p>
+    <button class="cta danger" id="btnStartCancel">ANNULLA</button>
+  </section>
+
+  <section class="screen" data-screen="ended">
+    <div class="alert" aria-hidden="true">!</div>
+    <h1 id="endTitle">Connessione persa</h1>
+    <p class="hint" id="endMsg"></p>
+    <button class="cta primary" id="btnBackLobby">TORNA ALLA LOBBY</button>
+    <button class="cta" id="btnCloseGame">CHIUDI PARTITA</button>
+  </section>
+
+  <aside class="devpanel" id="devPanel" hidden>
+    <h2>Sviluppatore</h2>
+    <label class="field small">Multiplayer Mode
+      <select id="devMode"><option value="auto">Automatico</option><option value="distributed">Distributed</option><option value="hosted">Hosted</option></select>
+    </label>
+    <pre id="devDump"></pre>
+  </aside>
+</main>
+
+<div id="reconnect" class="overlay" hidden><div class="card"><div class="spinner" aria-hidden="true"></div><h2>Connessione persa</h2><p>Riconnessione in corso…</p></div></div>
+<div id="scanner" class="overlay" hidden>
+  <div class="card scan">
+    <video id="scanVideo" playsinline muted></video>
+    <p class="hint" id="scanHint">Inquadra il QR della partita</p>
+    <button class="cta" id="btnScanClose">CHIUDI</button>
+  </div>
+</div>
+<div id="confirm" class="overlay" hidden><div class="card"><h2 id="confirmTitle">Annullare la partita?</h2><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ANNULLA</button></div></div></div>
+<div id="game" hidden></div>
+<script src="vendor/qrcode.js"></script>
+<script src="vendor/jsQR.js"></script>
+<script type="module" src="mp.js"></script>
+</body>
+</html>

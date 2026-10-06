@@ -14,12 +14,13 @@ DISC = 47700 + os.getpid() % 200       # private discovery port: tests never see
 CODE = "482731"
 
 
-def spawn(role, name, dev, rom, d, impair=""):
+def spawn(role, name, dev, rom, d, impair="", grace=0):
     g = lambda w: subprocess.check_output([cfgtool, role, work, "x", rom or "-", "127.0.0.1" if role == "client" else "-", "56300", name, dev, w], text=True).strip()
     open(f"{work}/{name}.opts", "w").write(g("opts"))
     extra = ["--session-mode", "distributed", "--lan-role", "host" if role == "host" else "guest", "--lan-code", CODE, "--lan-discovery-port", str(DISC),
              "--lan-discovery-addr", "127.0.0.1", "--lan-bind", "127.0.0.1", "--lan-name", name]
     if impair: extra += ["--lan-impair", impair]
+    if grace: extra += ["--mp-peer-grace-ms", str(grace)]
     return Runtime(rt_bin, core, rom, f"{work}/{d}", name=name, username=g("nick"), opts=f"{work}/{name}.opts", av=True, extra=extra)
 
 
@@ -73,6 +74,16 @@ if "--quick" not in sys.argv:
     r1.kill(); time.sleep(6)
     t.check("host crash: the guest's core is told the session ended and the guest process stays alive", r2.proc.poll() is None and r2.status.get("mp_active") is False, f"active={r2.status.get('mp_active')}")
     r2.stop()
+    # ---- peer-loss policy: after the grace window with no peer the host ends the multiplayer session cleanly (core stop, sockets closed)
+    r1 = spawn("host", "G1", devs[0], rom1, "g1", grace=3000); time.sleep(1.5)
+    r2 = spawn("client", "G2", devs[1], rom2, "g2"); time.sleep(8)
+    t.check("grace policy: session established (host sees 1 peer)", r1.status.get("mp_peers") == 1 and r1.status.get("mp_ended") is None)
+    r2.kill(); time.sleep(3.5)
+    t.check("grace policy: shortly after the peer vanished the session is still held (inside the window / timeout)", r1.status.get("mp_ended") is None or r1.status.get("mp_ended") == "peer_lost")
+    time.sleep(6)
+    st = r1.status
+    t.check("grace policy: after the grace window the host ended the multiplayer session by itself and keeps running", st.get("mp_ended") == "peer_lost" and st.get("mp_role") == "none" and r1.proc.poll() is None, f"ended={st.get('mp_ended')} role={st.get('mp_role')}")
+    r1.stop()
 else:
     r2.stop(); time.sleep(0.5); r1.stop()
 sys.exit(t.done())

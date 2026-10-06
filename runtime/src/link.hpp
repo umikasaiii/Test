@@ -11,7 +11,7 @@
 
 namespace dsrt {
 
-enum LinkType : uint8_t { L_VIDEO = 1, L_AUDIO = 2, L_LOG = 3, L_STATUS = 4, L_BUTTON = 10, L_TOUCH = 11, L_SNAPSHOT = 12, L_QUIT = 13, L_KEYFRAME = 14, L_AUDIO_DUMP = 15, L_SAVE = 16, L_DIAG_MARK = 17 };
+enum LinkType : uint8_t { L_VIDEO = 1, L_AUDIO = 2, L_LOG = 3, L_STATUS = 4, L_BUTTON = 10, L_TOUCH = 11, L_SNAPSHOT = 12, L_QUIT = 13, L_KEYFRAME = 14, L_AUDIO_DUMP = 15, L_SAVE = 16, L_DIAG_MARK = 17, L_MP_STOP = 18 };
 
 class Link {
 public:

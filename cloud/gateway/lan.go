@@ -26,6 +26,9 @@ type LanSpec struct {
 	Advertise string // host: IP shown in the QR/URI
 	Bind      string
 	Mode      string // "distributed" | "auto" (what the user chose)
+	Secret    string // 32 hex chars: session secret shared through the lobby (host: given to the runtime, guest: same value)
+	HostAddr  string // guest: "ip:port" of the host runtime's LAN data port (from the lobby; skips discovery)
+	GraceMs   int    // host: end the multiplayer session by itself this long after the last peer vanished
 }
 
 func sessionModeOf(r *Room) string {
@@ -71,6 +74,11 @@ func (l *LanSpec) runtimeArgs() []string {
 		}
 	}
 	add("--lan-code", l.Code)
+	add("--lan-secret", l.Secret)
+	add("--lan-host", l.HostAddr)
+	if l.GraceMs > 0 {
+		a = append(a, "--mp-peer-grace-ms", fmt.Sprint(l.GraceMs))
+	}
 	add("--lan-uri", l.URI)
 	add("--lan-impair", l.Impair)
 	add("--lan-discovery-addr", l.DiscAddr)

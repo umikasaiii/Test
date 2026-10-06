@@ -1,0 +1,3 @@
+qrcode.js  — "QR Code Generator for JavaScript" (qrcode-generator 1.4.4), Copyright (c) 2009 Kazuhiko Arase, MIT license (http://www.opensource.org/licenses/mit-license.php).
+jsQR.js    — jsQR 1.4.0, Copyright (c) Cosmo Wolfe, Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0). Used only to decode the QR in browsers without BarcodeDetector.
+Both are used as unmodified distribution files.

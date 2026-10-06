@@ -1,0 +1,295 @@
+package main
+
+// The multiplayer session of THIS device (host or guest): state machine, lobby, game start, supervision. The UI only ever reads /api/mp/state.
+// No cloud: everything is LAN/local (HTTP between the two gateways for the lobby, UDP for discovery/netcheck, DSLink Radio Protocol or WebRTC for the game).
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+type MpPlayer struct {
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	Connected bool   `json:"connected"`
+	Ready     bool   `json:"ready"`
+	Pending   bool   `json:"pending"` // asked to join without code/QR: waits for the host's approval
+	token     string
+	lastSeen  time.Time
+	addr      string
+	lobbyOnly string // the peer's own state as it reports it (guest -> host)
+}
+
+type mpPlan struct {
+	Mode        string `json:"mode"` // distributed | hosted (empty until the host starts)
+	LanPort     int    `json:"lanPort,omitempty"`
+	HostedCode  string `json:"hostedCode,omitempty"`
+	HostedToken string `json:"hostedToken,omitempty"`
+	Seq         int    `json:"seq"`
+}
+
+const (
+	mpPeerDeadMs     = 5000  // no heartbeat for this long = peer unreachable
+	mpReconnectGrace = 12000 // how long a vanished peer may come back before the session ends
+	mpLobbyTTL       = 15 * time.Minute
+)
+
+type MpSession struct {
+	mu  sync.Mutex
+	srv *Server
+
+	state MpState
+	role  string // "host" | "guest" ("" when idle)
+
+	roomID, code, secret string
+	game                 LibGame
+	gamePath             string
+	modeChosen           string // auto | distributed | hosted (developer override; users get auto)
+	modeEffective        string
+	modeNote             string
+	hostName             string
+	players              [2]*MpPlayer
+	net                  MpNetResult
+	netDone              bool
+	step                 string
+	err                  *MpErr
+	created              time.Time
+	plan                 mpPlan
+	prevState            MpState
+	reconnectSince       time.Time
+	lockedUntil          time.Time
+	badJoins             []time.Time
+	devLog               []string
+
+	// guest side
+	hostAddr                    string // ip:port of the host gateway (HTTP)
+	hostUDP                     int    // the host's discovery/echo UDP port
+	hostIP                      string
+	token                       string
+	hostState                   MpState
+	hostSeen                    time.Time
+	started                     bool // guest: its own game launch has begun for the current plan
+	lastJoin                    JoinRequest
+	keepEnded                   bool
+	radioSeen                   bool // host: the guest's radio link has been up at least once in this game
+	hostDriverOK, guestDriverOK bool
+
+	// game
+	stopSuper chan struct{}
+	stopDrv   chan struct{}
+	local     *Room // the runtime room of this device while a game runs
+}
+
+func newMpSession(s *Server) *MpSession {
+	return &MpSession{srv: s, state: MpIdle, modeChosen: "auto"}
+}
+
+func (m *MpSession) logf(format string, a ...any) {
+	line := time.Now().Format("15:04:05 ") + fmt.Sprintf(format, a...)
+	m.devLog = append(m.devLog, line)
+	if len(m.devLog) > 80 {
+		m.devLog = m.devLog[len(m.devLog)-80:]
+	}
+	log.Printf("mp: %s", fmt.Sprintf(format, a...))
+}
+
+// go moves the state machine; illegal transitions are refused (and logged) instead of silently producing an impossible state.
+func (m *MpSession) go_(to MpState) bool {
+	if !mpCanGo(m.state, to) {
+		m.logf("illegal transition %s -> %s refused", m.state, to)
+		return false
+	}
+	if m.state != to {
+		m.logf("%s -> %s", m.state, to)
+	}
+	m.state = to
+	return true
+}
+
+func randHexN(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func randCode() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	v := 100000 + (uint32(b[0])<<24|uint32(b[1])<<16|uint32(b[2])<<8|uint32(b[3]))%900000
+	return fmt.Sprintf("%06d", v)
+}
+
+func deviceName() string {
+	if n := os.Getenv("DSLINK_DEVICE_NAME"); n != "" {
+		return n
+	}
+	return "Giocatore " + fmt.Sprintf("%04d", 1000+int(randHexN(2)[0])*7%9000)
+}
+
+// advertiseIP is what goes inside the QR (never shown): first non-loopback IPv4, or DSLINK_ADVERTISE_IP.
+func advertiseIP() string {
+	if v := os.Getenv("DSLINK_ADVERTISE_IP"); v != "" {
+		return v
+	}
+	if ifs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range ifs {
+			if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLoopback() && ipn.IP.To4() != nil {
+				return ipn.IP.String()
+			}
+		}
+	}
+	return "127.0.0.1"
+}
+
+func (m *MpSession) qrPayload() string {
+	if m.role != "host" || m.code == "" {
+		return ""
+	}
+	return fmt.Sprintf("dslink://join?c=%s&s=%s&h=%s:%d&r=%s&u=%d", m.code, m.secret, advertiseIP(), m.srv.httpPort, m.roomID, m.srv.udpPort())
+}
+
+// parseJoinPayload: dslink://join?c=CODE&s=SECRET&h=IP:PORT&r=ROOM (the QR content).
+func parseJoinPayload(p string) (code, secret, host, room string, udp int, ok bool) {
+	p = strings.TrimSpace(p)
+	if !strings.HasPrefix(p, "dslink://join?") {
+		return
+	}
+	for _, kv := range strings.Split(p[len("dslink://join?"):], "&") {
+		i := strings.IndexByte(kv, '=')
+		if i < 0 {
+			continue
+		}
+		v := kv[i+1:]
+		switch kv[:i] {
+		case "c":
+			code = v
+		case "s":
+			secret = v
+		case "h":
+			host = v
+		case "r":
+			room = v
+		case "u":
+			udp, _ = strconv.Atoi(v)
+		}
+	}
+	ok = len(code) == 6 && len(secret) == 32 && host != ""
+	return
+}
+
+func netLabel(class string) (label, hint string) {
+	switch class {
+	case "GREEN":
+		return "Ottima", ""
+	case "YELLOW":
+		return "Buona", "Per maggiore stabilità verrà utilizzata la modalità Hosted."
+	case "RED":
+		return "Non adatta", "Per maggiore stabilità verrà utilizzata la modalità Hosted."
+	}
+	return "In verifica…", ""
+}
+
+// ---------------------------------------------------------------- the one document the UI renders
+
+func (m *MpSession) view(dev bool) map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pl := []map[string]any{}
+	for _, p := range m.players {
+		if p != nil {
+			pl = append(pl, map[string]any{"name": p.Name, "role": p.Role, "connected": p.Connected, "ready": p.Ready, "pending": p.Pending})
+		}
+	}
+	label, hint := netLabel(m.net.Class)
+	if !m.netDone {
+		label, hint = "In verifica…", ""
+	}
+	eff, modeNote := m.modeEffective, m.modeNote
+	if eff == "" && m.netDone { // before START: what AUTOMATIC would pick right now (the host decides for real at START)
+		eff, modeNote = m.decideMode()
+	}
+	modeLabel := "Automatica"
+	switch eff {
+	case "distributed":
+		modeLabel = "Distribuita"
+	case "hosted":
+		modeLabel = "Hosted"
+	}
+	canStart := m.role == "host" && m.state == MpReady
+	v := map[string]any{
+		"state": m.state, "role": m.role, "game": map[string]any{"title": m.game.Title, "id": m.game.ID}, "code": m.code, "qr": m.qrPayload(), "hostName": m.hostName,
+		"players": pl, "mode": map[string]any{"chosen": m.modeChosen, "effective": eff, "label": modeLabel, "note": modeNote},
+		"net": map[string]any{"done": m.netDone, "class": m.net.Class, "label": label, "hint": hint}, "step": m.step, "error": m.err, "canStart": canStart,
+		"expiresInSec": int((mpLobbyTTL - time.Since(m.created)).Seconds()),
+	}
+	if (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) && m.local != nil {
+		ig := map[string]any{"base": "", "code": m.local.Code, "player": 1, "token": m.local.Tokens[0]}
+		if m.role == "guest" && m.plan.Mode == "hosted" {
+			ig = map[string]any{"base": "http://" + m.hostIP + ":" + hostPortOf(m.hostAddr), "code": m.plan.HostedCode, "player": 2, "token": m.plan.HostedToken}
+		}
+		v["ingame"] = ig
+	} else if m.role == "guest" && m.plan.Mode == "hosted" && (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) {
+		v["ingame"] = map[string]any{"base": "http://" + m.hostIP + ":" + hostPortOf(m.hostAddr), "code": m.plan.HostedCode, "player": 2, "token": m.plan.HostedToken}
+	}
+	if dev {
+		d := map[string]any{"net": m.net, "plan": m.plan, "log": m.devLog, "roomId": m.roomID, "hostAddr": m.hostAddr}
+		if m.local != nil {
+			sl := []any{}
+			for _, s := range m.local.Slots {
+				if s != nil {
+					sl = append(sl, s.Status())
+				}
+			}
+			d["slots"] = sl
+		}
+		v["dev"] = d
+	}
+	return v
+}
+
+func hostPortOf(addr string) string {
+	if i := strings.LastIndexByte(addr, ':'); i >= 0 {
+		return addr[i+1:]
+	}
+	return "8080"
+}
+
+// reset drops everything and goes back to IDLE (user left the multiplayer flow). Must be called with m.mu held.
+func (m *MpSession) resetLocked() {
+	if m.stopSuper != nil {
+		close(m.stopSuper)
+		m.stopSuper = nil
+	}
+	if m.stopDrv != nil {
+		close(m.stopDrv)
+		m.stopDrv = nil
+	}
+	m.teardownGameLocked()
+	m.state, m.role = MpIdle, ""
+	m.roomID, m.code, m.secret, m.token, m.hostAddr, m.hostIP = "", "", "", "", "", ""
+	m.game, m.gamePath = LibGame{}, ""
+	m.players = [2]*MpPlayer{}
+	m.net, m.netDone, m.step, m.err = MpNetResult{}, false, "", nil
+	m.modeEffective, m.modeNote, m.plan, m.started = "", "", mpPlan{}, false
+	m.hostState = ""
+	m.hostDriverOK, m.guestDriverOK, m.radioSeen, m.keepEnded = false, false, false, false
+	m.badJoins, m.lockedUntil = nil, time.Time{}
+}
+
+// teardownGameLocked stops this device's runtimes and frees the gateway room (sockets, processes, scratch files).
+func (m *MpSession) teardownGameLocked() {
+	if m.stopDrv != nil {
+		close(m.stopDrv)
+		m.stopDrv = nil
+	}
+	m.local = nil
+	m.srv.closeRoom() // stops the runtimes (process groups), closes the WebRTC peers, removes the scratch directory
+}

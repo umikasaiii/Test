@@ -44,6 +44,9 @@ type Server struct {
 	env       Env
 	api       *webrtc.API
 	ice       []webrtc.ICEServer
+	httpPort  int
+	mp        *MpSession
+	udp       *mpUDP
 	relayOnly bool // TURN-relay-only ICE policy (Cloudflare Containers: no inbound UDP)
 	mu        sync.Mutex
 	room      *Room
@@ -303,6 +306,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	web := flag.String("web", "../web", "static web UI directory")
+	controlsDir := flag.String("controls", "../worker/public/controls", "touch-controls module served at /controls/ (shared with the PWA)")
 	flag.Parse()
 	env := Env{
 		RetroArch:     getenv("DSLINK_RETROARCH", "/opt/dslink/bin/retroarch"),
@@ -321,7 +325,9 @@ func main() {
 	if err := s.initWebRTC(); err != nil {
 		log.Fatal(err)
 	}
+	s.initMp(*addr)
 	mux := http.NewServeMux()
+	s.registerMp(mux)
 	mux.HandleFunc("/api/room", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
@@ -365,6 +371,7 @@ func main() {
 		})
 	}
 	mux.HandleFunc("/ws", s.ws)
+	mux.Handle("/controls/", http.StripPrefix("/controls/", http.FileServer(http.Dir(*controlsDir))))
 	mux.Handle("/", http.FileServer(http.Dir(*web)))
 	srv := &http.Server{Addr: *addr, Handler: mux}
 	go func() {
