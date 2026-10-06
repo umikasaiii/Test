@@ -1,6 +1,6 @@
 # DSLink on Android — native Runtime + melonDS (arm64-v8a)
 
-Status: **built in CI, tested on a desktop and on an Android *emulator* (x86_64 build of the same code) with homebrew content.
+Status: **arm64-v8a debug APK built in CI; the same code tested on the desktop and on an Android *emulator* (x86_64 build) with homebrew content only.
 DEVICE VERIFIED: NO** — nothing here has run on a physical phone yet; speed (55–60 fps), thermals, battery and real Wi-Fi behaviour are **unmeasured**.
 
 ## 1. Architecture
@@ -115,3 +115,19 @@ The emulator proves the pipeline, **not** arm64 performance. Mario Party DS (pri
 3. Phone A: **CREA PARTITA** → pick the game → **CREA STANZA**. Phone B: **UNISCITI** → tap the room under **PARTITE VICINE** (or enter the code / scan the QR) → **PRONTO**; phone A: **AVVIA PARTITA**.
 4. Wait for *Download Play* to finish and the game lobby to appear on both; play a few minutes; rotate, lock/unlock the screen once, switch app and come back.
 5. Developer menu (tap the logo 5 times) → **Overlay prestazioni**: note emulator fps, frame time, CPU, audio underruns, RTT, battery delta and thermal state on both phones; report them.
+
+## 15. What the CI proved (and what it did not)
+
+`.github/workflows/android-native.yml` (green on the final commit):
+
+| Job | Result |
+|---|---|
+| `host-tests` | front-end unit test 27/27; Android-only C++ sources compile against the NDK-header stubs |
+| `apk-arm64` | melonDS core + Runtime + DSLink tools + JNI + gateway built for **arm64-v8a** with the NDK, Gradle `testDebugUnitTest` + `assembleDebug`, APK content check (all six native libraries present; no ROM/BIOS/firmware-like file; `check_no_private.py`) → artifact `DSLink-android-arm64-debug` (`DSLink-android-arm64-debug.apk`) |
+| `emulator-x86_64` | the whole app on an API 30 x86_64 emulator, homebrew ROM only (instrumented tests, see below) |
+
+Instrumented tests (`EndToEndTest`): ROM accepted by the DSLink validator running on Android · gateway + Runtime + melonDS core started from the APK (solo test hook) · page switches to native display · GL renderer draws on the real surface · frame is 256×384 with the right pixel format · AAudio runs at the core's native rate with no runaway · JNI button reaches the core (A square lights) · JNI stylus reaches the touch panel (crosshair) · rotation without activity recreate (surface re-sized) · pause/resume (no frames while paused, back to real time) · activity recreate (session survives, new surface) · Back asks before leaving a session · private-file validation rejects blank / wrong-size / missing files · QR payload carries the platform's Wi-Fi address · discovery hints reach the gateway · session end stops the Runtime.
+
+Bugs only the Android run could find (fixed): Go on `linux` uses `pidfd_send_signal`, which the app seccomp filter kills with SIGSYS → the gateway must be built with `GOOS=android`; a finished activity's audio-focus listener paused the console its successor owned; shutdown on the UI thread caused an ANR; history entries made without a gesture are skipped by WebView's Back → Back is decided by the page (`window.dslinkBack`).
+
+**Not proven**: anything about real arm64 hardware (fps, thermals, battery, audio latency, Wi-Fi/NSD, camera QR), Mario Party DS on Android (needs the private files; DEVICE PENDING), two phones playing together.
