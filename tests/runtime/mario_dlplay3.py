@@ -23,7 +23,7 @@ def spawn(who, name, rom):
     os.environ["DSLINK_MP_TRACE"] = os.path.join(out, f"trace_{who}.log")
     g = lambda w: subprocess.check_output([cfgtool, role, work, "x", rom or "-", "127.0.0.1" if role == "client" else "-", "56300", name, DEV[who], w], text=True).strip()
     open(f"{work}/{name}.opts", "w").write(g("opts"))
-    return Runtime(rt, core, rom, d, name=name, username=g("nick"), opts=f"{work}/{name}.opts", mp=(role, sock), av=True)
+    return Runtime(rt, core, rom, d, name=name, username=g("nick"), opts=f"{work}/{name}.opts", mp=(role, sock), av=("--noav" not in sys.argv))
 
 def ahash(im, top):
     y0 = 0 if top else 192
