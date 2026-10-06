@@ -9,9 +9,14 @@
 #include <media/NdkMediaFormat.h>
 
 #include <cstring>
+#include <mutex>
 
 namespace dsrt {
 namespace {
+
+// creating, configuring and deleting codecs is serialised inside one process: two encoders opened at the same time (a Hosted game with two guests, the 2-stream self-test)
+// must not run the NDK's create/configure/delete paths concurrently (the emulator's software codec aborts the process in its heap allocator when they overlap)
+std::recursive_mutex g_codecMu;
 
 constexpr int kColorYuv420Planar = 19, kColorYuv420SemiPlanar = 21, kColorYuv420Flexible = 0x7F420888;
 constexpr uint32_t kFlagSync = 1, kFlagConfig = 2;  // BUFFER_FLAG_SYNC_FRAME / BUFFER_FLAG_CODEC_CONFIG
@@ -29,6 +34,7 @@ public:
     // vendor/software codec may refuse, so they are dropped step by step instead of failing the whole stream. The error lists every attempt (it is what the CI log and the
     // self-test show when a device has a problem).
     bool open(int w, int h, int fps, int kbps, int keyintSec, std::string& err) override {
+        std::lock_guard<std::recursive_mutex> lock(g_codecMu);
         std::string all;
         for (int level : {0, 1, 2}) {                                  // 0 = everything, 1 = core + profile + bitrate mode, 2 = core only
             for (int fmt : {kColorYuv420SemiPlanar, kColorYuv420Planar, kColorYuv420Flexible}) {
@@ -94,6 +100,7 @@ public:
     }
 
     void close() override {
+        std::lock_guard<std::recursive_mutex> lock(g_codecMu);
         if (c_) {
             if (started_) AMediaCodec_stop(c_);
             AMediaCodec_delete(c_);

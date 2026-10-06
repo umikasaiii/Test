@@ -34,6 +34,13 @@ fi
 echo "=================== native crashes (crash buffer / DEBUG / libc) ==================="
 adb logcat -d -b crash 2>/dev/null | cut -c1-300 | tail -60
 adb logcat -d -b all 2>/dev/null | grep -E "Fatal signal|F libc|F DEBUG|DEBUG +: +(#[0-9]+|signal|Abort message)|Abort message|CodecException|MediaCodec.*(error|fail)|c2.android.*(error|fail)" | cut -c1-300 | tail -40
+# symbolise the Runtime frames of a native crash (function names come from the build tree copy; the packaged one is stripped)
+A2L=$(find "${ANDROID_NDK_ROOT:-/nonexistent}" "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/ndk" /usr/local/lib/android/sdk/ndk -name llvm-addr2line -type f 2>/dev/null | head -1)
+LIB=$(find ../build -name libdslink_runtime.so -type f -printf '%s %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)   # the biggest copy = the one that was not stripped
+if [ -n "$A2L" ] && [ -n "$LIB" ] && [ -f "$LIB" ]; then
+  echo "=================== symbolised Runtime frames ==================="
+  adb logcat -d -b all 2>/dev/null | grep -E "DEBUG.*#[0-9]+ pc [0-9a-f]+ .*libdslink_runtime.so" | grep -oE "pc [0-9a-f]+" | awk '{print "0x"$2}' | sort -u | head -12 | while read a; do echo "$a $("$A2L" -f -C -e "$LIB" "$a" | tr '\n' ' ' | cut -c1-220)"; done
+fi
 echo "=================== SUMMARY ==================="
 grep -E "FAILED|PASSED|Starting [0-9]+ tests|Tests on .* (failed|passed)" /tmp/gradle_android.log | sed 's/\x1b\[[0-9;]*m//g'
 grep -E "dslink-test: java.lang.AssertionError" /tmp/logcat_android.txt | cut -c1-3000
