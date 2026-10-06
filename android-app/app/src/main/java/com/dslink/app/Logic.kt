@@ -73,3 +73,22 @@ object DevText {
         return lines.joinToString("\n")
     }
 }
+
+/**
+ * The Download Play assistant's screen references (refs.json): per game, the 16x16 average-hash of the screens it must recognise (192 characters of 0/1 for each of the two screens).
+ * They are derived from the user's own game and stay private like the system files; only the shape is checked here.
+ */
+object RefsCheck {
+    private val REQUIRED = listOf("host_main_menu", "host_find_players", "client_ds_menu", "client_dl_open", "client_discovered")
+    /** null = fine, else a short message for the user */
+    fun validate(text: String): String? {
+        val o = try { org.json.JSONObject(text) } catch (_: Exception) { return "Non è un file di riferimenti valido." }
+        for (k in REQUIRED) if (!o.has(k)) return "Mancano dei riferimenti ($k)."
+        val it = o.keys()
+        while (it.hasNext()) {
+            val k = it.next(); val v = o.optJSONObject(k) ?: return "Riferimento non valido ($k)."
+            for (side in listOf("top", "bot")) { val h = v.optString(side); if (h.length != 192 || h.any { c -> c != '0' && c != '1' }) return "Riferimento non valido ($k)." }
+        }
+        return null
+    }
+}

@@ -102,6 +102,28 @@ func (d *dlDriver) refOr(name, fallback string) string {
 	return fallback
 }
 
+// ownDownloadDone: THIS console's own transfer is over. With several clients on one radio the state machine also sees the other clients' frames, so its state cannot tell:
+// the console associated by itself (assoc_req_tx) and the bytes delivered to it have stopped growing.
+func (d *dlDriver) ownDownloadDone(timeout time.Duration) bool {
+	end := time.Now().Add(timeout)
+	last, since := -1.0, time.Now()
+	for time.Now().Before(end) {
+		c, _ := d.slot.Status()["dl_counters"].(map[string]any)
+		b, _ := c["data_bytes_rx"].(float64)
+		assoc, _ := c["assoc_req_tx"].(float64)
+		if b != last {
+			last, since = b, time.Now()
+		}
+		if assoc >= 1 && b > 300000 && time.Since(since) > 5*time.Second {
+			return true
+		}
+		if d.sleep(500*time.Millisecond) != nil || !d.alive() {
+			return false
+		}
+	}
+	return false
+}
+
 // allGuests: every guest console reached one of the states (the host's own radio view only follows the first client)
 func (d *dlDriver) allGuests(states []string, timeout time.Duration) bool {
 	end := time.Now().Add(timeout)
@@ -507,11 +529,23 @@ func (m *MpSession) runGuestDriver(slot *Slot, profile string, stop chan struct{
 		return errors.New("guest: no game found")
 	}
 	d.waitScreen("client_discovered", "bot", 40, 20*time.Second)
-	for i := 0; i < 10; i++ {
-		switch d.state() {
-		case "DOWNLOAD_HANDSHAKE", "DOWNLOAD_TRANSFER", "DOWNLOAD_VERIFY":
-			i = 99
-			continue
+	m.mu.Lock()
+	multi := m.hostedGuests > 1
+	m.mu.Unlock()
+	if multi && idx > 0 && !m.waitGuestsDownloaded(idx, 400*time.Second, stop) { // two guests: the downloads go one after the other
+		return errors.New("guest: the previous guest never finished its download")
+	}
+	for i := 0; i < 12; i++ {
+		if multi { // the radio is shared: the state machine would already report the other guest's transfer, so look at the screen
+			if ok, _ := d.screenIs("client_downloading", "bot", 60); ok {
+				break
+			}
+		} else {
+			switch d.state() {
+			case "DOWNLOAD_HANDSHAKE", "DOWNLOAD_TRANSFER", "DOWNLOAD_VERIFY":
+				i = 99
+				continue
+			}
 		}
 		if err := d.tap(0.5, 0.67, ms(300), 2*time.Second); err != nil {
 			return err
@@ -522,7 +556,11 @@ func (m *MpSession) runGuestDriver(slot *Slot, profile string, stop chan struct{
 	}
 	m.setStep("Download Play…")
 	m.note("guest %d: download requested (state %s)", idx+2, d.state())
-	if !d.waitState([]string{"DOWNLOAD_VERIFY", "CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 500*time.Second) {
+	if multi {
+		if !d.ownDownloadDone(500 * time.Second) {
+			return errors.New("guest: download did not complete")
+		}
+	} else if !d.waitState([]string{"DOWNLOAD_VERIFY", "CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 500*time.Second) {
 		return errors.New("guest: download did not complete")
 	}
 	m.guestDownloaded(idx)

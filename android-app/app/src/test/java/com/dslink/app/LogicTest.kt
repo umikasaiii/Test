@@ -2,6 +2,7 @@ package com.dslink.app
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,5 +54,15 @@ class LogicTest {
         for (w in listOf("P2 emu 59.7", "P3 emu 58.9", "connected", "RTT 3.1 ms", "RTT 4.2 ms", "encoder P2: c2.qti.avc.encoder (hardware)", "encoder P3", "59.2 fps", "58.1 fps", "latency 7.4", "2310 kbps", "dropped 3", "dropped 5")) assertTrue("missing $w in\n$t", t.contains(w))
         assertTrue(DevText.format(m, 0.0, 0.0, 0.0, 0.0, "", "", "").lines().none { it.startsWith("P2") || it.startsWith("P3") })
         assertTrue(DevText.hosted(listOf(DevText.Hosted(2, 0.0, "", false, 0.0, 0.0, 0.0, 0.0, 0, 0.0, false))).any { it.contains("no encoder") })
+    }
+
+    @Test fun refsFileShapeIsChecked() {
+        val h = "01".repeat(96)
+        fun one() = """{"top":"$h","bot":"$h"}"""
+        val ok = listOf("host_main_menu", "host_find_players", "client_ds_menu", "client_dl_open", "client_discovered").joinToString(",", "{", "}") { "\"$it\":${one()}" }
+        assertNull(RefsCheck.validate(ok))
+        assertNotNull(RefsCheck.validate("not json"))
+        assertNotNull(RefsCheck.validate("{}"))
+        assertNotNull(RefsCheck.validate(ok.replace(h, "01")))
     }
 }

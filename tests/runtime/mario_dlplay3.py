@@ -81,13 +81,23 @@ for r, n in ((C1, "c1"), (C2, "c2")):
     t.check(f"{n}: discovers the game", wait_state(r, {"GAME_DISCOVERED"}, 20) and wait_screen(r, "client_discovered", 15, "bot"), dl(r))
 shot(C1, "c1_discovered"); shot(C2, "c2_discovered")
 def pick(r): tap(r, 0.5, 0.67, 0.3, 2.0); press(r, 8, 0.25, 3.0)
-for r in (C1, C2):
-    for i in range(6):
-        if dl(r) in ("DOWNLOAD_HANDSHAKE", "DOWNLOAD_TRANSFER", "DOWNLOAD_VERIFY"): break
+def own_download_done(r, secs):
+    """the console's OWN transfer: its association was made by it (assoc_req_tx) and the bytes delivered to it stopped growing (the shared radio makes the state machine see the other client's transfer too)"""
+    end = time.time() + secs; last, since = -1, time.time()
+    while time.time() < end:
+        c = r.status.get("dl_counters") or {}
+        b = c.get("data_bytes_rx", 0)
+        if b != last: last, since = b, time.time()
+        if c.get("assoc_req_tx", 0) >= 1 and b > 300000 and time.time() - since > 5: return True
+        time.sleep(0.5)
+    return False
+for n, r in (("c1", C1), ("c2", C2)):          # one download after the other: every client asks for the game itself (screen-checked: the radio state is shared)
+    for i in range(12):
+        if screen_is(r, "client_downloading", "bot", 60): break
         pick(r)
-    mark("download requested", state=dl(r))
-for n, r in (("c1", C1), ("c2", C2)):
-    t.check(f"{n}: DOWNLOAD_VERIFY", wait_state(r, {"DOWNLOAD_VERIFY"}, 150), dl(r))
+    mark("download requested", who=n, screen_downloading=screen_is(r, "client_downloading", "bot", 60))
+    t.check(f"{n}: its own download completes", own_download_done(r, 150), str((r.status.get("dl_counters") or {}).get("data_bytes_rx")))
+    shot(r, n + "_dl_done")
 mark("both downloaded", c1=dl(C1), c2=dl(C2), host=dl(H))
 time.sleep(12); shot(H, "host_two_joined"); shot(C1, "c1_downloading"); shot(C2, "c2_downloading")
 for _try in range(10):

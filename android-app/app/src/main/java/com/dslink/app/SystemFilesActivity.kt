@@ -33,7 +33,7 @@ class SystemFilesActivity : ComponentActivity() {
         }
         col.addView(text("File di sistema Nintendo DS", 22f, bold = true))
         col.addView(text("Servono per far partire il Nintendo DS e il Download Play. Scegli i tuoi file: restano solo su questo telefono, non vengono mai inviati né inclusi nell'app.", 14f, 0xFFAFC4E8.toInt()))
-        for ((kind, file, title) in listOf(Triple(0, "bios7.bin", "BIOS ARM7"), Triple(1, "bios9.bin", "BIOS ARM9"), Triple(2, "firmware.bin", "Firmware"))) {
+        for ((kind, file, title) in listOf(Triple(0, "bios7.bin", "BIOS ARM7"), Triple(1, "bios9.bin", "BIOS ARM9"), Triple(2, "firmware.bin", "Firmware"), Triple(3, "refs.json", "Riferimenti schermate Download Play"))) {
             val st = text("", 13f, 0xFFAFC4E8.toInt())
             val b = Button(this).apply { text = "SCEGLI FILE"; minHeight = 150; setOnClickListener { pickKind = kind; pick.launch(arrayOf("*/*")) } }
             col.addView(text("$title ($file)", 16f, bold = true)); col.addView(st); col.addView(b, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 12 })
@@ -51,6 +51,12 @@ class SystemFilesActivity : ComponentActivity() {
         var all = true
         for (r in rows) {
             val f = target(r.file)
+            if (r.kind == 3) {   // the screen references of the Download Play assistant (a game's own, private): needed to start a known game such as Mario Party DS
+                val msg = if (f.exists()) RefsCheck.validate(f.readText()) else "Non presente"
+                r.status.text = if (msg == null) "✓ Pronto" else msg
+                if (msg != null) all = false
+                continue
+            }
             if (!f.exists()) { r.status.text = "Non presente"; all = false; continue }
             val res = Native.nativeCheckSysFile(r.kind, f.path).split('|')
             val ok = res[0] == "OK"
@@ -69,7 +75,7 @@ class SystemFilesActivity : ComponentActivity() {
             val tmp = File(dir, row.file + ".part")
             try {
                 contentResolver.openInputStream(uri)?.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
-                val res = Native.nativeCheckSysFile(kind, tmp.path).split('|')
+                val res = if (kind == 3) (RefsCheck.validate(tmp.readText()).let { if (it == null) listOf("OK") else listOf("NO", it) }) else Native.nativeCheckSysFile(kind, tmp.path).split('|')
                 if (res[0] == "OK") { target(row.file).delete(); tmp.renameTo(target(row.file)) } else { tmp.delete(); runOnUiThread { row.status.text = res.getOrElse(1) { "File non valido" } }; return@Thread }
                 try { contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
             } catch (e: Exception) { tmp.delete(); runOnUiThread { row.status.text = "Non riesco a leggere il file." ; return@runOnUiThread } }
