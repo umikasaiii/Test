@@ -4,13 +4,22 @@ cd "$(dirname "$0")/../android-app"
 adb logcat -c
 # A freshly booted emulator can be busy with Google-app first-run work and ANR the very first activity ("keyDispatchingTimedOut" kills the instrumentation before any test
 # body ran): that is the emulator, not the app, so such a run is repeated once. A real test failure (no ANR) is never retried.
-for attempt in 1 2; do
+# let the freshly booted emulator settle: stop the Google search app (its first-run work is what starves the first activity) and wait for the CPU to go idle
+adb shell pm disable-user --user 0 com.google.android.googlequicksearchbox >/dev/null 2>&1
+adb shell am force-stop com.google.android.gms >/dev/null 2>&1
+for i in $(seq 1 24); do
+  idle=$(adb shell top -b -n 1 2>/dev/null | tr -d '\r' | grep -m1 -oE '[0-9]+%idle' | tr -d '%idle')
+  echo "settle $i: idle ${idle:-?}% (of 400%)"
+  [ -n "$idle" ] && [ "$idle" -ge 340 ] && break
+  sleep 5
+done
+for attempt in 1 2 3; do
   adb shell am force-stop com.google.android.googlequicksearchbox >/dev/null 2>&1
   adb shell input keyevent KEYCODE_HOME >/dev/null 2>&1
   gradle --no-daemon -Pdslink.abis=x86_64 connectedDebugAndroidTest 2>&1 | tee /tmp/gradle_android.log
   rc=${PIPESTATUS[0]}
-  if [ "$rc" = 0 ] || ! grep -q "keyDispatchingTimedOut" /tmp/gradle_android.log || [ "$attempt" = 2 ]; then break; fi
-  echo "=== attempt $attempt died of an emulator ANR before/while starting the first test; repeating once ==="
+  if [ "$rc" = 0 ] || ! grep -q "keyDispatchingTimedOut" /tmp/gradle_android.log || [ "$attempt" = 3 ]; then break; fi
+  echo "=== attempt $attempt died of an emulator ANR before/while starting the first test; repeating ==="
   sleep 20
 done
 adb logcat -d -s dslink-test:V dslink-stack:V dslink-render:V dslink-audio:V dslink-jni:V dslink-nsd:V AndroidRuntime:E > /tmp/logcat_android.txt
