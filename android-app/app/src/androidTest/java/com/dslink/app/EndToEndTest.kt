@@ -46,6 +46,7 @@ class EndToEndTest {
                     tail(File(ctx.filesDir, "gateway.log"), 60)
                     File(ctx.filesDir, "work").listFiles()?.filter { it.name.startsWith("slot") }?.forEach { tail(File(it, "runtime.log"), 40) }
                     try { sb.append("--- logcat ---\n").append(Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "120", "-s", "dslink-stack:V", "dslink-render:V", "dslink-audio:V", "dslink-jni:V", "AndroidRuntime:E")).inputStream.bufferedReader().readText()) } catch (_: Exception) { }
+                    sb.lines().forEach { android.util.Log.e("dslink-test", it) }
                     throw AssertionError(sb.toString(), t)
                 }
             }

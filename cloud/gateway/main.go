@@ -385,11 +385,11 @@ func main() {
 		s.closeRoom()
 		os.Exit(0)
 	}()
-	if os.Getenv("DSLINK_PARENT_WATCH") == "1" { // started by the Android app: if the app process dies, never linger as an orphan holding the port and the consoles
-		ppid := os.Getppid()
+	if v := os.Getenv("DSLINK_PARENT_PID"); v != "" { // started by the Android app: if the app process dies, never linger as an orphan holding the port and the consoles
+		pid, _ := strconv.Atoi(v)
 		go func() {
 			for range time.Tick(time.Second) {
-				if os.Getppid() != ppid {
+				if pid > 0 && syscall.Kill(pid, 0) == syscall.ESRCH {
 					s.closeRoom()
 					os.Exit(0)
 				}
