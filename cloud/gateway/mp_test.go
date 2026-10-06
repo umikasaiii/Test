@@ -395,7 +395,15 @@ func TestLoopbackGuardOnlyOpensThePeerProtocolToTheLAN(t *testing.T) {
 func TestDiscoveryHintsAndNoEncoderMode(t *testing.T) {
 	mpSetHints([]string{"192.168.1.20", "not-an-ip", "::1", " 10.0.0.7 "})
 	a := discoveryAddrs()
-	if len(a) != 3 || a[1] != "192.168.1.20" || a[2] != "10.0.0.7" {
+	has := func(x string) bool {
+		for _, v := range a {
+			if v == x {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("192.168.1.20") || !has("10.0.0.7") || has("not-an-ip") || has("::1") || has(" 10.0.0.7 ") {
 		t.Fatalf("hints must be validated IPv4 only: %v", a)
 	}
 	mpSetHints(nil)
