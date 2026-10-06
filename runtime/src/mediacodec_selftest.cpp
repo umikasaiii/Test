@@ -121,42 +121,70 @@ const char* decodeCheck(const std::vector<Au>& aus, unsigned w, unsigned h, std:
 
 }  // namespace
 
-int runEncoderSelfTest(unsigned w, unsigned h) {
+namespace {
+struct One { bool pass = false, hw = false; std::string json; };
+
+// one stream: its own McVideoEncoder (= its own MediaCodec instance), 150 synthetic frames at 60 fps, then the decode check
+One runOne(unsigned w, unsigned h, int index) {
+    One r;
     McVideoEncoder enc(makeMediaCodecH264());
     std::string err;
-    if (!enc.open(w, h, 60, 2000, 2, err)) { std::printf("{\"pass\":false,\"error\":\"%s\"}\n", err.c_str()); return 1; }
+    char b[1024];
+    if (!enc.open(w, h, 60, 2500, 2, err)) {
+        std::snprintf(b, sizeof b, "{\"stream\":%d,\"pass\":false,\"error\":\"%s\"}", index, err.c_str());
+        r.json = b;
+        return r;
+    }
     std::mutex mu;
     std::vector<Au> aus;
     enc.onVideo = [&](const uint8_t* d, size_t n, bool key, uint64_t pts) { std::lock_guard<std::mutex> l(mu); aus.push_back({std::vector<uint8_t>(d, d + n), key, pts}); };
     std::vector<uint8_t> frame;
     const int N = 150;
     for (int i = 0; i < N; ++i) {
-        paint(frame, w, h, i);
+        paint(frame, w, h, i + index * 7);
         enc.push(frame.data(), w, h, size_t(w) * 4);
         std::this_thread::sleep_for(std::chrono::microseconds(16667));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(600));
     EncStats st = enc.stats();
     const std::string name = enc.codecName();
-    const bool hw = enc.hardware();
+    r.hw = enc.hardware();
     std::vector<Au> got;
     { std::lock_guard<std::mutex> l(mu); got = aus; }
     enc.close();
-    bool firstKeyOk = !got.empty() && got[0].key && annexbHasType(got[0].d.data(), got[0].d.size(), 7) && annexbHasType(got[0].d.data(), got[0].d.size(), 8) && annexbHasType(got[0].d.data(), got[0].d.size(), 5);
-    uint64_t bytes = 0; int keys = 0;
+    const bool firstKeyOk = !got.empty() && got[0].key && annexbHasType(got[0].d.data(), got[0].d.size(), 7) && annexbHasType(got[0].d.data(), got[0].d.size(), 8) && annexbHasType(got[0].d.data(), got[0].d.size(), 5);
+    uint64_t bytes = 0;
+    int keys = 0;
     for (auto& a : got) { bytes += a.d.size(); keys += a.key ? 1 : 0; }
     std::string dinfo;
     const std::string dec = got.empty() ? "no_output" : decodeCheck(got, w, h, dinfo);
-    const bool pass = firstKeyOk && got.size() >= size_t(N) * 8 / 10 && (dec == "ok" || dec == "skipped_vendor_format");
-    std::printf("{\"pass\":%s,\"codec\":\"%s\",\"hardware\":%s,\"w\":%u,\"h\":%u,\"in\":%d,\"out\":%zu,\"keys\":%d,\"firstKeyframeHasSpsPpsIdr\":%s,\"encFps\":%.1f,\"latMs\":%.1f,\"latMaxMs\":%.1f,\"kbps\":%.0f,\"avgFrameBytes\":%llu,\"dropped\":%llu,\"decode\":\"%s\",\"decodeInfo\":\"%s\"}\n",
-                pass ? "true" : "false", name.c_str(), hw ? "true" : "false", w, h, N, got.size(), keys, firstKeyOk ? "true" : "false", st.fps, st.latAvgMs, st.latMaxMs, st.kbps,
-                (unsigned long long)(got.empty() ? 0 : bytes / got.size()), (unsigned long long)st.dropped, dec.c_str(), dinfo.c_str());
+    r.pass = firstKeyOk && got.size() >= size_t(N) * 8 / 10 && (dec == "ok" || dec == "skipped_vendor_format");
+    std::snprintf(b, sizeof b, "{\"stream\":%d,\"pass\":%s,\"codec\":\"%s\",\"hardware\":%s,\"w\":%u,\"h\":%u,\"in\":%d,\"out\":%zu,\"keys\":%d,\"firstKeyframeHasSpsPpsIdr\":%s,\"encFps\":%.1f,\"latMs\":%.1f,\"latMaxMs\":%.1f,\"kbps\":%.0f,\"avgFrameBytes\":%llu,\"dropped\":%llu,\"decode\":\"%s\",\"decodeInfo\":\"%s\"}",
+                  index, r.pass ? "true" : "false", name.c_str(), r.hw ? "true" : "false", w, h, N, got.size(), keys, firstKeyOk ? "true" : "false", st.fps, st.latAvgMs, st.latMaxMs, st.kbps,
+                  (unsigned long long)(got.empty() ? 0 : bytes / got.size()), (unsigned long long)st.dropped, dec.c_str(), dinfo.c_str());
+    r.json = b;
+    return r;
+}
+}  // namespace
+
+// streams > 1: that many encoders run AT THE SAME TIME (a Hosted game with two guests needs two): the report says whether every one of them opened and ran, and whether all are hardware
+int runEncoderSelfTest(unsigned w, unsigned h, int streams) {
+    if (streams < 1) streams = 1;
+    if (streams > 3) streams = 3;
+    std::vector<One> res(static_cast<size_t>(streams));
+    std::vector<std::thread> th;
+    for (int i = 0; i < streams; ++i) th.emplace_back([&, i] { res[size_t(i)] = runOne(w, h, i); });
+    for (auto& t : th) t.join();
+    bool pass = true, hwAll = true;
+    std::string arr;
+    for (size_t i = 0; i < res.size(); ++i) { pass = pass && res[i].pass; hwAll = hwAll && res[i].hw; arr += (i ? "," : "") + res[i].json; }
+    std::printf("{\"pass\":%s,\"concurrent\":%d,\"hardwareAll\":%s,\"streams\":[%s]}\n", pass ? "true" : "false", streams, hwAll ? "true" : "false", arr.c_str());
     return pass ? 0 : 1;
 }
 
 }  // namespace dsrt
 #else
 namespace dsrt {
-int runEncoderSelfTest(unsigned, unsigned) { std::printf("{\"pass\":false,\"error\":\"this Runtime has no MediaCodec encoder\"}\n"); return 2; }
+int runEncoderSelfTest(unsigned, unsigned, int) { std::printf("{\"pass\":false,\"error\":\"this Runtime has no MediaCodec encoder\"}\n"); return 2; }
 }  // namespace dsrt
 #endif

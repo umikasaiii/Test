@@ -46,7 +46,7 @@ func (m *MpSession) TestSolo(gameID string) *MpErr {
 			m.failStart("start_failed", err)
 			return
 		}
-		room.Tokens[0], room.Tokens[1] = randHex(8), randHex(8)
+		room.newTokens()
 		m.srv.mu.Lock()
 		m.srv.room = room
 		m.srv.mu.Unlock()

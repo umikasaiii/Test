@@ -24,5 +24,5 @@ class Bridge(private val act: MainActivity) {
     @JavascriptInterface fun version(): String = BuildConfig.VERSION_NAME
 
     /** Developer menu: encodes synthetic frames with this phone's H.264 encoder, decodes them again and reports codec/hardware/fps/latency/bitrate as one JSON line (takes a few seconds). */
-    @JavascriptInterface fun encoderSelfTest(): String = Stack.encoderSelfTest(act)
+    @JavascriptInterface fun encoderSelfTest(): String = Stack.encoderSelfTest(act, 2)   // two encoders at once: a Hosted game with two iPhones needs two
 }

@@ -134,7 +134,7 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	player, _ := strconv.Atoi(q.Get("player"))
 	s.mu.Lock()
 	room := s.room
-	ok := room != nil && strings.EqualFold(room.Code, q.Get("code")) && (player == 1 || player == 2) && room.Tokens[player-1] == q.Get("token")
+	ok := room != nil && strings.EqualFold(room.Code, q.Get("code")) && (player >= 1 && player <= len(room.Slots)) && room.Slots[player-1] != nil && room.Tokens[player-1] == q.Get("token")
 	s.mu.Unlock()
 	if !ok {
 		log.Printf("ws refused: room=%v code=%q player=%d", room != nil, q.Get("code"), player)

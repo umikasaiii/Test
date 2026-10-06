@@ -26,8 +26,10 @@ func testGuestRom() string { return os.Getenv("DSLINK_TEST_GUEST_ROM") } // test
 
 // decideMode: the user normally gets AUTOMATIC. Distributed only on a clearly good network; otherwise Hosted. The developer menu can force either.
 func (m *MpSession) decideMode() (string, string) {
-	if g := m.players[1]; g != nil && g.web { // a browser (iPhone) cannot run a console: the consoles stay here and it gets video/audio (Hosted)
-		return "hosted", ""
+	for _, i := range m.guestIdx(false) {
+		if m.players[i].web { // a browser (iPhone) cannot run a console: the consoles stay here and it gets video/audio (Hosted)
+			return "hosted", ""
+		}
 	}
 	switch m.modeChosen {
 	case "distributed":
@@ -59,9 +61,11 @@ func (m *MpSession) Start() *MpErr {
 		m.mu.Unlock()
 		return mpErr("no_firmware")
 	}
-	if g := m.players[1]; g != nil && g.web && m.srv.env.NoEncoder { // a browser can only be given a streamed console
-		m.mu.Unlock()
-		return mpErr("start_failed")
+	for _, i := range m.guestIdx(false) {
+		if m.players[i].web && m.srv.env.NoEncoder { // a browser can only be given a streamed console
+			m.mu.Unlock()
+			return mpErr("start_failed")
+		}
 	}
 	eff, note := m.decideMode()
 	m.modeEffective, m.modeNote = eff, note
@@ -69,6 +73,7 @@ func (m *MpSession) Start() *MpErr {
 	m.step = "Preparazione partita…"
 	m.attempt = 1
 	m.guestAttempt = 0
+	m.hostedGuests, m.guestDriversDone, m.dlDone = 0, 0, nil
 	m.plan = mpPlan{Mode: eff, Seq: m.plan.Seq + 1, Attempt: 1}
 	m.radioSeen = false
 	m.stopDrv = make(chan struct{})
@@ -98,6 +103,7 @@ func (m *MpSession) failStart(code string, why error) {
 func (m *MpSession) hostLaunch(mode string, stop chan struct{}) {
 	m.mu.Lock()
 	rom, title, profile, code, secret, gen := m.gamePath, m.game.Title, m.game.Profile, m.code, m.secret, m.attempt
+	guestIdx := m.guestIdx(true) // Hosted: one console per guest that is in the room (one or two), in the order they joined
 	m.mu.Unlock()
 	room := &Room{Code: roomCode(), Title: title, Created: time.Now()}
 	m.setStep("Avvio Nintendo DS…")
@@ -105,12 +111,14 @@ func (m *MpSession) hostLaunch(mode string, stop chan struct{}) {
 		room.Solo = true
 		room.Lan = &LanSpec{Role: "host", Code: code, Secret: secret, GraceMs: 10000, Bind: os.Getenv("DSLINK_MP_BIND"), Advertise: advertiseIP(), Mode: "distributed"}
 	}
-	if err := m.srv.startSlots(room, rom, func() string {
-		if mode == "hosted" {
-			return testGuestRom()
+	guestRoms := []string{""}
+	if mode == "hosted" {
+		guestRoms = make([]string, len(guestIdx))
+		for i := range guestRoms {
+			guestRoms[i] = testGuestRom()
 		}
-		return ""
-	}()); err != nil {
+	}
+	if err := m.srv.startSlotsN(room, rom, guestRoms); err != nil {
 		for _, sl := range room.Slots {
 			if sl != nil {
 				sl.Stop()
@@ -119,7 +127,7 @@ func (m *MpSession) hostLaunch(mode string, stop chan struct{}) {
 		m.failStart("start_failed", err)
 		return
 	}
-	room.Tokens[0], room.Tokens[1] = randHex(8), randHex(8)
+	room.newTokens()
 	m.srv.mu.Lock()
 	m.srv.room = room
 	m.srv.mu.Unlock()
@@ -131,8 +139,14 @@ func (m *MpSession) hostLaunch(mode string, stop chan struct{}) {
 	}
 	m.local = room
 	if mode == "hosted" {
-		m.plan.HostedCode, m.plan.HostedToken = room.Code, room.Tokens[1]
-		m.step = "Connessione al secondo giocatore…"
+		m.plan.HostedCode = room.Code
+		for i, gi := range guestIdx { // guest gi plays on console i+1; each gets only its own console's token (see handleLobbyStatus)
+			if m.players[gi] != nil {
+				m.players[gi].roomSlot = i + 1
+			}
+		}
+		m.hostedGuests, m.guestDriversDone, m.dlDone = len(guestIdx), 0, map[int]bool{}
+		m.step = "Connessione agli altri giocatori…"
 	}
 	m.mu.Unlock()
 	if mode == "distributed" {
@@ -169,18 +183,21 @@ func (m *MpSession) hostLaunch(mode string, stop chan struct{}) {
 		}
 		m.driverDone(true)
 	}()
-	if mode == "hosted" { // both consoles live here: the guest's DS menu is driven on this device too
-		go func() {
-			if err := m.runGuestDriver(room.Slots[1], profile, stop); err != nil {
-				select {
-				case <-stop:
-				default:
-					m.setupFailed(mode, gen, err)
+	if mode == "hosted" { // all consoles live here: each guest's DS menu is driven on this device too
+		for i := range guestIdx {
+			i := i
+			go func() {
+				if err := m.runGuestDriver(room.Slots[i+1], profile, stop, i); err != nil {
+					select {
+					case <-stop:
+					default:
+						m.setupFailed(mode, gen, err)
+					}
+					return
 				}
-				return
-			}
-			m.driverDone(false)
-		}()
+				m.driverDone(false)
+			}()
+		}
 	}
 }
 
@@ -207,6 +224,7 @@ func (m *MpSession) setupFailed(mode string, gen int, err error) {
 	m.plan.Attempt, m.plan.LanPort = m.attempt, 0
 	m.plan.Seq++
 	m.hostDriverOK, m.guestDriverOK, m.radioSeen = false, false, false
+	m.guestDriversDone, m.dlDone = 0, nil
 	m.local = nil
 	m.go_(MpStarting)
 	m.step = "Preparazione partita…"
@@ -222,7 +240,8 @@ func (m *MpSession) driverDone(host bool) {
 	if host {
 		m.hostDriverOK = true
 	} else {
-		m.guestDriverOK = true
+		m.guestDriversDone++
+		m.guestDriverOK = m.hostedGuests == 0 || m.guestDriversDone >= m.hostedGuests // Hosted: every guest's console must be through the setup
 	}
 	m.checkInGameLocked()
 }
@@ -261,7 +280,7 @@ func (m *MpSession) waitRadioThenInGame(mode string, stop chan struct{}) {
 			st := room.Slots[0].Status()
 			peers, _ := st["mp_peers"].(float64)
 			if mode == "hosted" {
-				ok = peers >= 1
+				ok = int(peers) >= m.hostedGuests && m.hostedGuests > 0
 			} else {
 				g := m.players[1]
 				ok = peers >= 1 && g != nil && g.lobbyOnly == string(MpInGame)
@@ -303,7 +322,7 @@ func (m *MpSession) guestLoop(stop chan struct{}, nonce string) {
 			Pending bool
 			State   MpState
 			Game    struct{ Title, ID, Profile string }
-			Players []MpPlayer
+			Players []*MpPlayer // fixed positions, null = empty: [0] host, [1] PLAYER 2, [2] PLAYER 3
 			Net     struct {
 				Done  bool
 				Class string
@@ -322,7 +341,7 @@ func (m *MpSession) guestLoop(stop chan struct{}, nonce string) {
 		}
 		switch {
 		case err == nil && code == 404:
-			if p := m.players[1]; p != nil && p.Pending {
+			if p := m.players[m.slot]; p != nil && p.Pending {
 				m.go_(MpError)
 				m.err = mpErr("rejected")
 			} else if m.state != MpEnded && m.state != MpError {
@@ -341,14 +360,21 @@ func (m *MpSession) guestLoop(stop chan struct{}, nonce string) {
 			m.mu.Unlock()
 			continue
 		}
-		if p := m.players[1]; p != nil && p.Pending {
+		if p := m.players[m.slot]; p != nil && p.Pending {
 			p.Pending, p.Connected = false, true
 			m.go_(MpConnected)
 			m.step = ""
 		}
-		// mirror the host's view
+		// mirror the host's view (positions are the host's: this guest sees its own row and the other guest's)
 		m.game = LibGame{ID: hs.Game.ID, Title: hs.Game.Title, Profile: hs.Game.Profile}
-		m.players[0] = &MpPlayer{Name: hs.Players[0].Name, Role: "host", Connected: true, Ready: true}
+		for i := range m.players {
+			if i < len(hs.Players) && hs.Players[i] != nil {
+				p := hs.Players[i]
+				m.players[i] = &MpPlayer{Name: p.Name, Role: p.Role, Connected: p.Connected, Ready: p.Ready || i == 0}
+			} else if i != m.slot {
+				m.players[i] = nil
+			}
+		}
 		m.net, m.netDone = MpNetResult{Class: hs.Net.Class}, hs.Net.Done
 		m.modeChosen, m.modeEffective, m.modeNote = hs.Mode.Chosen, hs.Mode.Effective, hs.Mode.Note
 		m.hostState, m.plan = hs.State, hs.Plan
@@ -501,7 +527,7 @@ func (m *MpSession) guestLaunch(plan mpPlan, startKey, tok, hostIP, profile stri
 		m.failStart("start_failed", err)
 		return
 	}
-	room.Tokens[0], room.Tokens[1] = randHex(8), randHex(8)
+	room.newTokens()
 	m.srv.mu.Lock()
 	m.srv.room = room
 	m.srv.mu.Unlock()
@@ -537,7 +563,7 @@ func (m *MpSession) guestLaunch(plan mpPlan, startKey, tok, hostIP, profile stri
 	m.go_(MpDownloadPlay)
 	m.step = "Ricerca partita…"
 	m.mu.Unlock()
-	if err := m.runGuestDriver(room.Slots[0], profile, stop); err != nil {
+	if err := m.runGuestDriver(room.Slots[0], profile, stop, 0); err != nil {
 		select {
 		case <-stop:
 		default:
@@ -602,49 +628,141 @@ func (m *MpSession) supervise(stop chan struct{}) {
 			continue
 		}
 		now := time.Now()
-		g := m.players[1]
+		dead := mpPeerDeadMs * time.Millisecond
 		switch m.state {
 		case MpWaitingForPeer, MpConnected, MpNetworkCheck, MpReady:
 			if now.Sub(m.created) > mpLobbyTTL {
 				m.endLocked("room_expired")
-			} else if g != nil && !g.Pending && now.Sub(g.lastSeen) > mpPeerDeadMs*time.Millisecond {
-				m.guestGoneLocked("heartbeat")
-			} else if g != nil && g.Pending && now.Sub(g.lastSeen) > 10*time.Second {
-				m.players[1] = nil // the asking guest went away
-			} else if m.state == MpNetworkCheck && g != nil && now.Sub(g.lastSeen) < time.Second && !m.netDone && now.Sub(m.created) > 0 {
-				// waiting for the guest's measurement
+				break
+			}
+			for i := 1; i < len(m.players); i++ {
+				g := m.players[i]
+				switch {
+				case g == nil:
+				case !g.Pending && now.Sub(g.lastSeen) > dead:
+					m.guestGoneLocked(i, "heartbeat")
+				case g.Pending && now.Sub(g.lastSeen) > 10*time.Second:
+					m.players[i] = nil // the asking guest went away
+				}
 			}
 		case MpStarting, MpDownloadPlay, MpInGame, MpReconnecting:
-			alive := g != nil && now.Sub(g.lastSeen) < mpPeerDeadMs*time.Millisecond
-			if m.plan.Mode == "distributed" && m.local != nil && m.local.Slots[0] != nil {
-				st := m.local.Slots[0].Status()
-				peers, _ := st["mp_peers"].(float64)
-				if peers >= 1 {
-					m.radioSeen = true
+			anyDown := false
+			for _, i := range m.guestIdx(false) {
+				g := m.players[i]
+				alive := now.Sub(g.lastSeen) < dead
+				if i == 1 && m.plan.Mode == "distributed" && m.local != nil && m.local.Slots[0] != nil {
+					st := m.local.Slots[0].Status()
+					peers, _ := st["mp_peers"].(float64)
+					if peers >= 1 {
+						m.radioSeen = true
+					}
+					if e, _ := st["mp_ended"].(string); e == "peer_lost" {
+						alive = false
+					}
+					if m.radioSeen && peers < 1 {
+						alive = false
+					}
 				}
-				if e, _ := st["mp_ended"].(string); e == "peer_lost" {
-					alive = false
-				}
-				if m.radioSeen && peers < 1 {
-					alive = false
+				if !alive {
+					if g.goneSince.IsZero() {
+						g.goneSince = now
+					}
+					anyDown = true
+				} else {
+					g.goneSince = time.Time{}
 				}
 			}
-			if !alive && m.state != MpReconnecting {
+			switch {
+			case anyDown && m.state != MpReconnecting:
 				m.prevState, m.reconnectSince = m.state, now
 				m.go_(MpReconnecting)
 				m.step = "Connessione persa. Riconnessione in corso…"
-			} else if alive && m.state == MpReconnecting {
+			case !anyDown && m.state == MpReconnecting:
 				m.go_(m.prevState)
 				m.step = ""
-				m.logf("peer back, resuming %s", m.prevState)
-			} else if !alive && m.state == MpReconnecting && now.Sub(m.reconnectSince) > mpReconnectGrace*time.Millisecond {
-				m.endLocked("peer_lost")
-				m.players[1] = nil
-				m.netDone = false
+				m.logf("peers back, resuming %s", m.prevState)
+			case anyDown && m.state == MpReconnecting && now.Sub(m.reconnectSince) > mpReconnectGrace*time.Millisecond:
+				m.settleLostGuestsLocked(now)
 			}
 		}
 		m.mu.Unlock()
 	}
+}
+
+// settleLostGuestsLocked: the grace period is over and at least one guest never came back. In a running Hosted game with a guest still present the game goes on without the lost one
+// (only that console, its encoder and its stream are released); otherwise the session ends in order.
+func (m *MpSession) settleLostGuestsLocked(now time.Time) {
+	var lost, kept []int
+	for _, i := range m.guestIdx(false) {
+		if g := m.players[i]; !g.goneSince.IsZero() {
+			lost = append(lost, i)
+		} else {
+			kept = append(kept, i)
+		}
+	}
+	if m.prevState == MpInGame && m.plan.Mode == "hosted" && len(kept) > 0 {
+		for _, i := range lost {
+			m.releaseGuestConsoleLocked(m.players[i])
+			m.players[i] = nil
+			m.logf("guest %d lost: the game goes on without it", i+1)
+		}
+		m.go_(MpInGame)
+		m.step = ""
+		return
+	}
+	m.endLocked("peer_lost")
+	for _, i := range lost {
+		m.players[i] = nil
+	}
+	m.netDone = false
+}
+
+// dropGuestLocked: a guest left on purpose (or was settled as lost) while the room is in any state.
+func (m *MpSession) dropGuestLocked(idx int, why string) {
+	g := m.players[idx]
+	if g == nil {
+		return
+	}
+	switch m.state {
+	case MpStarting, MpDownloadPlay, MpInGame, MpReconnecting:
+		others := 0
+		for _, j := range m.guestIdx(false) {
+			if j != idx {
+				others++
+			}
+		}
+		inGame := m.state == MpInGame || (m.state == MpReconnecting && m.prevState == MpInGame)
+		if inGame && m.plan.Mode == "hosted" && others > 0 {
+			m.releaseGuestConsoleLocked(g)
+			m.players[idx] = nil
+			m.logf("guest %d left (%s): the game goes on without it", idx+1, why)
+			return
+		}
+		m.endLocked(why)
+		m.players[idx] = nil
+	default:
+		m.guestGoneLocked(idx, why)
+	}
+}
+
+// releaseGuestConsoleLocked: stops ONE guest's console (process group), its encoder and its WebRTC peer; the other consoles keep running.
+func (m *MpSession) releaseGuestConsoleLocked(g *MpPlayer) {
+	room := m.local
+	if room == nil || g == nil || g.roomSlot <= 0 || g.roomSlot >= len(room.Slots) {
+		return
+	}
+	m.srv.mu.Lock()
+	sl, pr := room.Slots[g.roomSlot], room.peers[g.roomSlot]
+	room.Slots[g.roomSlot] = nil
+	m.srv.mu.Unlock()
+	go func() {
+		if pr != nil {
+			pr.Close()
+		}
+		if sl != nil {
+			sl.Stop()
+		}
+	}()
 }
 
 // ReturnToLobby: "TORNA ALLA LOBBY" after a loss. Host: same room, waiting for a peer again. Guest: tries to join the same host lobby again.
@@ -656,7 +774,8 @@ func (m *MpSession) ReturnToLobby() *MpErr {
 	}
 	if m.role == "host" && m.roomID != "" {
 		m.teardownGameLocked()
-		m.players[1] = nil
+		m.players[1], m.players[2] = nil, nil
+		m.hostedGuests, m.guestDriversDone, m.dlDone = 0, 0, nil
 		m.net, m.netDone, m.err, m.step, m.plan = MpNetResult{}, false, nil, "", mpPlan{}
 		m.hostDriverOK, m.guestDriverOK, m.radioSeen = false, false, false
 		m.go_(MpIdle)

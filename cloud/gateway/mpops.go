@@ -200,11 +200,25 @@ func (m *MpSession) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	addr, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if g := m.players[1]; g != nil { // duplicate join: the same device asking again gets the same answer; anyone else finds the room full
-		if g.addr == addr && g.dev == q.Dev {
-			jsonOut(w, 200, m.joinAnswer(q, g))
+	for i := 1; i < len(m.players); i++ { // duplicate join: the same device asking again gets the same answer
+		if g := m.players[i]; g != nil && g.addr == addr && g.dev == q.Dev {
+			jsonOut(w, 200, m.joinAnswer(q, g, i))
 			return
 		}
+	}
+	// capacity: up to two browser guests (Hosted); a phone guest (Distributed) is the only guest of its room
+	free, guests, native := -1, 0, false
+	for i := 1; i < len(m.players); i++ {
+		if g := m.players[i]; g == nil {
+			if free < 0 {
+				free = i
+			}
+		} else {
+			guests++
+			native = native || !g.web
+		}
+	}
+	if free < 0 || native || (guests > 0 && !q.Web) {
 		jsonOut(w, 409, map[string]string{"error": "room_full"})
 		return
 	}
@@ -212,30 +226,42 @@ func (m *MpSession) handleJoin(w http.ResponseWriter, r *http.Request) {
 	if q.Via == "nearby" {
 		g.Pending, g.Connected = true, false
 	}
-	m.players[1] = g
-	m.logf("guest %q joined via %s from %s (pending=%v)", q.Name, q.Via, addr, g.Pending)
-	if !g.Pending {
+	m.players[free] = g
+	m.logf("guest %q (player %d) joined via %s from %s (pending=%v)", q.Name, free+1, q.Via, addr, g.Pending)
+	if !g.Pending && (m.state == MpWaitingForPeer) {
 		m.go_(MpNetworkCheck)
 	}
-	jsonOut(w, 200, m.joinAnswer(q, g))
+	m.refreshReadyLocked() // a second guest who is not ready yet takes the room out of READY
+	jsonOut(w, 200, m.joinAnswer(q, g, free))
 }
 
-func (m *MpSession) joinAnswer(q joinReq, g *MpPlayer) map[string]any {
-	return map[string]any{"token": g.token, "pending": g.Pending, "hostName": m.hostName}
+func (m *MpSession) joinAnswer(q joinReq, g *MpPlayer, idx int) map[string]any {
+	return map[string]any{"token": g.token, "pending": g.Pending, "hostName": m.hostName, "slot": idx}
 }
 
 func (m *MpSession) guestByToken(tok string) *MpPlayer {
-	if p := m.players[1]; p != nil && tok != "" && hmac.Equal([]byte(p.token), []byte(tok)) {
-		return p
+	_, g := m.guestIdxByToken(tok)
+	return g
+}
+
+// guestIdxByToken: which guest (1 or 2) holds this private token
+func (m *MpSession) guestIdxByToken(tok string) (int, *MpPlayer) {
+	if tok == "" {
+		return 0, nil
 	}
-	return nil
+	for i := 1; i < len(m.players); i++ {
+		if p := m.players[i]; p != nil && p.token != "" && hmac.Equal([]byte(p.token), []byte(tok)) {
+			return i, p
+		}
+	}
+	return 0, nil
 }
 
 func (m *MpSession) handleLobbyStatus(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	tok := r.URL.Query().Get("token")
-	g := m.guestByToken(tok)
+	idx, g := m.guestIdxByToken(tok)
 	if m.role != "host" || g == nil {
 		jsonOut(w, 404, map[string]string{"error": "room_expired"})
 		return
@@ -245,15 +271,19 @@ func (m *MpSession) handleLobbyStatus(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, 200, map[string]any{"pending": true, "state": m.state})
 		return
 	}
-	pl := []map[string]any{}
-	for _, p := range m.players {
+	pl := make([]any, len(m.players)) // fixed positions: [0] host, [1] and [2] guests (null = empty): a guest knows which one it is and sees the other's name and readiness
+	for i, p := range m.players {
 		if p != nil {
-			pl = append(pl, map[string]any{"name": p.Name, "role": p.Role, "connected": p.Connected, "ready": p.Ready})
+			pl[i] = map[string]any{"name": p.Name, "role": p.Role, "connected": p.Connected, "ready": p.Ready}
 		}
 	}
-	out := map[string]any{"state": m.state, "game": map[string]any{"title": m.game.Title, "id": m.game.ID, "profile": m.game.Profile}, "players": pl, "hostName": m.hostName,
+	plan := m.plan // the stream credentials in it are THIS guest's own console only
+	if plan.Mode == "hosted" && m.local != nil && g.roomSlot > 0 && g.roomSlot < len(m.local.Tokens) {
+		plan.HostedToken, plan.HostedPlayer = m.local.Tokens[g.roomSlot], g.roomSlot+1
+	}
+	out := map[string]any{"state": m.state, "game": map[string]any{"title": m.game.Title, "id": m.game.ID, "profile": m.game.Profile}, "players": pl, "hostName": m.hostName, "slot": idx,
 		"net": map[string]any{"done": m.netDone, "class": m.net.Class}, "mode": m.modeForPeer(),
-		"plan": m.plan, "step": m.step, "error": m.err}
+		"plan": plan, "step": m.step, "error": m.err}
 	if m.err != nil || m.state == MpEnded {
 		out["error"] = m.err
 	}
@@ -329,16 +359,22 @@ func (m *MpSession) handleLobbyLeave(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(io.LimitReader(r.Body, 512)).Decode(&q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if g := m.guestByToken(q.Token); m.role == "host" && g != nil {
-		m.guestGoneLocked("peer_left")
+	if idx, g := m.guestIdxByToken(q.Token); m.role == "host" && g != nil {
+		m.dropGuestLocked(idx, "peer_left")
 	}
 	jsonOut(w, 200, map[string]any{"ok": true})
 }
 
-// refreshReadyLocked: READY = guest connected + network checked + guest ready (the host is ready by definition); anything less = CONNECTED.
+// refreshReadyLocked: READY = at least one guest connected + network checked + every connected guest ready (the host is ready by definition); anything less = CONNECTED.
+// A second guest is optional: START works with one guest or two.
 func (m *MpSession) refreshReadyLocked() {
-	g := m.players[1]
-	allReady := g != nil && g.Connected && g.Ready && m.netDone
+	guests := m.guestIdx(true)
+	allReady := len(guests) > 0 && m.netDone
+	for _, i := range guests {
+		if !m.players[i].Ready {
+			allReady = false
+		}
+	}
 	switch {
 	case allReady && (m.state == MpConnected || m.state == MpNetworkCheck):
 		m.go_(MpReady)
@@ -348,34 +384,51 @@ func (m *MpSession) refreshReadyLocked() {
 }
 
 // guestGoneLocked: the guest left the LOBBY (before the game). In a running game this is handled by the supervisor (RECONNECTING).
-func (m *MpSession) guestGoneLocked(why string) {
-	m.players[1] = nil
-	m.netDone, m.net = false, MpNetResult{}
+func (m *MpSession) guestGoneLocked(idx int, why string) {
+	m.players[idx] = nil
+	left := len(m.guestIdx(true))
+	if left == 0 {
+		m.netDone, m.net = false, MpNetResult{}
+	}
 	switch m.state {
 	case MpConnected, MpNetworkCheck, MpReady:
-		m.go_(MpWaitingForPeer)
-		m.err = nil
-		m.step = "L'altro giocatore si è disconnesso."
+		if left == 0 {
+			m.go_(MpWaitingForPeer)
+			m.err = nil
+			m.step = "L'altro giocatore si è disconnesso."
+		} else {
+			m.refreshReadyLocked()
+			m.step = "Un giocatore si è disconnesso."
+		}
 	}
-	m.logf("guest gone (%s)", why)
+	m.logf("guest %d gone (%s)", idx+1, why)
 }
 
 // Approve (host): accept or reject a "nearby" join request.
 func (m *MpSession) Approve(accept bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	g := m.players[1]
-	if m.role != "host" || g == nil || !g.Pending {
+	idx := 0
+	for i := 1; i < len(m.players); i++ {
+		if g := m.players[i]; g != nil && g.Pending {
+			idx = i
+			break
+		}
+	}
+	if m.role != "host" || idx == 0 {
 		return
 	}
+	g := m.players[idx]
 	if !accept {
 		g.token = "" // the guest's next poll finds nothing -> "rejected"
-		m.players[1] = nil
+		m.players[idx] = nil
 		m.logf("join rejected")
 		return
 	}
 	g.Pending, g.Connected, g.lastSeen = false, true, time.Now()
-	m.go_(MpNetworkCheck)
+	if m.state == MpWaitingForPeer {
+		m.go_(MpNetworkCheck)
+	}
 }
 
 // ---------------------------------------------------------------- peer HTTP client
@@ -552,6 +605,7 @@ func (m *MpSession) Join(req JoinRequest) *MpErr {
 		Token, Wrapped, HostName string
 		Pending                  bool
 		Error                    string
+		Slot                     int
 	}
 	st, err := peerPost(hostAddr, "/api/lobby/join", body, &ans)
 	if err != nil {
@@ -578,8 +632,12 @@ func (m *MpSession) Join(req JoinRequest) *MpErr {
 	if secret != "" {
 		m.secret = secret
 	}
+	if ans.Slot < 1 || ans.Slot >= len(m.players) {
+		ans.Slot = 1
+	}
+	m.slot = ans.Slot
 	m.players[0] = &MpPlayer{Name: ans.HostName, Role: "host", Connected: true, Ready: true}
-	m.players[1] = &MpPlayer{Name: name, Role: "guest", Connected: !ans.Pending, Pending: ans.Pending}
+	m.players[ans.Slot] = &MpPlayer{Name: name, Role: "guest", Connected: !ans.Pending, Pending: ans.Pending}
 	if ans.Pending {
 		m.step = "In attesa che l'host accetti…"
 	} else {
@@ -599,7 +657,7 @@ func (m *MpSession) SetReady(ready bool) *MpErr {
 		return mpErr("not_ready")
 	}
 	addr, tok := m.hostAddr, m.token
-	if p := m.players[1]; p != nil {
+	if p := m.players[m.slot]; p != nil {
 		p.Ready = ready
 	}
 	m.mu.Unlock()

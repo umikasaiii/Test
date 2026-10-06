@@ -209,38 +209,25 @@ class EndToEndTest {
     }
 
     /** The stream encoder on THIS device: MediaCodec H.264 (hardware on a phone, the software codec on the emulator) -> access units -> decoded again and compared with the synthetic picture. */
-    @Test fun streamEncoderSelfTestPassesOnThisDevice() {
-        val j = JSONObject(Stack.encoderSelfTest(ctx))
-        android.util.Log.i("dslink-test", "encoder self-test: $j")
-        assertTrue("encoder self-test: $j", j.optBoolean("pass"))
-        assertTrue("a codec name is reported", j.optString("codec").isNotEmpty())
-        assertTrue("access units came out: $j", j.optInt("out") >= 120)
-        assertTrue("the first keyframe carries SPS+PPS+IDR: $j", j.optBoolean("firstKeyframeHasSpsPpsIdr"))
-        assertTrue("decoded picture matches the input (or the vendor layout is skipped): $j", j.optString("decode") in listOf("ok", "skipped_vendor_format"))
+    @Test fun streamEncodersSelfTestPassesOnThisDevice() {
+        val all = JSONObject(Stack.encoderSelfTest(ctx, 2))   // TWO encoders at the same time: Hosted with two iPhones
+        android.util.Log.i("dslink-test", "encoder self-test (2 concurrent streams): $all")
+        assertTrue("both streams pass: $all", all.optBoolean("pass"))
+        assertEquals("two concurrent encoders", 2, all.optInt("concurrent"))
+        val arr = all.getJSONArray("streams")
+        assertEquals(2, arr.length())
+        for (i in 0 until arr.length()) {
+            val j = arr.getJSONObject(i)
+            assertTrue("stream $i: a codec name is reported: $j", j.optString("codec").isNotEmpty())
+            assertTrue("stream $i: access units came out: $j", j.optInt("out") >= 120)
+            assertTrue("stream $i: the first keyframe carries SPS+PPS+IDR: $j", j.optBoolean("firstKeyframeHasSpsPpsIdr"))
+            assertTrue("stream $i: decoded picture matches the input (or the vendor layout is skipped): $j", j.optString("decode") in listOf("ok", "skipped_vendor_format"))
+        }
     }
 
-    /**
-     * HOSTED, the iPhone case: this phone runs BOTH consoles; a browser guest (here: the app's own WebView standing in for Safari) joins through the web guest API, receives the
-     * second console as H.264 (MediaCodec) + Opus over WebRTC and sends buttons back; when the browser goes away the session ends cleanly and both consoles stop.
-     */
-    @Test fun hostedBrowserGuestReceivesTheSecondConsoleFromMediaCodecOverWebRtc() {
-        val id = uploadHomebrew()
-        assertTrue(Gw.post("/api/mp/create", JSONObject().put("gameId", id)))
-        val code = Gw.state()!!.optString("code")
-        assertEquals(6, code.length)
-        val sid = "ab12cd34".repeat(4)   // the browser's own handle
-        assertTrue("web guest joins by code", Gw.post("/g/$sid/api/mp/join", JSONObject().put("code", code)))
-        assertTrue("host sees the browser guest", until(20000) { Gw.state()!!.optString("state") in listOf("CONNECTED", "NETWORK_CHECK", "READY") })
-        assertTrue(Gw.post("/g/$sid/api/mp/ready", JSONObject().put("ready", true)))
-        assertTrue("host READY", until(20000) { Gw.state()!!.optBoolean("canStart") })
-        assertTrue(Gw.post("/api/mp/start", JSONObject()))
-        assertTrue("host IN_GAME: ${Gw.state()}", until(90000) { state() == "IN_GAME" })
-        assertEquals("a browser guest always gets Hosted", "hosted", Gw.state()!!.getJSONObject("mode").optString("effective"))
-        assertTrue("two consoles run on this phone (${runtimeProcesses()})", until(10000) { runtimeProcesses() == 2 })
-
-        // the browser: signalling over /ws, media over WebRTC
-        js("""(() => { const g = window.__g = { v: 0, vb: 0, a: 0, fd: 0, vw: 0, st: 'init', err: '', open: false };
-          fetch('/g/$sid/api/mp/state').then((r) => r.json()).then((s) => { const ig = s.ingame; if (!ig) { g.err = 'no ingame'; return; }
+    /** the browser side of one guest (the app's own WebView stands in for Safari): its guest session heartbeat, signalling over /ws, media over WebRTC, counters in window.<name> */
+    private fun guestJs(name: String, sid: String) = """(() => { const g = window.$name = { v: 0, vb: 0, a: 0, fd: 0, vw: 0, st: 'init', err: '', open: false };
+          fetch('/g/$sid/api/mp/state').then((r) => r.json()).then((s) => { const ig = s.ingame; if (!ig) { g.err = 'no ingame'; return; } g.player = ig.player;
             const pc = new RTCPeerConnection({ iceServers: [] }); g.pc = pc; g.dc = pc.createDataChannel('input', { ordered: true }); pc.createDataChannel('move', { ordered: false, maxRetransmits: 0 });
             pc.addTransceiver('video', { direction: 'recvonly' }); pc.addTransceiver('audio', { direction: 'recvonly' });
             const vid = document.createElement('video'); vid.muted = true; vid.autoplay = true; vid.playsInline = true; vid.style.display = 'none'; document.body.appendChild(vid); g.vid = vid;
@@ -252,37 +239,74 @@ class EndToEndTest {
             ws.onerror = () => { g.err = 'ws error'; };
             g.poll = setInterval(() => { fetch('/g/$sid/api/mp/state').catch(() => {}); }, 600);   // what the guest page does while it is open: the host hears the browser through it
             g.timer = setInterval(async () => { g.st = pc.connectionState; const st = await pc.getStats(); st.forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'video') { g.v = r.packetsReceived; g.vb = r.bytesReceived; g.fd = r.framesDecoded || 0; } if (r.type === 'inbound-rtp' && r.kind === 'audio') g.a = r.packetsReceived; }); g.vw = vid.videoWidth; }, 500);
-          }).catch((e) => { g.err = String(e); }); return 'started'; })()""")
-        val q = "JSON.stringify({st:__g.st,v:__g.v,a:__g.a,vb:__g.vb,fd:__g.fd,vw:__g.vw,open:__g.open,err:__g.err})"
-        var last = JSONObject()
-        val flowing = until(60000, 500) { last = jsJson(q); last.optString("st") == "connected" && last.optInt("v") > 60 && last.optInt("a") > 30 }
-        assertTrue("WebRTC connects and video/audio packets arrive: $last", flowing)
-        android.util.Log.i("dslink-test", "browser guest stats: $last")
-        assertTrue("video bytes flow (H.264 from MediaCodec): $last", last.optInt("vb") > 20000)
-        if (last.optInt("fd") == 0) android.util.Log.w("dslink-test", "this WebView decoded no frame yet (packets arrived): $last")
+          }).catch((e) => { g.err = String(e); }); return 'started'; })()"""
+    private fun guestQ(name: String) = "JSON.stringify({st:$name.st,v:$name.v,a:$name.a,vb:$name.vb,fd:$name.fd,vw:$name.vw,open:$name.open,err:$name.err,player:$name.player})"
+    private fun slotsOf() = Gw.state(true)!!.getJSONObject("dev").getJSONArray("slots")
+    private fun slotById(id: Int): JSONObject { val sl = slotsOf(); for (i in 0 until sl.length()) if (sl.getJSONObject(i).optInt("id") == id) return sl.getJSONObject(i); return JSONObject() }
 
-        // the second console reports its encoder; the browser's buttons reach console 2 only
-        val dev = Gw.state(true)!!.getJSONObject("dev").getJSONArray("slots")
-        var p2 = JSONObject()
-        for (i in 0 until dev.length()) { val sl = dev.getJSONObject(i); if (sl.optInt("id") == 2) p2 = sl }
-        val enc = p2.optJSONObject("enc")
-        android.util.Log.i("dslink-test", "console 2 encoder: $enc  fps ${p2.optDouble("fps")}")
-        assertNotNull("console 2 reports its encoder", enc)
-        assertTrue("encoder produced pictures: $enc", enc!!.optInt("out") > 60 && enc.optString("codec").isNotEmpty())
-        js("(() => { __g.dc.send(JSON.stringify({t:'btn',k:'a',d:true})); __g.dc.send(JSON.stringify({t:'btn',k:'a',d:false})); return 'sent'; })()")
-        assertTrue("the browser's buttons reach console 2", until(10000) {
-            val sl = Gw.state(true)!!.getJSONObject("dev").getJSONArray("slots")
-            var n2 = 0; var n1 = -1
-            for (i in 0 until sl.length()) { val o = sl.getJSONObject(i); if (o.optInt("id") == 2) n2 = o.optInt("input_events") else if (o.optInt("id") == 1) n1 = o.optInt("input_events") }
-            n2 >= 2 && n1 == 0
-        })
+    /**
+     * HOSTED with TWO browser guests (two iPhones): this phone runs THREE consoles on one local DS wireless bridge, two MediaCodec encoders, two WebRTC peers; each browser receives only its own
+     * console and its buttons reach only that console; when one browser goes away the other keeps playing; when the last one goes the session ends cleanly and every console stops.
+     */
+    @Test fun hostedTwoBrowserGuestsEachReceiveTheirOwnConsoleFromMediaCodec() {
+        val id = uploadHomebrew()
+        assertTrue(Gw.post("/api/mp/create", JSONObject().put("gameId", id)))
+        val code = Gw.state()!!.optString("code")
+        assertEquals(6, code.length)
+        val sid1 = "ab12cd34".repeat(4); val sid2 = "ef56ab78".repeat(4)   // each browser's own handle
+        assertTrue("browser 1 joins by code", Gw.post("/g/$sid1/api/mp/join", JSONObject().put("code", code)))
+        assertTrue("browser 2 joins by the SAME code", Gw.post("/g/$sid2/api/mp/join", JSONObject().put("code", code)))
+        assertTrue("host lists both guests", until(20000) { val p = Gw.state()!!.getJSONArray("players"); p.length() == 3 })
+        assertTrue(Gw.post("/g/$sid1/api/mp/ready", JSONObject().put("ready", true)))
+        assertTrue(Gw.post("/g/$sid2/api/mp/ready", JSONObject().put("ready", true)))
+        assertTrue("host READY with both guests ready", until(30000) { Gw.state()!!.optBoolean("canStart") })
+        assertTrue(Gw.post("/api/mp/start", JSONObject()))
+        assertTrue("host IN_GAME: ${Gw.state()}", until(120000) { state() == "IN_GAME" })
+        assertEquals("a browser guest always gets Hosted", "hosted", Gw.state()!!.getJSONObject("mode").optString("effective"))
+        assertTrue("three consoles run on this phone (${runtimeProcesses()})", until(15000) { runtimeProcesses() == 3 })
 
-        // the browser goes away for good: the host is told, both consoles and the stream are released
-        js("(() => { clearInterval(__g.timer); clearInterval(__g.poll); __g.ws.close(); __g.pc.close(); return 'closed'; })()")
-        assertTrue("host: peer lost -> ENDED ('Connessione con il giocatore persa.')", until(60000, 500) {
+        // both browsers: signalling over /ws, media over WebRTC, each to its OWN console
+        js(guestJs("__g1", sid1)); js(guestJs("__g2", sid2))
+        var l1 = JSONObject(); var l2 = JSONObject()
+        val flowing = until(90000, 500) {
+            l1 = jsJson(guestQ("__g1")); l2 = jsJson(guestQ("__g2"))
+            listOf(l1, l2).all { it.optString("st") == "connected" && it.optInt("v") > 60 && it.optInt("a") > 30 }
+        }
+        android.util.Log.i("dslink-test", "browser guests: $l1 $l2")
+        assertTrue("both WebRTC peers connect and video/audio packets arrive: $l1 $l2", flowing)
+        assertTrue("each guest got a different console: ${l1.optInt("player")} ${l2.optInt("player")}", setOf(l1.optInt("player"), l2.optInt("player")) == setOf(2, 3))
+        assertTrue("video bytes flow on both (H.264 from two MediaCodec encoders): $l1 $l2", l1.optInt("vb") > 20000 && l2.optInt("vb") > 20000)
+
+        // two encoders, each reporting; each console at speed
+        for (pid in listOf(2, 3)) {
+            val sl = slotById(pid); val enc = sl.optJSONObject("enc")
+            android.util.Log.i("dslink-test", "console $pid: fps ${sl.optDouble("fps")} encoder $enc rtt ${sl.optDouble("peer_rtt_ms")}")
+            assertNotNull("console $pid reports its encoder", enc)
+            assertTrue("encoder $pid produced pictures: $enc", enc!!.optInt("out") > 60 && enc.optString("codec").isNotEmpty())
+            assertTrue("console $pid has its guest connected", sl.optBoolean("peer_connected"))
+        }
+        // input isolation: guest 1's button reaches ONE console, guest 2's the other, the host's console none
+        val p1 = l1.optInt("player")
+        js("(() => { __g1.dc.send(JSON.stringify({t:'btn',k:'a',d:true})); __g1.dc.send(JSON.stringify({t:'btn',k:'a',d:false})); return 'sent'; })()")
+        assertTrue("guest 1's buttons reach only console $p1", until(10000) { val a = slotById(p1).optInt("input_events"); val b = slotById(5 - p1).optInt("input_events"); val h = slotById(1).optInt("input_events"); a >= 2 && b == 0 && h == 0 })
+        js("(() => { __g2.dc.send(JSON.stringify({t:'btn',k:'b',d:true})); __g2.dc.send(JSON.stringify({t:'btn',k:'b',d:false})); return 'sent'; })()")
+        assertTrue("guest 2's buttons reach only console ${5 - p1}", until(10000) { slotById(5 - p1).optInt("input_events") >= 2 && slotById(p1).optInt("input_events") in 2..3 && slotById(1).optInt("input_events") == 0 })
+
+        // guest 1's browser goes away: the game goes on for the host and guest 2; only that console is released
+        js("(() => { clearInterval(__g1.timer); clearInterval(__g1.poll); __g1.ws.close(); __g1.pc.close(); return 'closed'; })()")
+        assertTrue("guest 1 gone: its console stops, the other two keep running", until(60000, 500) { runtimeProcesses() == 2 })
+        assertEquals("the game is still IN_GAME for the others", "IN_GAME", state())
+        val still = jsJson(guestQ("__g2"))
+        assertEquals("guest 2 is still connected", "connected", still.optString("st"))
+        val v0 = still.optInt("v"); SystemClock.sleep(2000)
+        assertTrue("guest 2 still receives video", jsJson(guestQ("__g2")).optInt("v") > v0 + 30)
+
+        // the last browser goes: the host is told, every console stops
+        js("(() => { clearInterval(__g2.timer); clearInterval(__g2.poll); __g2.ws.close(); __g2.pc.close(); return 'closed'; })()")
+        assertTrue("host: last peer lost -> ENDED ('Connessione con il giocatore persa.')", until(60000, 500) {
             val s = Gw.state(); s != null && s.optString("state") == "ENDED" && s.optJSONObject("error")?.optString("message") == "Connessione con il giocatore persa."
         })
-        assertTrue("both consoles stop", until(20000) { runtimeProcesses() == 0 })
+        assertTrue("every console stops", until(20000) { runtimeProcesses() == 0 })
     }
 
     @Test fun discoveryHintsAndNetworkReachTheGateway() {

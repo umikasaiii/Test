@@ -78,17 +78,19 @@ class DevMonitor(private val ctx: Context, private val tv: TextView) {
         return "net RTT %.1f ms  jitter %.1f ms  loss %.1f%%  %s".format(d.optDouble("rttMs"), d.optDouble("jitterMs"), d.optDouble("lossPct"), d.optString("class"))
     }
 
-    /** the streamed second console of a Hosted game (slot 2 of the gateway's room) with its encoder and the guest's WebRTC link */
-    private fun hostedStats(dev: org.json.JSONObject?): DevText.Hosted? {
-        val slots = dev?.optJSONArray("slots") ?: return null
+    /** the streamed consoles of a Hosted game (slots 2 and 3 of the gateway's room: one per guest) with their encoders and the guests' WebRTC links */
+    private fun hostedStats(dev: org.json.JSONObject?): List<DevText.Hosted> {
+        val slots = dev?.optJSONArray("slots") ?: return emptyList()
+        val out = ArrayList<DevText.Hosted>()
         for (i in 0 until slots.length()) {
             val s = slots.optJSONObject(i) ?: continue
-            if (s.optInt("id") != 2) continue
+            val id = s.optInt("id")
+            if (id < 2) continue
             val e = s.optJSONObject("enc")
-            return DevText.Hosted(s.optDouble("fps"), e?.optString("codec") ?: "", e?.optBoolean("hardware") ?: false, e?.optDouble("fps") ?: 0.0, e?.optDouble("latMs") ?: 0.0,
+            out += DevText.Hosted(id, s.optDouble("fps"), e?.optString("codec") ?: "", e?.optBoolean("hardware") ?: false, e?.optDouble("fps") ?: 0.0, e?.optDouble("latMs") ?: 0.0,
                 e?.optDouble("latMaxMs") ?: 0.0, e?.optDouble("kbps") ?: 0.0, e?.optLong("dropped") ?: 0L, s.optDouble("peer_rtt_ms", 0.0), s.optBoolean("peer_connected"))
         }
-        return null
+        return out
     }
 
     private fun batteryIntent(): Intent? = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

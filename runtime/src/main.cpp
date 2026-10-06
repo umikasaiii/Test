@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
     Args args = parseArgs(argc, argv);
     if (args.has("encoder-selftest")) {  // what the stream encoder does on this device (no game, no network): see mediacodec_selftest.cpp
 #ifdef DSLINK_WITH_MEDIACODEC
-        return runEncoderSelfTest(unsigned(args.geti("out-w", 256)), unsigned(args.geti("out-h", 384)));
+        return runEncoderSelfTest(unsigned(args.geti("out-w", 256)), unsigned(args.geti("out-h", 384)), args.geti("streams", 1));
 #else
         std::cout << "{\"pass\":false,\"error\":\"this Runtime has no MediaCodec encoder\"}\n";
         return 2;

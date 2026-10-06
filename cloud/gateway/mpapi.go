@@ -128,7 +128,7 @@ func (s *Server) registerMp(mux *http.ServeMux) {
 		room := m.local
 		m.mu.Unlock()
 		idx, _ := strconv.Atoi(r.URL.Query().Get("slot"))
-		if room == nil || idx < 0 || idx > 1 || room.Slots[idx] == nil {
+		if room == nil || idx < 0 || idx >= len(room.Slots) || room.Slots[idx] == nil {
 			http.NotFound(w, r)
 			return
 		}

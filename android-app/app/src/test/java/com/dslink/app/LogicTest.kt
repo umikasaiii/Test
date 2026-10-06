@@ -47,10 +47,11 @@ class LogicTest {
 
     @Test fun hostedOverlayShowsTheSecondConsoleAndTheEncoder() {
         val m = DoubleArray(17) { 0.0 }
-        val h = DevText.Hosted(59.7, "c2.qti.avc.encoder", true, 59.2, 7.4, 16.0, 2310.0, 3, 3.1, true)
-        val t = DevText.format(m, 30.0, 90.0, 100.0, 300.0, "battery 80%", "thermal none", "net", h)
-        for (w in listOf("P2 emu 59.7", "connected", "RTT 3.1 ms", "c2.qti.avc.encoder (hardware)", "59.2 fps", "latency 7.4", "2310 kbps", "dropped 3")) assertTrue("missing $w in\n$t", t.contains(w))
-        assertTrue(DevText.format(m, 0.0, 0.0, 0.0, 0.0, "", "", "").lines().none { it.startsWith("P2") })
-        assertTrue(DevText.hosted(DevText.Hosted(0.0, "", false, 0.0, 0.0, 0.0, 0.0, 0, 0.0, false)).any { it.contains("no encoder") })
+        val h2 = DevText.Hosted(2, 59.7, "c2.qti.avc.encoder", true, 59.2, 7.4, 16.0, 2310.0, 3, 3.1, true)
+        val h3 = DevText.Hosted(3, 58.9, "c2.qti.avc.encoder", true, 58.1, 8.0, 17.0, 2290.0, 5, 4.2, true)
+        val t = DevText.format(m, 30.0, 90.0, 100.0, 300.0, "battery 80%", "thermal none", "net", listOf(h2, h3))
+        for (w in listOf("P2 emu 59.7", "P3 emu 58.9", "connected", "RTT 3.1 ms", "RTT 4.2 ms", "encoder P2: c2.qti.avc.encoder (hardware)", "encoder P3", "59.2 fps", "58.1 fps", "latency 7.4", "2310 kbps", "dropped 3", "dropped 5")) assertTrue("missing $w in\n$t", t.contains(w))
+        assertTrue(DevText.format(m, 0.0, 0.0, 0.0, 0.0, "", "", "").lines().none { it.startsWith("P2") || it.startsWith("P3") })
+        assertTrue(DevText.hosted(listOf(DevText.Hosted(2, 0.0, "", false, 0.0, 0.0, 0.0, 0.0, 0, 0.0, false))).any { it.contains("no encoder") })
     }
 }

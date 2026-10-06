@@ -141,10 +141,10 @@ function drawQR(payload) {
   g.fillStyle = "#000"; for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (q.isDark(y, x)) g.fillRect(off + x * cell, off + y * cell, cell, cell);
 }
 
-function playerRow(label, p, hostRow) {
+function playerRow(label, p, hostRow, optional) {
   const li = document.createElement("li"); const name = document.createElement("span"); const stt = document.createElement("span"); stt.className = "st";
   name.textContent = p && p.name ? `${label} · ${p.name}` : label;
-  if (!p) { stt.textContent = "In attesa…"; stt.classList.add("wait"); }
+  if (!p) { stt.textContent = optional ? "Facoltativo" : "In attesa…"; stt.classList.add("wait"); }
   else if (p.pending) { stt.textContent = "Chiede di unirsi"; stt.classList.add("pend"); }
   else if (hostRow) { stt.textContent = "✓ Pronto"; stt.classList.add("ok"); }
   else if (p.ready) { stt.textContent = "✓ Pronto"; stt.classList.add("ok"); }
@@ -157,17 +157,17 @@ function renderLobby() {
   const m = st.mode || {}; $("lobbyMode").textContent = "Modalità: " + (m.effective === "distributed" ? "Distribuita" : m.effective === "hosted" ? "Hosted" : "Automatica");
   $("lobbyCode").textContent = st.code || "------"; drawQR(host ? st.qr : ""); document.querySelector(".codebox").style.display = host ? "" : "none";
   const ul = $("players"); ul.innerHTML = "";
-  const h = (st.players || []).find((p) => p.role === "host"), g = (st.players || []).find((p) => p.role === "guest");
-  ul.append(playerRow("HOST", h, true), playerRow("PLAYER 2", g, false));
+  const pls = st.players || [], h = pls.find((p) => p.role === "host"), g1 = pls.find((p) => p.slot === 1), g2 = pls.find((p) => p.slot === 2);
+  ul.append(playerRow("HOST", h, true), playerRow("PLAYER 2", g1, false), playerRow("PLAYER 3", g2, false, !!g1 && !g2));   // up to two guests; the second one is optional
   const n = st.net || {}; const badge = $("netBadge"); badge.textContent = n.label || "In verifica…"; badge.className = "badge " + (n.done ? n.class : ""); $("netHint").textContent = n.done ? (n.hint || "") : "";
   $("lobbyNotice").textContent = st.error ? st.error.message : (m.note || (st.step && st.state !== "READY" ? st.step : ""));
   const pend = (st.players || []).find((p) => p.pending); $("approveBox").hidden = !(host && pend); if (pend) $("approveName").textContent = `${pend.name} vuole unirsi`;
   $("btnStart").hidden = !host; $("btnStart").disabled = !st.canStart;
-  const me = (st.players || []).find((p) => p.role === "guest"); $("btnReady").hidden = host || !me || !me.connected; $("btnReady").textContent = me && me.ready ? "ANNULLA PRONTO" : "PRONTO";
+  const me = (st.players || []).find((p) => p.role === "guest" && p.slot === st.you); $("btnReady").hidden = host || !me || !me.connected; $("btnReady").textContent = me && me.ready ? "ANNULLA PRONTO" : "PRONTO";
   $("btnCancel").textContent = host ? "ANNULLA PARTITA" : "ESCI";
 }
 $("btnStart").onclick = async () => { const r = await api("POST", "/api/mp/start"); if (!r.ok) $("lobbyNotice").textContent = r.j.error.message; await poll(); };
-$("btnReady").onclick = async () => { const me = (st.players || []).find((p) => p.role === "guest"); await api("POST", "/api/mp/ready", { ready: !(me && me.ready) }); lastDump = ""; await poll(); };
+$("btnReady").onclick = async () => { const me = (st.players || []).find((p) => p.role === "guest" && p.slot === st.you); await api("POST", "/api/mp/ready", { ready: !(me && me.ready) }); lastDump = ""; await poll(); };
 $("btnCancel").onclick = () => askLeave();
 $("btnApprove").onclick = async () => { await api("POST", "/api/mp/approve", { accept: true }); await poll(); };
 $("btnReject").onclick = async () => { await api("POST", "/api/mp/approve", { accept: false }); await poll(); };

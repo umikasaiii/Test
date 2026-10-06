@@ -86,25 +86,74 @@ func TestWebGuestJoinsThroughTheHostGateway(t *testing.T) {
 		t.Fatal("ready")
 	}
 	waitFor(t, "host READY", func() bool { return stateOf(d.host) == MpReady })
-	// a second browser finds the room full
+	// a SECOND browser joins as PLAYER 3: the room leaves READY until it is ready too; a third browser finds the room full
 	sid2 := strings.Repeat("cd34", 5)
-	req2, _ := http.NewRequest("POST", front.URL+"/g/"+sid2+"/api/mp/join", strings.NewReader(`{"code":"`+code+`"}`))
-	r2, _ := http.DefaultClient.Do(req2)
-	var j2 map[string]any
-	json.NewDecoder(r2.Body).Decode(&j2)
-	r2.Body.Close()
-	if r2.StatusCode != 400 || j2["error"].(map[string]any)["code"] != "room_full" {
-		t.Fatalf("a second guest must find the room full: %d %v", r2.StatusCode, j2)
+	call2 := func(sid, op, body string) (int, map[string]any) {
+		req, _ := http.NewRequest("POST", front.URL+"/g/"+sid+"/api/mp/"+op, strings.NewReader(body))
+		req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var j map[string]any
+		json.NewDecoder(resp.Body).Decode(&j)
+		return resp.StatusCode, j
 	}
-	// the browser goes away (Safari in the background): the host stops hearing it and the lobby opens up again
+	if st, j := call2(sid2, "join", `{"code":"`+code+`"}`); st != 200 {
+		t.Fatalf("a second browser guest must be accepted: %d %v", st, j)
+	}
+	waitFor(t, "host leaves READY because player 3 is not ready", func() bool { return stateOf(d.host) == MpConnected })
+	pl := d.host.mp.view(false)["players"].([]map[string]any)
+	if len(pl) != 3 || pl[1]["slot"] != 1 || pl[2]["slot"] != 2 {
+		t.Fatalf("the lobby lists host, PLAYER 2 and PLAYER 3 in join order: %v", pl)
+	}
+	var sv2 map[string]any
+	waitFor(t, "the second guest knows it is PLAYER 3 and sees everybody", func() bool {
+		rq, _ := http.NewRequest("GET", front.URL+"/g/"+sid2+"/api/mp/state", nil)
+		rs, _ := http.DefaultClient.Do(rq)
+		sv2 = nil
+		json.NewDecoder(rs.Body).Decode(&sv2)
+		rs.Body.Close()
+		return sv2["you"] == float64(2) && len(sv2["players"].([]any)) == 3
+	})
+	sid3 := strings.Repeat("ef56", 5)
+	if st, j := call2(sid3, "join", `{"code":"`+code+`"}`); st != 400 || j["error"].(map[string]any)["code"] != "room_full" {
+		t.Fatalf("a third guest must find the room full: %d %v", st, j)
+	}
+	if st, _ := call2(sid2, "ready", `{"ready":true}`); st != 200 {
+		t.Fatal("ready 2")
+	}
+	waitFor(t, "host READY with both guests ready", func() bool { return stateOf(d.host) == MpReady })
+	// the first browser goes away: the second guest stays and the room is still startable (START works with one guest too)
 	hostSession.mu.Lock()
 	wg := d.host.webg.byID[sid]
 	hostSession.mu.Unlock()
 	wg.m.mu.Lock()
 	wg.m.webSeen = time.Now().Add(-2 * mpWebBrowserGrace) // as if no request came for a long while
 	wg.m.mu.Unlock()
-	// (the browser's next request would refresh webSeen; none comes)
-	waitFor(t, "host notices the vanished browser", func() bool { return stateOf(d.host) == MpWaitingForPeer })
+	keep := d.host.webg.byID[sid2]
+	stop := make(chan struct{})
+	go func() { // the second browser keeps polling like its page does
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(500 * time.Millisecond):
+				call2(sid2, "ready", `{"ready":true}`)
+			}
+		}
+	}()
+	defer close(stop)
+	waitFor(t, "the vanished first guest is dropped, the second stays", func() bool {
+		hostSession.mu.Lock()
+		defer hostSession.mu.Unlock()
+		return hostSession.players[1] == nil && hostSession.players[2] != nil
+	})
+	if st := stateOf(d.host); st != MpReady && st != MpConnected {
+		t.Fatalf("with one guest left the room stays open, state %s", st)
+	}
+	_ = keep
 }
 
 func TestQRCarriesAWebAddressAndBothFormsParse(t *testing.T) {

@@ -28,6 +28,7 @@ var drvSeq atomic.Int64
 
 type dlDriver struct {
 	slot   *Slot
+	guests []*Slot // host driver, Hosted: the consoles of the guests (their own states tell when every one of them has downloaded / booted the game)
 	refs   map[string]dlRef
 	stop   chan struct{}
 	report func(string)
@@ -91,6 +92,39 @@ func (d *dlDriver) state() string {
 	st := d.slot.Status()
 	s, _ := st["dl_state"].(string)
 	return s
+}
+
+// refOr: the reference screen for this player if the private profile has one, else the two-player one
+func (d *dlDriver) refOr(name, fallback string) string {
+	if _, ok := d.refs[name]; ok {
+		return name
+	}
+	return fallback
+}
+
+// allGuests: every guest console reached one of the states (the host's own radio view only follows the first client)
+func (d *dlDriver) allGuests(states []string, timeout time.Duration) bool {
+	end := time.Now().Add(timeout)
+	for time.Now().Before(end) {
+		all := true
+		for _, g := range d.guests {
+			st, _ := g.Status()["dl_state"].(string)
+			ok := false
+			for _, w := range states {
+				if st == w {
+					ok = true
+				}
+			}
+			all = all && ok
+		}
+		if all {
+			return true
+		}
+		if d.sleep(500*time.Millisecond) != nil || !d.alive() {
+			return false
+		}
+	}
+	return false
 }
 
 func (d *dlDriver) alive() bool {
@@ -302,6 +336,15 @@ func (m *MpSession) runHostDriver(room *Room, mode, profile string, stop chan st
 	if err != nil {
 		return err
 	}
+	nG := 1
+	m.mu.Lock()
+	if mode == "hosted" && m.hostedGuests > 0 {
+		nG = m.hostedGuests
+	}
+	m.mu.Unlock()
+	for i := 1; i <= nG && i < len(room.Slots); i++ {
+		d.guests = append(d.guests, room.Slots[i])
+	}
 	if err := d.sleep(14 * time.Second); err != nil { // boot + title screen
 		return err
 	}
@@ -337,7 +380,11 @@ func (m *MpSession) runHostDriver(room *Room, mode, profile string, stop chan st
 		return errors.New("host: the other console never asked for the game")
 	}
 	m.setStep("Download Play…")
-	if !d.waitState([]string{"DOWNLOAD_VERIFY"}, 400*time.Second) {
+	if nG > 1 { // two guests download at the same time: the host starts the game only when BOTH consoles hold it
+		if !m.waitGuestsDownloaded(nG, 500*time.Second, stop) {
+			return errors.New("host: not every guest completed the download")
+		}
+	} else if !d.waitState([]string{"DOWNLOAD_VERIFY"}, 400*time.Second) {
 		return errors.New("host: transfer did not complete")
 	}
 	m.note("host: transfer complete")
@@ -352,8 +399,12 @@ func (m *MpSession) runHostDriver(room *Room, mode, profile string, stop chan st
 	if err := d.sleep(12 * time.Second); err != nil { // let the other console finish verifying what it received: starting before that leaves it waiting forever
 		return err
 	}
-	if !d.waitScreen("host_p2_joined", "bot", 60, 40*time.Second) {
-		return errors.New("host: player 2 not listed")
+	joined := "host_p2_joined"
+	if nG > 1 {
+		joined = d.refOr("host_p23_joined", "")
+	}
+	if joined != "" && !d.waitScreen(joined, "bot", 60, 40*time.Second) {
+		return errors.New("host: the players are not listed")
 	}
 	m.setStep("Avvio partita…")
 	started := false
@@ -374,12 +425,16 @@ func (m *MpSession) runHostDriver(room *Room, mode, profile string, stop chan st
 		if err != nil {
 			return err
 		}
-		started = d.waitState([]string{"CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 6*time.Second)
+		if nG > 1 {
+			started = d.allGuests([]string{"CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 8*time.Second)
+		} else {
+			started = d.waitState([]string{"CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 6*time.Second)
+		}
 	}
 	if !started {
 		return errors.New("host: the game did not start after OK")
 	}
-	if !d.waitState([]string{"GAME_HANDSHAKE", "LOBBY"}, 100*time.Second) {
+	if !d.waitState([]string{"GAME_HANDSHAKE", "LOBBY"}, 100*time.Second) || (nG > 1 && !d.allGuests([]string{"GAME_HANDSHAKE", "LOBBY"}, 100*time.Second)) {
 		return errors.New("host: game handshake did not complete")
 	}
 	m.note("host: game handshake reached")
@@ -401,7 +456,36 @@ func (m *MpSession) runHostDriver(room *Room, mode, profile string, stop chan st
 	return errors.New("host: lobby not reached")
 }
 
-func (m *MpSession) runGuestDriver(slot *Slot, profile string, stop chan struct{}) error {
+// guestDownloaded / waitGuestsDownloaded: Hosted with two guests, the host's driver waits for both guests' downloads
+func (m *MpSession) guestDownloaded(idx int) {
+	m.mu.Lock()
+	if m.dlDone == nil {
+		m.dlDone = map[int]bool{}
+	}
+	m.dlDone[idx] = true
+	m.mu.Unlock()
+}
+
+func (m *MpSession) waitGuestsDownloaded(n int, timeout time.Duration, stop chan struct{}) bool {
+	end := time.Now().Add(timeout)
+	for time.Now().Before(end) {
+		m.mu.Lock()
+		done := len(m.dlDone)
+		m.mu.Unlock()
+		if done >= n {
+			return true
+		}
+		select {
+		case <-stop:
+			return false
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return false
+}
+
+// runGuestDriver: the DS menu of ONE guest console (idx 0 = PLAYER 2, idx 1 = PLAYER 3): Download Play -> pick the game -> download -> boot -> lobby.
+func (m *MpSession) runGuestDriver(slot *Slot, profile string, stop chan struct{}, idx int) error {
 	d, err := m.newDriver(slot, stop)
 	if err != nil {
 		return err
@@ -437,24 +521,26 @@ func (m *MpSession) runGuestDriver(slot *Slot, profile string, stop chan struct{
 		}
 	}
 	m.setStep("Download Play…")
-	m.note("guest: download requested (state %s)", d.state())
+	m.note("guest %d: download requested (state %s)", idx+2, d.state())
 	if !d.waitState([]string{"DOWNLOAD_VERIFY", "CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 500*time.Second) {
 		return errors.New("guest: download did not complete")
 	}
+	m.guestDownloaded(idx)
 	m.setStep("Avvio partita…")
 	m.note("guest: waiting for the host to start (state %s)", d.state())
 	if !d.waitState([]string{"CLIENT_GAME_BOOT", "GAME_HANDSHAKE", "LOBBY"}, 400*time.Second) || !d.waitState([]string{"GAME_HANDSHAKE", "LOBBY"}, 400*time.Second) {
 		return errors.New("guest: game did not start")
 	}
-	d.waitScreen("client_you_are_p2", "bot", 40, 60*time.Second)
+	youAre, lobby := d.refOr(fmt.Sprintf("client_you_are_p%d", idx+2), "client_you_are_p2"), d.refOr(fmt.Sprintf("client_lobby_p%d", idx+2), "client_lobby")
+	d.waitScreen(youAre, "bot", 40, 60*time.Second)
 	for i := 0; i < 8; i++ {
-		if ok, _ := d.screenIs("client_lobby", "bot", 60); ok {
+		if ok, _ := d.screenIs(lobby, "bot", 60); ok {
 			return nil
 		}
 		if i >= 5 && (d.state() == "LOBBY" || d.state() == "IN_GAME") {
 			return nil
 		}
-		if err := d.ifScreen("client_you_are_p2", "bot", 40, func() error { return d.tap(0.5, 0.79, ms(400), 4*time.Second) }); err != nil {
+		if err := d.ifScreen(youAre, "bot", 40, func() error { return d.tap(0.5, 0.79, ms(400), 4*time.Second) }); err != nil {
 			return err
 		}
 		if err := d.sleep(3 * time.Second); err != nil {

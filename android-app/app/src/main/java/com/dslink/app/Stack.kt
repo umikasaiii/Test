@@ -85,14 +85,14 @@ object Stack {
      * The stream encoder's self-test (Hosted mode sends the second console to another device through this phone's MediaCodec): runs the Runtime with --encoder-selftest
      * and returns its one JSON line. Needs no game and no gateway. Blocking: call from a background thread.
      */
-    fun encoderSelfTest(ctx: Context): String {
+    fun encoderSelfTest(ctx: Context, streams: Int = 2): String {
         val rt = File(ctx.applicationInfo.nativeLibraryDir, "libdslink_runtime.so")
         if (!rt.canExecute()) return "{\"pass\":false,\"error\":\"runtime missing\"}"
         return try {
-            val p = ProcessBuilder(rt.path, "--encoder-selftest").redirectErrorStream(true).start()
+            val p = ProcessBuilder(rt.path, "--encoder-selftest", "--streams", streams.toString()).redirectErrorStream(true).start()
             val out = StringBuilder()
             val t = Thread { p.inputStream.bufferedReader().forEachLine { out.appendLine(it) } }.apply { start() }
-            if (!p.waitFor(40, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); t.join(1000); return "{\"pass\":false,\"error\":\"timeout\"}" }
+            if (!p.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); t.join(1000); return "{\"pass\":false,\"error\":\"timeout\"}" }
             t.join(2000)
             out.lines().lastOrNull { it.startsWith("{") } ?: "{\"pass\":false,\"error\":\"no result\"}"
         } catch (e: Exception) { "{\"pass\":false,\"error\":\"${e.javaClass.simpleName}\"}" }

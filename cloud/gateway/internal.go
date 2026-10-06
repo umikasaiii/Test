@@ -157,7 +157,7 @@ func (s *Server) internalSession(w http.ResponseWriter, r *http.Request) {
 		fail(422, "invalid ROM", err)
 		return
 	}
-	fwDirs := [2]string{}
+	fwDirs := [3]string{}
 	for _, sl := range m.Slots {
 		if sl.Slot < 1 || sl.Slot > 2 {
 			continue
@@ -174,7 +174,7 @@ func (s *Server) internalSession(w http.ResponseWriter, r *http.Request) {
 			fwDirs[sl.Slot-1] = d
 		}
 	}
-	room := &Room{Solo: m.Solo, Code: m.SessionID, Title: m.Title, Created: time.Now(), Tokens: req.Tokens, FirmwareDirs: fwDirs, ContentBase: req.ContentBase, Ticket: req.Ticket}
+	room := &Room{Solo: m.Solo, Code: m.SessionID, Title: m.Title, Created: time.Now(), Tokens: [3]string{req.Tokens[0], req.Tokens[1]}, FirmwareDirs: fwDirs, ContentBase: req.ContentBase, Ticket: req.Ticket}
 	for _, sv := range m.Saves {
 		if sv.Kind == "sram" {
 			dst := filepath.Join(s.env.WorkDir, "slot1", "saves", "melonDS DS", "player1.srm")

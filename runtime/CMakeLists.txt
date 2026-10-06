@@ -18,7 +18,7 @@ option(DSLINK_WITH_MEDIACODEC "Android MediaCodec H.264 + libopus stream encoder
 # Desktop test of the encoder's platform-neutral half (fake codec + real libopus built from the same submodule)
 option(DSLINK_ENC_TEST "Build enc_test: colour conversion, resampler, mailbox/keyframe logic, Opus" OFF)
 find_package(Threads REQUIRED)
-set(DSLINK_REPO "${CMAKE_SOURCE_DIR}/..")
+set(DSLINK_REPO "${CMAKE_CURRENT_SOURCE_DIR}/..")
 if(DSLINK_WITH_MEDIACODEC OR DSLINK_ENC_TEST)
   set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
   set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)

@@ -49,18 +49,18 @@ object Words {
 /** the developer overlay text (only shown from the developer menu) */
 object DevText {
     /** Hosted: the second console that is streamed to another device (an iPhone) and the encoder that feeds it. */
-    data class Hosted(val p2Fps: Double, val codec: String, val hardware: Boolean, val encFps: Double, val latMs: Double, val latMaxMs: Double, val kbps: Double, val dropped: Long, val rttMs: Double, val connected: Boolean)
+    data class Hosted(val player: Int, val p2Fps: Double, val codec: String, val hardware: Boolean, val encFps: Double, val latMs: Double, val latMaxMs: Double, val kbps: Double, val dropped: Long, val rttMs: Double, val connected: Boolean)
 
-    fun hosted(h: Hosted?): List<String> {
-        h ?: return emptyList()
+    /** one block per streamed console (P2, and P3 when a second guest plays) */
+    fun hosted(hs: List<Hosted>): List<String> = hs.flatMap { h ->
         val codec = if (h.codec.isEmpty()) "no encoder" else "${h.codec} (${if (h.hardware) "hardware" else "software"})"
-        return listOf(
-            "P2 emu %.1f fps  guest %s  RTT %s".format(h.p2Fps, if (h.connected) "connected" else "not connected", if (h.rttMs > 0) "%.1f ms".format(h.rttMs) else "-"),
-            "encoder $codec  %.1f fps  latency %.1f ms (max %.1f)  %.0f kbps  dropped %d".format(h.encFps, h.latMs, h.latMaxMs, h.kbps, h.dropped),
+        listOf(
+            "P${h.player} emu %.1f fps  guest %s  RTT %s".format(h.p2Fps, if (h.connected) "connected" else "not connected", if (h.rttMs > 0) "%.1f ms".format(h.rttMs) else "-"),
+            "encoder P${h.player}: $codec  %.1f fps  latency %.1f ms (max %.1f)  %.0f kbps  dropped %d".format(h.encFps, h.latMs, h.latMaxMs, h.kbps, h.dropped),
         )
     }
 
-    fun format(m: DoubleArray, cpuApp: Double, cpuRuntime: Double, ramAppMb: Double, ramRuntimeMb: Double, battery: String, thermal: String, net: String, hosted: Hosted? = null): String {
+    fun format(m: DoubleArray, cpuApp: Double, cpuRuntime: Double, ramAppMb: Double, ramRuntimeMb: Double, battery: String, thermal: String, net: String, hosted: List<Hosted> = emptyList()): String {
         fun d(i: Int) = if (i < m.size) m[i] else 0.0
         val lines = ArrayList<String>()
         lines += "FPS P1 emu %.1f  render %.1f  frame %.1f ms (max %.1f)".format(d(12), d(0), d(13), d(14))

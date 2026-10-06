@@ -26,17 +26,20 @@ type MpPlayer struct {
 	lastSeen  time.Time
 	addr      string
 	dev       string
-	web       bool   // a browser (e.g. Safari on an iPhone) joined through this gateway's web guest page: it only ever plays Hosted (streamed console)
-	lobbyOnly string // the peer's own state as it reports it (guest -> host)
+	roomSlot  int       // host side: the index of the console this guest plays on (1 or 2) once the game is launched
+	goneSince time.Time // host side: since when its heartbeat is missing (zero = present)
+	web       bool      // a browser (e.g. Safari on an iPhone) joined through this gateway's web guest page: it only ever plays Hosted (streamed console)
+	lobbyOnly string    // the peer's own state as it reports it (guest -> host)
 }
 
 type mpPlan struct {
-	Mode        string `json:"mode"` // distributed | hosted (empty until the host starts)
-	LanPort     int    `json:"lanPort,omitempty"`
-	HostedCode  string `json:"hostedCode,omitempty"`
-	HostedToken string `json:"hostedToken,omitempty"`
-	Seq         int    `json:"seq"`
-	Attempt     int    `json:"attempt,omitempty"` // which try of the DS-level setup the host is on (the guest restarts its console when it grows)
+	Mode         string `json:"mode"` // distributed | hosted (empty until the host starts)
+	LanPort      int    `json:"lanPort,omitempty"`
+	HostedCode   string `json:"hostedCode,omitempty"`
+	HostedToken  string `json:"hostedToken,omitempty"`  // filled per guest when it asks for the status: only its own console's token
+	HostedPlayer int    `json:"hostedPlayer,omitempty"` // which console (2 or 3) is this guest's
+	Seq          int    `json:"seq"`
+	Attempt      int    `json:"attempt,omitempty"` // which try of the DS-level setup the host is on (the guest restarts its console when it grows)
 }
 
 const (
@@ -61,11 +64,15 @@ type MpSession struct {
 	modeEffective        string
 	modeNote             string
 	hostName             string
-	devID                string // random per gateway process, sent when joining
-	solo                 bool   // test hook: a console with nobody else in the room (no supervision of a missing peer)
-	attempt              int    // host: current try of the DS-level setup (1..mpSetupAttempts)
-	guestAttempt         int    // guest: the host's attempt this device has acted on
-	players              [2]*MpPlayer
+	devID                string       // random per gateway process, sent when joining
+	solo                 bool         // test hook: a console with nobody else in the room (no supervision of a missing peer)
+	attempt              int          // host: current try of the DS-level setup (1..mpSetupAttempts)
+	guestAttempt         int          // guest: the host's attempt this device has acted on
+	players              [3]*MpPlayer // [0] host, [1] and [2] guests (Hosted: up to two browser guests; Distributed: one)
+	slot                 int          // guest side: the index the host gave this guest (1 = PLAYER 2, 2 = PLAYER 3)
+	hostedGuests         int          // host side: consoles launched for guests in the current Hosted game
+	guestDriversDone     int          // host side (Hosted): guests whose Download Play setup finished
+	dlDone               map[int]bool // host side (Hosted): guests whose download completed (the host starts the game only after all of them)
 	net                  MpNetResult
 	netDone              bool
 	step                 string
@@ -259,9 +266,9 @@ func (m *MpSession) view(dev bool) map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	pl := []map[string]any{}
-	for _, p := range m.players {
+	for i, p := range m.players {
 		if p != nil {
-			pl = append(pl, map[string]any{"name": p.Name, "role": p.Role, "connected": p.Connected, "ready": p.Ready, "pending": p.Pending})
+			pl = append(pl, map[string]any{"name": p.Name, "role": p.Role, "connected": p.Connected, "ready": p.Ready, "pending": p.Pending, "slot": i})
 		}
 	}
 	label, hint := netLabel(m.net.Class)
@@ -285,19 +292,20 @@ func (m *MpSession) view(dev bool) map[string]any {
 		"players": pl, "mode": map[string]any{"chosen": m.modeChosen, "effective": eff, "label": modeLabel, "note": modeNote},
 		"net": map[string]any{"done": m.netDone, "class": m.net.Class, "label": label, "hint": hint}, "step": m.step, "error": m.err, "canStart": canStart,
 		"expiresInSec": int((mpLobbyTTL - time.Since(m.created)).Seconds()),
+		"you":          m.slot,
 		"platform":     map[string]any{"native": m.srv.env.ShmPath != "" && !m.web, "hostedHost": !m.srv.env.NoEncoder, "web": m.web},
 	}
 	if (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) && m.local != nil {
 		ig := map[string]any{"base": "", "code": m.local.Code, "player": 1, "token": m.local.Tokens[0]}
 		if m.role == "guest" && m.plan.Mode == "hosted" {
-			ig = map[string]any{"base": m.hostedBase(), "code": m.plan.HostedCode, "player": 2, "token": m.plan.HostedToken}
+			ig = map[string]any{"base": m.hostedBase(), "code": m.plan.HostedCode, "player": m.hostedPlayer(), "token": m.plan.HostedToken}
 		}
 		if m.srv.env.ShmPath != "" && ig["base"] == "" {
 			ig["native"] = true // the console on this device is drawn by the app itself (shared memory), not streamed to the page
 		}
 		v["ingame"] = ig
 	} else if m.role == "guest" && m.plan.Mode == "hosted" && (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) {
-		v["ingame"] = map[string]any{"base": m.hostedBase(), "code": m.plan.HostedCode, "player": 2, "token": m.plan.HostedToken}
+		v["ingame"] = map[string]any{"base": m.hostedBase(), "code": m.plan.HostedCode, "player": m.hostedPlayer(), "token": m.plan.HostedToken}
 	}
 	if dev {
 		d := map[string]any{"net": m.net, "plan": m.plan, "log": m.devLog, "roomId": m.roomID, "hostAddr": m.hostAddr}
@@ -313,6 +321,24 @@ func (m *MpSession) view(dev bool) map[string]any {
 		v["dev"] = d
 	}
 	return v
+}
+
+func (m *MpSession) hostedPlayer() int {
+	if m.plan.HostedPlayer >= 2 {
+		return m.plan.HostedPlayer
+	}
+	return 2
+}
+
+// guestIdx lists the host-side guest positions that are filled (1, 2) in order
+func (m *MpSession) guestIdx(connectedOnly bool) []int {
+	var out []int
+	for i := 1; i < len(m.players); i++ {
+		if g := m.players[i]; g != nil && (!connectedOnly || (g.Connected && !g.Pending)) {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 // hostedBase: where a Hosted guest's page opens the stream. A browser guest got its page FROM the host's gateway: same origin ("" = relative).
@@ -344,7 +370,8 @@ func (m *MpSession) resetLocked() {
 	m.state, m.role = MpIdle, ""
 	m.roomID, m.code, m.secret, m.token, m.hostAddr, m.hostIP = "", "", "", "", "", ""
 	m.game, m.gamePath = LibGame{}, ""
-	m.players = [2]*MpPlayer{}
+	m.players = [3]*MpPlayer{}
+	m.slot, m.hostedGuests, m.guestDriversDone, m.dlDone = 0, 0, 0, nil
 	m.net, m.netDone, m.step, m.err = MpNetResult{}, false, "", nil
 	m.modeEffective, m.modeNote, m.plan, m.started = "", "", mpPlan{}, false
 	m.attempt, m.guestAttempt, m.solo = 0, 0, false

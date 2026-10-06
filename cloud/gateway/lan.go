@@ -40,8 +40,10 @@ func sessionModeOf(r *Room) string {
 
 func slotStatuses(r *Room) []any {
 	out := []any{r.Slots[0].Status()}
-	if r.Slots[1] != nil {
-		out = append(out, r.Slots[1].Status())
+	for _, sl := range r.Slots[1:] {
+		if sl != nil {
+			out = append(out, sl.Status())
+		}
 	}
 	return out
 }
@@ -126,7 +128,7 @@ func (s *Server) createLanRoom(w http.ResponseWriter, r *http.Request, dir strin
 		jsonOut(w, 500, map[string]string{"error": "impossibile avviare l'emulatore: " + err.Error()})
 		return
 	}
-	room.Tokens[0], room.Tokens[1] = randHex(8), randHex(8)
+	room.newTokens()
 	s.room = room
 	out := map[string]any{"code": room.Code, "player": 1, "token": room.Tokens[0], "title": room.Title, "mode": "distributed", "lan_role": lan.Role}
 	if lan.Role == "host" { // the runtime reports the room code + join URI in its status once the LAN socket is open

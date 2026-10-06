@@ -42,7 +42,7 @@ public:
 };
 
 std::unique_ptr<H264Codec> makeMediaCodecH264();  // Android: the NDK MediaCodec; elsewhere nullptr
-int runEncoderSelfTest(unsigned w, unsigned h);   // dslink-runtime --encoder-selftest: encode synthetic frames, decode them again, print one JSON line (0 = pass)
+int runEncoderSelfTest(unsigned w, unsigned h, int streams);   // dslink-runtime --encoder-selftest [--streams N]: N encoders at once encode synthetic frames, each is decoded again, one JSON line (0 = pass)
 
 class McVideoEncoder {
 public:

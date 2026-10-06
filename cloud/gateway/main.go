@@ -26,18 +26,18 @@ import (
 
 type Room struct {
 	Code         string
-	Slots        [2]*Slot
-	Tokens       [2]string
+	Slots        [3]*Slot // Hosted: [0] = the host's console, [1] and [2] = the consoles streamed to the (up to two) browser guests
+	Tokens       [3]string
 	Title        string
 	SHA256       string
 	Created      time.Time
 	Solo         bool      // cloud solo session: only slot 1 runs
-	FirmwareDirs [2]string // cloud sessions: each slot's own firmware
+	FirmwareDirs [3]string // cloud sessions: each slot's own firmware
 	ContentBase  string    // cloud sessions: where to persist saves
 	Ticket       string
 	Lan          *LanSpec // Distributed Mode: this device's single runtime is a LAN host/guest (no Unix-socket bridge, no second slot)
 	Compat       bool     // test-only "Multi-ROM compatibility mode": slot 2 also gets a cartridge
-	peers        [2]*Peer
+	peers        [3]*Peer
 }
 
 type Server struct {
@@ -52,6 +52,13 @@ type Server struct {
 	mu        sync.Mutex
 	room      *Room
 	up        websocket.Upgrader
+}
+
+// newTokens: one private token per console (the stream of console N can only be opened with token N)
+func (r *Room) newTokens() {
+	for i := range r.Tokens {
+		r.Tokens[i] = randHex(8)
+	}
 }
 
 func randHex(n int) string {
@@ -147,7 +154,7 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, 500, map[string]string{"error": "impossibile avviare gli emulatori: " + err.Error()})
 		return
 	}
-	room.Tokens[0], room.Tokens[1] = randHex(8), randHex(8)
+	room.newTokens()
 	s.room = room
 	jsonOut(w, 200, map[string]any{"code": room.Code, "player": 1, "token": room.Tokens[0], "title": room.Title})
 }
@@ -163,28 +170,57 @@ func parseKV(s string) map[string]string {
 }
 
 func (s *Server) startSlots(room *Room, rom1, rom2 string) error {
+	return s.startSlotsN(room, rom1, []string{rom2})
+}
+
+// startSlotsN: the host's console + one console per guest (Hosted: up to two browser guests), all on ONE local DS wireless bridge.
+func (s *Server) startSlotsN(room *Room, rom1 string, guestRoms []string) error {
 	runtimeBackend := s.env.Backend != "retroarch"
-	if !runtimeBackend { // reference implementation (RetroArch + Xvfb + capture) needs PulseAudio sinks
+	n := 1 + len(guestRoms)
+	if n > len(room.Slots) {
+		return fmt.Errorf("at most %d consoles", len(room.Slots))
+	}
+	if !runtimeBackend { // reference implementation (RetroArch + Xvfb + capture) needs PulseAudio sinks, two consoles at most
+		if n > 2 {
+			return fmt.Errorf("the RetroArch reference backend runs two consoles at most")
+		}
 		if err := s.env.StartPulse([]string{"dslink_s1", "dslink_s2"}); err != nil {
 			return err
 		}
 	}
 	// distinct deviceIds -> distinct DS MACs (DSLink DeviceIdentity); re-roll on the (unlikely) clash
-	var d1, d2 string
-	for i := 0; i < 8; i++ {
-		d1, d2 = randHex(16), randHex(16)
-		m1, _ := s.env.cfgtool("host", s.env.WorkDir, "", "", 56200, "Player1", d1, "mac")
-		m2, _ := s.env.cfgtool("client", s.env.WorkDir, "", "127.0.0.1", 56200, "Player2", d2, "mac")
-		if m1 != "" && m1 != m2 {
+	devs := make([]string, n)
+	for try := 0; try < 8; try++ {
+		macs := map[string]bool{}
+		clash := false
+		for i := 0; i < n; i++ {
+			devs[i] = randHex(16)
+			role, host := "client", "127.0.0.1"
+			if i == 0 {
+				role, host = "host", ""
+			}
+			m, _ := s.env.cfgtool(role, s.env.WorkDir, "", host, 56200, fmt.Sprintf("Player%d", i+1), devs[i], "mac")
+			if m == "" || macs[m] {
+				clash = true
+			}
+			macs[m] = true
+		}
+		if !clash {
 			break
 		}
 	}
-	specs := [2]SlotSpec{
-		{ID: 1, Display: ":101", Sink: "dslink_s1", Host: true, ROM: rom1, NetPort: 56200, VideoPort: 5004, AudioPort: 5006, Name: "Player1", DeviceID: d1},
-		{ID: 2, Display: ":102", Sink: "dslink_s2", Host: false, ROM: rom2, NetPort: 56200, VideoPort: 5008, AudioPort: 5010, Name: "Player2", DeviceID: d2},
+	specs := make([]SlotSpec, n)
+	for i := 0; i < n; i++ {
+		rom := rom1
+		if i > 0 {
+			rom = guestRoms[i-1]
+		}
+		specs[i] = SlotSpec{ID: i + 1, Display: fmt.Sprintf(":%d", 101+i), Sink: fmt.Sprintf("dslink_s%d", i+1), Host: i == 0, ROM: rom, NetPort: 56200, VideoPort: 5004 + 4*i, AudioPort: 5006 + 4*i,
+			Name: fmt.Sprintf("Player%d", i+1), DeviceID: devs[i]}
 	}
 	for i := range specs {
 		sl := &Slot{Spec: specs[i], env: s.env, FirmwareDir: room.FirmwareDirs[i]}
+		sl.peerRttUs.Store(0)
 		if runtimeBackend {
 			sl.Backend = "runtime"
 			v, err := newVideoTrack(fmt.Sprintf("slot%d", i+1))
@@ -214,7 +250,9 @@ func (s *Server) startSlots(room *Room, rom1, rom2 string) error {
 		if room.Lan != nil { // Distributed: this device runs one console only
 			room.Slots[0].Lan = room.Lan
 			room.Slots[0].Spec.Host = room.Lan.Role == "host"
-			room.Slots[1] = nil
+			for i := 1; i < len(room.Slots); i++ {
+				room.Slots[i] = nil
+			}
 		}
 		if err := room.Slots[0].StartRuntime(mp); err != nil {
 			return fmt.Errorf("slot 1: %w", err)
@@ -223,8 +261,11 @@ func (s *Server) startSlots(room *Room, rom1, rom2 string) error {
 			return nil
 		}
 		time.Sleep(1500 * time.Millisecond) // the host's bridge listens as soon as its core is started
-		if err := room.Slots[1].StartRuntime(mp); err != nil {
-			return fmt.Errorf("slot 2: %w", err)
+		for i := 1; i < n; i++ {
+			if err := room.Slots[i].StartRuntime(mp); err != nil { // every guest console connects to the same bridge socket; the host numbers them 1, 2, ...
+				return fmt.Errorf("slot %d: %w", i+1, err)
+			}
+			time.Sleep(700 * time.Millisecond)
 		}
 		return nil
 	}
@@ -298,7 +339,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	jsonOut(w, 200, map[string]any{"room": map[string]any{
 		"code": s.room.Code, "title": s.room.Title, "compat_mode": s.room.Compat,
 		"slots": slotStatuses(s.room), "peers": peers,
-		"macs_differ":            s.room.Slots[1] != nil && s.room.Slots[0].ExpectedMAC != "" && s.room.Slots[0].ExpectedMAC != s.room.Slots[1].ExpectedMAC,
+		"macs_differ":            macsDiffer(s.room),
 		"core_macs_match_dslink": (s.room.Slots[0].MAC == "" || s.room.Slots[0].MAC == s.room.Slots[0].ExpectedMAC) && (s.room.Slots[1] == nil || s.room.Slots[1].MAC == "" || s.room.Slots[1].MAC == s.room.Slots[1].ExpectedMAC),
 		"session_mode":           sessionModeOf(s.room),
 	}})
@@ -418,4 +459,21 @@ func getenv(k, d string) string {
 		return v
 	}
 	return d
+}
+
+// macsDiffer: every console of the room has its own DS MAC (and the host's is known)
+func macsDiffer(r *Room) bool {
+	seen := map[string]bool{}
+	n := 0
+	for _, sl := range r.Slots {
+		if sl == nil {
+			continue
+		}
+		n++
+		if sl.ExpectedMAC == "" || seen[sl.ExpectedMAC] {
+			return false
+		}
+		seen[sl.ExpectedMAC] = true
+	}
+	return n > 1
 }
