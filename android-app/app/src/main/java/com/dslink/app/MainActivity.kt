@@ -199,8 +199,9 @@ class MainActivity : ComponentActivity(), SurfaceHolder.Callback {
         if (isFinishing) {
             monitor.enable(false)
             Native.nativeRequestQuit()
-            Stack.stop()
-            Native.nativeShutdown()
+            // never block the UI thread on process shutdown (SIGTERM + wait): that is how an app earns an ANR. The native engine itself lives as long
+            // as the process (idle without a surface / a Runtime), so a new activity can start while the old gateway is still being stopped.
+            Thread { Stack.stop() }.start()
         }
         web.destroy()
         super.onDestroy()

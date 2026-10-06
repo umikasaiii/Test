@@ -66,6 +66,7 @@ class EndToEndTest {
 
     @After fun tearDown() {
         Gw.post("/api/mp/cancel", JSONObject()); Gw.post("/api/mp/reset", JSONObject())
+        Stack.stop()          // synchronous: the next test must not find the previous gateway still answering
         scenario.close()
         File(ctx.filesDir, "enable_test_hooks").delete()
     }
