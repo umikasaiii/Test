@@ -45,7 +45,7 @@ class EndToEndTest {
                     fun tail(f: File, n: Int) {
                         if (!f.exists()) return
                         val all = f.readLines()
-                        val key = all.filter { Regex("fatal error|panic:|SIG[A-Z]+|unexpected signal|exit status").containsMatchIn(it) }.take(6)
+                        val key = all.filter { Regex("fatal error|panic:|SIG[A-Z]+|unexpected signal|exit status|started:|FATAL|shm|core loaded|session:").containsMatchIn(it) }.take(6)
                         sb.append("--- ${f.name}: ${all.size} lines; key lines + last $n ---\n").append((key + all.takeLast(n)).joinToString("\n")).append("\n")
                     }
                     tail(File(ctx.filesDir, "gateway.log"), 15)
@@ -77,7 +77,7 @@ class EndToEndTest {
         return false
     }
     private fun metrics() = Native.nativeMetrics()
-    private fun mm() = "metrics[" + metrics().joinToString(",") { "%.1f".format(it) } + "]"
+    private fun mm() = "metrics[renderFps,uploads,surfW,surfH,frameW,frameH,audioOn,rate,underruns,skips,xruns,latMs,rtFps,rtFrameMs,rtMaxMs,peers,alive,PAUSED,vframes,awpos,session]=" + metrics().joinToString(",") { "%.1f".format(it) }
     private fun state() = Gw.state(true)?.optString("state") ?: ""
     private fun js(script: String): String {
         val latch = CountDownLatch(1); var out = ""

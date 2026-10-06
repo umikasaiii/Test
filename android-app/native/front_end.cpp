@@ -117,6 +117,13 @@ void ShmReader::setPaused(bool p) { if (H()) H()->paused.store(p ? 1 : 0); }
 void ShmReader::requestQuit() { if (H()) H()->quit.store(1); }
 uint32_t ShmReader::buttons() const { return H() ? H()->buttons.load() : 0; }
 
+ShmReader::Debug ShmReader::debug() const {
+    Debug d;
+    if (!H()) return d;
+    d.paused = H()->paused.load(); d.session = H()->session.load(); d.vframes = H()->vframes.load(); d.awpos = H()->awpos.load(); d.arpos = H()->arpos.load();
+    return d;
+}
+
 RuntimeStatus ShmReader::status() const {
     RuntimeStatus s;
     if (!H()) return s;

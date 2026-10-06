@@ -125,9 +125,9 @@ JNIEXPORT void JNICALL Java_com_dslink_app_Native_nativeRequestQuit(JNIEnv*, jcl
 
 JNIEXPORT jint JNICALL Java_com_dslink_app_Native_nativePadId(JNIEnv* env, jclass, jstring name) { return dsfe::padId(jstr(env, name)); }
 
-// [renderFps, uploads, surfaceW, surfaceH, frameW, frameH, audioRunning, audioRate, audioUnderruns, audioSkips, aaudioXruns, audioLatencyMs, runtimeFps, runtimeFrameMs, runtimeSlowestMs, runtimePeers, runtimeAlive]
+// [..., runtimeAlive, shmPaused, shmVideoFrames, shmAudioWritePos, shmSession]  =  [renderFps, uploads, surfaceW, surfaceH, frameW, frameH, audioRunning, audioRate, audioUnderruns, audioSkips, aaudioXruns, audioLatencyMs, runtimeFps, runtimeFrameMs, runtimeSlowestMs, runtimePeers, runtimeAlive]
 JNIEXPORT jdoubleArray JNICALL Java_com_dslink_app_Native_nativeMetrics(JNIEnv* env, jclass) {
-    double v[17] = {0};
+    double v[21] = {0};
     if (eng()) {
         auto r = eng()->renderer.metrics();
         auto a = eng()->audio.metrics();
@@ -135,9 +135,11 @@ JNIEXPORT jdoubleArray JNICALL Java_com_dslink_app_Native_nativeMetrics(JNIEnv* 
         v[0] = r.fps; v[1] = double(r.uploads); v[2] = r.surfaceW; v[3] = r.surfaceH; v[4] = r.w; v[5] = r.h;
         v[6] = a.running ? 1 : 0; v[7] = a.rate; v[8] = double(a.underruns); v[9] = double(a.skips); v[10] = double(a.xruns); v[11] = a.latencyMs;
         v[12] = s.fps; v[13] = s.frameMs; v[14] = s.slowestMs; v[15] = s.peers; v[16] = s.alive ? 1 : 0;
+        auto d = eng()->reader.debug();
+        v[17] = d.paused; v[18] = double(d.vframes); v[19] = double(d.awpos); v[20] = double(d.session % 100000);
     }
-    jdoubleArray out = env->NewDoubleArray(17);
-    env->SetDoubleArrayRegion(out, 0, 17, v);
+    jdoubleArray out = env->NewDoubleArray(21);
+    env->SetDoubleArrayRegion(out, 0, 21, v);
     return out;
 }
 

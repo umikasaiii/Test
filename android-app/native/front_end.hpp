@@ -60,6 +60,8 @@ public:
     uint32_t buttons() const;
 
     RuntimeStatus status() const;
+    struct Debug { uint32_t paused = 0, session = 0; uint64_t vframes = 0, awpos = 0, arpos = 0; };
+    Debug debug() const;
 
 private:
     dsrt::shm::Header* H() const { return hdr_.load(std::memory_order_acquire); }
