@@ -19,50 +19,58 @@ export function initFriends(ctx) {
     radioMode: opt("radiomode", "") === "ordered" ? { ordered: true } : opt("radiomode", "") === "reliable" ? { ordered: true } : undefined,
     impair: { delayMs: +opt("delay", 0) || 0, jitterMs: +opt("jitter", 0) || 0, lossPct: +opt("loss", 0) || 0 },
     hasGame: (g) => !!localGame(g),
-    onChange: render, onStart: (s) => ctx.startGame(s.role === "host" ? s.o.game.id : localGame(s.hostGame).id, s), onLost: (why) => ctx.onLost(why),
+    canDownload: () => ctx.hasSystem(),
+    hostCheck: (s) => (s.dlplay ? hpBlock(s) || ctx.hostDlBlock() : ""),
+    onChange: render, onStart: (s) => (s.role === "guest" && s.dlplay ? ctx.startGame(null, s) : ctx.startGame(s.role === "host" ? s.o.game.id : localGame(s.hostGame).id, s)), onLost: (why) => ctx.onLost(why),
   });
   const errText = (e) => (e && e.status === 404 ? "Codice non valido o partita scaduta." : e && e.status === 409 ? "La partita è già al completo." : e && e.status === 429 ? "Troppi tentativi. Riprova tra un minuto." : "Non riesco a collegarmi. Controlla la connessione.");
 
-  // SharedArrayBuffer for the radio receive ring needs cross-origin isolation; on static hosting the service worker provides it. First use: turn it on and reload once (the plain
-  // message-queue path still works when it cannot be had, e.g. no service worker; the lobby tells the user the limits)
-  async function ensureIsolation(then) {
-    if (self.crossOriginIsolated || opt("coi", "auto") === "0" || !("serviceWorker" in navigator) || !self.isSecureContext) return false;
-    let tried = false; try { tried = sessionStorage.getItem("dslink.coiTried") === "1"; } catch { /* blocked */ }
-    if (tried) return false;
-    const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(r, 1500))]); if (!reg || !navigator.serviceWorker.controller) return false;
-    try { sessionStorage.setItem("dslink.coiTried", "1"); } catch { /* blocked */ }
-    await new Promise((resolve) => { const to = setTimeout(resolve, 1500); navigator.serviceWorker.addEventListener("message", function f(e) { if (e.data && e.data.t === "coi") { clearTimeout(to); navigator.serviceWorker.removeEventListener("message", f); resolve(); } }); navigator.serviceWorker.controller.postMessage({ t: "coi", on: true }); });
-    const u = new URL(location.href); u.searchParams.set("friends", then); location.replace(u.href); return true;
+  // HIGH-PERFORMANCE MODE (SharedArrayBuffer radio ring). Real games wait for radio replies inside very tight windows: the message-queue fallback is NOT enough for them (measured with Mario Party DS:
+  // Download Play fails in the handshake). The ring needs a cross-origin isolated page; on static hosting the service worker provides it. The reload is done at the LAST moment before the
+  // network is used, with the intent saved (create: chosen game; join: the room code), so nothing is asked twice and no room exists yet that could be lost.
+  const INTENT = "dslink.intent", TRIED = "dslink.coiTried";
+  const store = (k, v) => { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch { /* blocked */ } };
+  const load = (k) => { try { return sessionStorage.getItem(k); } catch { return null; } };
+  const isolated = () => !!self.crossOriginIsolated;
+  async function prepare(intent) {
+    if (isolated() || opt("coi", "auto") === "0" || !("serviceWorker" in navigator) || !self.isSecureContext || load(TRIED) === "1") return false;
+    const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(r, 5000))]); if (!reg || !reg.active) return false;   // first visit: the worker is still installing
+    if (!navigator.serviceWorker.controller) await new Promise((r) => { const to = setTimeout(r, 3000); navigator.serviceWorker.addEventListener("controllerchange", () => { clearTimeout(to); r(); }, { once: true }); });
+    store(TRIED, "1"); store(INTENT, JSON.stringify(intent));
+    await new Promise((resolve) => { const to = setTimeout(resolve, 2000); navigator.serviceWorker.addEventListener("message", function f(e) { if (e.data && e.data.t === "coi") { clearTimeout(to); navigator.serviceWorker.removeEventListener("message", f); resolve(); } }); reg.active.postMessage({ t: "coi", on: true }); });
+    const u = new URL(location.href); u.searchParams.delete("friends"); location.replace(u.href); return true;   // (a ?join=CODE of a scanned QR stays in the URL)
   }
+  const hpBlock = (s) => (!isolated() ? "Modalità multiplayer ad alte prestazioni richiesta, non disponibile su questo browser." : s.other.hp === false ? "Il dispositivo dell'amico non supporta la modalità multiplayer ad alte prestazioni." : "");
 
   // ---- create
   $("btnCreate").onclick = async () => {
-    if (await ensureIsolation("create")) return;
     const games = ctx.games(); const sel = $("friendGame"); sel.innerHTML = "";
     $("createErr").textContent = games.length ? "" : "Aggiungi prima un gioco alla libreria.";
     for (const g of games) { const o = document.createElement("option"); o.value = g.id; o.textContent = g.title || g.id; sel.append(o); }
     $("btnMakeRoom").disabled = !games.length; show("friends-create");
   };
   $("btnCreateBack").onclick = () => show("library");
-  $("btnMakeRoom").onclick = async () => {
-    const g = ctx.games().find((x) => x.id === $("friendGame").value); if (!g) return;
+  $("btnMakeRoom").onclick = () => makeRoom($("friendGame").value);
+  async function makeRoom(gameId) {
+    const g = ctx.games().find((x) => x.id === gameId); if (!g) return;
     $("btnMakeRoom").disabled = true; $("createErr").textContent = "";
+    if (await prepare({ kind: "create", gameId })) return;
     try {
-      session = new Session(sessionOpts("host", { id: g.id, code: g.code, title: g.title }));
+      session = new Session(sessionOpts("host", { id: g.id, code: g.code, title: g.title, dlplay: true }));
       await session.create(); show("lobby"); render(session);
-    } catch (e) { session = null; $("createErr").textContent = errText(e); }
+    } catch (e) { session = null; show("friends-create"); $("createErr").textContent = errText(e); }
     $("btnMakeRoom").disabled = false;
-  };
+  }
 
   // ---- join
-  $("btnJoin").onclick = async () => {
-    if (await ensureIsolation("join")) return; $("joinErr").textContent = ""; $("joinCode").value = ""; $("scanHint").textContent = ""; show("friends-join"); };
+  $("btnJoin").onclick = () => { $("joinErr").textContent = ""; $("joinCode").value = ""; $("scanHint").textContent = ""; show("friends-join"); };
   $("btnJoinBack").onclick = () => { stopScan(); show("library"); };
   $("joinCode").oninput = (e) => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); };
   $("btnDoJoin").onclick = () => doJoin($("joinCode").value);
   async function doJoin(code) {
     stopScan(); if (!/^\d{6}$/.test(code)) { $("joinErr").textContent = "Il codice ha 6 cifre."; return; }
     $("joinErr").textContent = ""; $("btnDoJoin").disabled = true;
+    if (await prepare({ kind: "join", code })) return;
     try {
       session = new Session(sessionOpts("guest", null));
       await session.join(code); show("lobby"); render(session);
@@ -102,11 +110,16 @@ export function initFriends(ctx) {
     const q = s.quality; $("lobbyQuality").className = "quality " + (q ? q.level : ""); $("lobbyQuality").textContent = s.qualityBusy ? "Controllo la connessione…" : q ? "Connessione: " + q.label : "";
     let note = "";
     if (!both) note = host ? "Fai inserire il codice all'amico." : "Mi collego alla partita…";
-    else if (!host && s.hostGame && !s.gameOk) note = `Per giocare serve «${s.hostGame.title}»: aggiungilo alla tua libreria.`;
+    else if (!host && s.hostGame && !s.gameOk && s.dlplay) note = `Non hai «${s.hostGame.title}»: lo scarichi dal DS dell'amico con Download Play (servono BIOS e firmware, nessun gioco).`;
+    else if (!host && s.hostGame && !s.gameOk) note = `Per giocare serve «${s.hostGame.title}»: aggiungilo alla tua libreria, oppure importa BIOS e firmware per scaricarlo dal DS dell'amico.`;
+    else if (host && s.dlplay && s.hostBlock()) note = s.hostBlock();
+    else if (!host && s.dlplay && !isolated()) note = hpBlock(s);
+    else if (host && s.dlplay) note = "Il tuo amico scarica il gioco dal tuo DS (Download Play).";
     else if (q && q.level === "RED") note = "La connessione non è adatta: avvicinatevi al router Wi-Fi o usate la stessa rete. Puoi provare comunque.";
     else if (s.other.hidden) note = "L'amico ha messo l'app in secondo piano…";
     $("lobbyNote").textContent = note;
-    $("btnReady").hidden = host ? true : !both; $("btnReady").disabled = !s.gameOk; $("btnReady").textContent = s.me.ready ? "ANNULLA" : "PRONTO";
+    $("btnReady").hidden = host ? true : !both; $("btnReady").disabled = !(s.gameOk || s.dlplay) || (s.dlplay && !isolated()); $("btnReady").textContent = s.me.ready ? "ANNULLA" : "PRONTO";
+    $("lobbyRefsWrap").hidden = !(host && s.dlplay && /refs\.json/.test(s.hostBlock()));
     $("btnStart").hidden = !host; $("btnStart").disabled = !s.canStart();
   }
   function drawQr(code) {
@@ -116,6 +129,7 @@ export function initFriends(ctx) {
     g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.fillStyle = "#000";
     for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (q.isDark(r, k)) g.fillRect((k + 1) * px, (r + 1) * px, px, px);
   }
+  $("lobbyRefs").onchange = async (e) => { const f = e.target.files[0]; e.target.value = ""; if (f && await ctx.importRefsFile(f) && session) render(session); };   // the room stays: refs.json can be imported while it is open
   $("btnReady").onclick = () => { if (session) session.setReady(!session.me.ready); };
   $("btnStart").onclick = () => { if (session) session.start(); };
   $("btnLobbyLeave").onclick = () => leave();
@@ -123,14 +137,23 @@ export function initFriends(ctx) {
   $("btnLostBack").onclick = () => show("library");
 
   // ?join=CODE (QR scanned with the camera app): open the join screen and connect
-  const jc = new URLSearchParams(location.search).get("join");   // (the page opened from a QR is not isolated yet: the message-queue path is used; the next visit gets the ring)
+  const jc = new URLSearchParams(location.search).get("join");
   return {
     get session() { return session; },
     leave, doJoin,
     /** the game ended or the link dropped while playing: close the room and tell the user */
     async lost(why) { const s = session; session = null; if (s) { s.state === "closed" || (await s.close()); } $("lostNote").textContent = why || ""; show("lost"); },
     async endSession() { const s = session; session = null; if (s) await s.close(); },
-    resume() { const f = new URLSearchParams(location.search).get("friends"); if (f === "create") $("btnCreate").onclick(); else if (f === "join") $("btnJoin").onclick(); },
-    autoJoin() { if (jc && /^\d{6}$/.test(jc)) { $("joinCode").value = jc; show("friends-join"); doJoin(jc); } },
+    /** after the isolation reload: carry on with what the user was doing (no new questions) */
+    resume() {
+      const raw = load(INTENT); store(INTENT, null); let it = null; try { it = raw ? JSON.parse(raw) : null; } catch { /* none */ }
+      const f = new URLSearchParams(location.search).get("friends");
+      if (it && it.kind === "create" && ctx.games().some((x) => x.id === it.gameId)) { $("btnCreate").onclick(); $("friendGame").value = it.gameId; makeRoom(it.gameId); return true; }
+      if (it && it.kind === "join" && /^\d{6}$/.test(it.code || "")) { $("btnJoin").onclick(); $("joinCode").value = it.code; doJoin(it.code); return true; }
+      if (f === "create") $("btnCreate").onclick(); else if (f === "join") $("btnJoin").onclick();
+      return false;
+    },
+    /** a QR scanned with the camera app opens .../play/?join=CODE: join that room (after the isolation step, if needed), without asking for the code again */
+    autoJoin() { if (jc && /^\d{6}$/.test(jc)) { $("joinCode").value = jc; show("friends-join"); const u = new URL(location.href); u.searchParams.delete("join"); try { history.replaceState(null, "", u.href); } catch { /* ok */ } doJoin(jc); } },
   };
 }

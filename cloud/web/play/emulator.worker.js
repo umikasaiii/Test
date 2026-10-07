@@ -4,8 +4,8 @@
 import createDslink from "./core/dslink_wasm.js";
 import { workerRadioFromShared, workerRadioFromMessages } from "./radio-ring.js";
 
-const CORE_OPTIONS = [
-  'melonds_console_mode = "ds"', 'melonds_boot_mode = "direct"', 'melonds_mac_address_mode = "from-username"',
+const coreOptions = (bootMode) => [
+  'melonds_console_mode = "ds"', `melonds_boot_mode = "${bootMode}"`, 'melonds_mac_address_mode = "from-username"',
   'melonds_number_of_screen_layouts = "1"', 'melonds_screen_layout1 = "top-bottom"', 'melonds_show_cursor = "disabled"',
 ].join("\n") + "\n";
 
@@ -36,19 +36,38 @@ function startGame(msg) {
   if (msg.sram) { M.FS.writeFile(sramFile, new Uint8Array(msg.sram)); lastSram = new Uint8Array(msg.sram); } else { try { M.FS.unlink(sramFile); } catch { /* none */ } lastSram = null; }
   radioRole = msg.radio ? msg.radio.role : 0; radio = null; self.__dslRadio = null; radioTxCount = 0; lagN = 0; lagSum = 0; lagMax = 0;
   if (radioRole) {
-    const lag = (ms) => { lagN++; lagSum += ms; if (ms > lagMax) lagMax = ms; };
-    const postTx = (dest, src, buf) => { radioTxCount++; self.postMessage({ t: "radioTx", dest, src, buf }, [buf.buffer]); };
+    const lag = (ms) => { lagN++; lagSum += ms; if (ms > lagMax) lagMax = ms; lagLast = ms; };
+    const postTx = (dest, src, buf) => { radioTxCount++; self.postMessage({ t: "radioTx", dest, src, buf, at: performance.timeOrigin + performance.now() }, [buf.buffer]); };
     radio = msg.radio.shared ? workerRadioFromShared(msg.radio.shared, postTx, lag) : workerRadioFromMessages(postTx, lag);
-    self.__dslRadio = radio;
+    self.__dslRadio = radio; traceInstall(radio);
   }
-  const rom = new Uint8Array(msg.rom), ptr = M._dsl_alloc(rom.byteLength);
-  M.HEAPU8.set(rom, ptr);                                   // the core reads the cartridge in place, nothing else holds a copy
-  if (!M._dsl_start(cstr(CORE_OPTIONS), cstr("/system"), cstr("/saves"), cstr(romId + ".nds"), ptr, rom.byteLength, radioRole)) { post({ t: "error", msg: "Avvio non riuscito: " + M.UTF8ToString(M._dsl_error()) }); return; }
+  // no cartridge (Download Play guest): the core boots the firmware menu itself ("native" boot); with a cartridge: direct boot
+  const rom = msg.rom ? new Uint8Array(msg.rom) : new Uint8Array(0), ptr = rom.byteLength ? M._dsl_alloc(rom.byteLength) : 0;
+  if (ptr) M.HEAPU8.set(rom, ptr);                          // the core reads the cartridge in place, nothing else holds a copy
+  if (!M._dsl_start(cstr(coreOptions(rom.byteLength ? "direct" : "native")), cstr("/system"), cstr("/saves"), cstr(romId + ".nds"), ptr, rom.byteLength, radioRole)) { post({ t: "error", msg: "Avvio non riuscito: " + M.UTF8ToString(M._dsl_error()) }); return; }
   sampleRate = M._dsl_sample_rate() || 32768; frameMs = 1000 / (M._dsl_fps() || 59.8261);
   started = true; paused = false; next = performance.now(); frames = 0; statT = next; resetStats();
   post({ t: "started", sampleRate, fps: 1000 / frameMs, w: M._dsl_video_w(), h: M._dsl_video_h(), audio: audioMode, radio: radio ? radio.mode : "off" });
   schedule();
 }
+// Radio frame trace (structured, no payload): one record per frame this console transmits/receives: time, direction, DS packet type (0 other / 1 reply / 2 cmd), length, 802.11 frame-control,
+// and for received frames how long the frame waited between the DataChannel and the core. Same fields as the native Runtime's DSLINK_MP_TRACE so the two can be compared. Bounded.
+const TRACE_MAX = 30000; let trace = [], traceDropped = 0;
+function traceRec(dir, heap, ptr, n, lag) {
+  if (trace.length >= TRACE_MAX) { traceDropped++; return; }
+  const p = ptr + 4, len = n - 4;                               // [dest u16][src u16][frame]: the core's netpacket frame starts at +4: u64 timestamp, u8 aid, u8 type, 12-byte header, 802.11
+  trace.push([performance.now(), dir, len > 9 ? heap[p + 9] : 0, len, len > 23 ? heap[p + 22] | heap[p + 23] << 8 : 0, heap[ptr] | heap[ptr + 1] << 8, lag || 0]);
+}
+function traceInstall(r) {
+  trace = []; traceDropped = 0; const pop = r.pop, tx = r.tx;
+  r.pop = (dst, cap, heap) => { const n = pop(dst, cap, heap); if (n > 0) traceRec(1, heap, dst, n, lagLast); return n; };
+  r.tx = (dest, src, ptr, n, heap) => { if (n >= 0) { trace.length < TRACE_MAX ? trace.push([performance.now(), 0, n > 9 ? heap[ptr + 9] : 0, n, n > 23 ? heap[ptr + 22] | heap[ptr + 23] << 8 : 0, dest, 0]) : traceDropped++; } return tx(dest, src, ptr, n, heap); };
+}
+let lagLast = 0;
+// Download Play diagnostics (frame classification only: states, counters, timings - never payload)
+function dlState() { try { return JSON.parse(M.UTF8ToString(M._dsl_dl_json())); } catch { return null; } }
+// the core's own log (its notifications, e.g. a wireless error before it powers off): the last lines, to explain a shutdown. No game content.
+function coreLogTail() { try { const t = M.UTF8ToString(M._dsl_log()); return t.slice(-1500); } catch { return ""; } }
 function resetStats() { statFrames = 0; statEmuMs = 0; statMax = 0; lateSum = 0; lateMax = 0; }
 
 function takeSram(force) {
@@ -102,11 +121,12 @@ function tick() {
   let now = performance.now(), ran = 0;
   const late = now - next; if (late > 0) { lateSum += late; if (late > lateMax) lateMax = late; }
   if (late > 200) next = now;                                // fell far behind (the OS throttled the worker): resync instead of fast-forwarding
-  while (now >= next && ran < 3) { if (!runOne()) { post({ t: "shutdown" }); started = false; return; } next += frameMs; ran++; now = performance.now(); }
+  while (now >= next && ran < 3) { if (!runOne()) { post({ t: "shutdown", log: coreLogTail(), dl: dlState() }); started = false; return; } next += frameMs; ran++; now = performance.now(); }
   if (now - statT >= 1000) {
     const sec = (now - statT) / 1000;
     post({ t: "stats", emuFps: statFrames / sec, frameMsAvg: statFrames ? statEmuMs / statFrames : 0, frameMsMax: statMax, tickLateAvgMs: statFrames ? lateSum / statFrames : 0, tickLateMaxMs: lateMax,
       submitted: vsubmitted, droppedAtSource: vdropped, audioFrames, audioDropped, wasmBytes: M.HEAPU8.byteLength, frames,
+      dl: radio ? dlState() : null,
       radio: radio ? { mode: radio.mode, in: M._dsl_radio_in(), out: M._dsl_radio_out(), active: M._dsl_radio_active(), peers: M._dsl_radio_peers(), txPosted: radioTxCount, lagAvg: lagN ? lagSum / lagN : 0, lagMax, lagN } : null });
     statT = now; resetStats();
   }
@@ -132,6 +152,8 @@ self.onmessage = async (e) => {
       case "save": takeSram(!!m.force); post({ t: "saved", token: m.token }); break;
       case "ping": post({ t: "pong", token: m.token }); break;
       case "stop": if (radio && radio.onMessage) radio.onMessage({ t: "radioState", state: 2 }); paused = true; clearTimeout(timer); timer = 0; takeSram(true); M._dsl_stop(); started = false; post({ t: "stopped" }); break;
+      case "radiotrace": post({ t: "radiotrace", events: trace, dropped: traceDropped }); trace = []; break;
+      case "dlmark": M._dsl_dl_mark(cstr(m.state), cstr(m.why || "page")); break;
       case "log": post({ t: "log", text: M.UTF8ToString(M._dsl_log()) }); M._dsl_log_clear(); break;
     }
   } catch (err) { post({ t: "error", msg: String(err && err.message || err) }); }

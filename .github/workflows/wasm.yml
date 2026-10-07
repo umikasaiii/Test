@@ -48,6 +48,12 @@ jobs:
         env:
           CHROME: /opt/google/chrome/chrome
         run: cd cloud/tests && node play_wasm_distributed.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playdist
+      - name: Download Play assistant unit test (average-hash identical to the native driver, refs.json validation, milestones)
+        run: node cloud/tests/dlassist_unit.mjs
+      - name: High-performance multiplayer mode: isolation by the service worker on a static host, room intent and QR join survive the reload
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_wasm_qr_isolation.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playqr
       - name: DISTRIBUTED network fault matrix (0/5/8/10 ms, jitter, 1% and 3% loss, ordered comparison)
         env:
           CHROME: /opt/google/chrome/chrome

@@ -55,7 +55,7 @@ export class Player {
     worker.postMessage({ t: "init" });
     await ready;
     const started = new Promise((resolve) => { this._started = resolve; });
-    const tr = [rom]; if (system) for (const b of Object.values(system)) if (b) tr.push(b); if (sram) tr.push(sram);
+    const tr = rom ? [rom] : []; if (system) for (const b of Object.values(system)) if (b) tr.push(b); if (sram) tr.push(sram);
     const rcfg = this.setupRadio(radio);
     worker.postMessage({ t: "start", id, rom, system, sram, radio: rcfg }, tr);
     const info = await started;
@@ -96,6 +96,10 @@ export class Player {
       this.worker.postMessage({ t: "radioRx", buf, at: at ? performance.timeOrigin + at : epochMs() }, [buf]); }
   }
   radioFlush() { if (!this.radio) return; if (this.radioProducer) this.radioProducer.flush(); else if (this.worker) this.worker.postMessage({ t: "radioFlush" }); }
+
+  /** structured radio frame trace of this console (no payload): [t, dir(0 tx/1 rx), type, len, fc, dest|src, lagMs] */
+  radioTrace() { return new Promise((resolve) => { this._trace = resolve; if (this.worker) this.worker.postMessage({ t: "radiotrace" }); setTimeout(() => resolve({ events: [], dropped: 0 }), 5000); }); }
+  dlMark(state, why) { if (this.worker) this.worker.postMessage({ t: "dlmark", state, why }); }
 
   // ------------------------------------------------------------------ video: main-thread renderer (default, verified everywhere) or an OffscreenCanvas render worker (optional, automatic fallback)
   async setupVideo() {
@@ -179,13 +183,14 @@ export class Player {
         while (this.queue.length > QUEUE_MAX) { const d = this.queue.shift(); this.v.droppedRender++; this.recycle(d.buf); }   // bounded latency: the page is behind, the oldest picture goes
         break;
       }
-      case "radioTx": if (this.radio) this.radio.peer.sendFrame(m.dest, m.src, new Uint8Array(m.buf)); break;
+      case "radioTx": if (this.radio) { const r = this.radio, d = performance.timeOrigin + performance.now() - m.at; r.txN = (r.txN || 0) + 1; r.txLagAvg = (r.txLagAvg || 0) + (d - (r.txLagAvg || 0)) / Math.min(r.txN, 500); if (d > (r.txLagMax || 0)) r.txLagMax = d; r.peer.sendFrame(m.dest, m.src, new Uint8Array(m.buf)); } break;
+      case "radiotrace": if (this._trace) { this._trace(m); this._trace = null; } break;
       case "stats": this.workerStats = m; break;
       case "sram": this.onSram(m.id, m.data); break;
       case "saved": if (this._saved && this._saved.token === m.token) this._saved.resolve(); break;
       case "pong": if (this._pong && this._pong.token === m.token) this._pong.resolve(true); break;
       case "error": this.onError(m.msg); if (this._fail) this._fail(new Error(m.msg)); if (this._started) this._started({ sampleRate: 32768 }); break;
-      case "shutdown": this.onShutdown(); break;
+      case "shutdown": this.shutdownInfo = { log: m.log || "", dl: m.dl || null, at: Date.now() }; this.onShutdown(); break;
     }
   }
   recycle(buf) { if (buf && this.worker) this.worker.postMessage({ t: "recycle", buf }, [buf]); }
@@ -224,7 +229,8 @@ export class Player {
       submitted: ws.submitted || 0, droppedAtSource: ws.droppedAtSource || 0, frames: ws.frames || 0, received: v.received, rendered: v.rendered, droppedRender: v.droppedRender,
       renderFps: v.renderFps, mainFrameMsAvg: v.mainFrameMsAvg, mainFrameMsMax: v.mainFrameMsMax, uploadMsAvg: v.uploadMsAvg || 0, uploadMsMax: v.uploadMsMax || 0, drawMsAvg: v.drawMsAvg || 0, drawMsMax: v.drawMsMax || 0,
       stalls: v.stalls, longTasks: v.longTasks, wasmMB: (ws.wasmBytes || 0) / 1048576, queued: rwm ? rwm.queued : this.queue.length, audio: a, audioSourceDropped: ws.audioDropped || 0, audioFramesProduced: ws.audioFrames || 0,
-      radio: this.radio ? { mode: this.radio.mode, role: this.radio.role, pushed: this.radio.pushed, droppedPaused: this.radio.droppedPaused, ringDropped: this.radioProducer ? this.radioProducer.dropped : 0, ringFill: this.radioProducer ? this.radioProducer.fillBytes : 0, core: ws.radio || null, peer: this.radio.peer.metrics() } : null,
+      radio: this.radio ? { mode: this.radio.mode, role: this.radio.role, pushed: this.radio.pushed, droppedPaused: this.radio.droppedPaused, ringDropped: this.radioProducer ? this.radioProducer.dropped : 0, ringFill: this.radioProducer ? this.radioProducer.fillBytes : 0, txLagAvg: this.radio.txLagAvg || 0, txLagMax: this.radio.txLagMax || 0, txN: this.radio.txN || 0, core: ws.radio || null, peer: this.radio.peer.metrics() } : null,
+      dl: ws.dl || null,
       lifecycle: { ...this.lifecycle, paused: this.paused, reason: this.pauseReason }, underruns: a.underEvents || 0 };
   }
 

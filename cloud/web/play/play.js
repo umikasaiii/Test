@@ -6,6 +6,7 @@ import { sha256Hex } from "./sha256.js";
 import { Player, detectCaps } from "./player.js";
 import { opt, setOpt } from "./options.js";
 import { initFriends } from "./friends.js";
+import { DlAssist, validateRefs, HOST_REFS } from "./dlassist.js";
 
 const $ = (id) => document.getElementById(id);
 let DEV = opt("dev", "") === "1" || (() => { try { return localStorage.getItem("dslink.dev") === "1"; } catch { return false; } })();
@@ -14,7 +15,7 @@ const SYS = [
   { key: "bios9", file: "bios9.bin", title: "BIOS ARM9", sizes: [4096] },
   { key: "firmware", file: "firmware.bin", title: "Firmware", sizes: [131072, 262144, 524288] },
 ];
-let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0, friends = null;
+let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0, friends = null, refsText = null, assist = null;
 
 const show = (name) => { document.body.dataset.screen = name; document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("on", s.dataset.screen === name)); };
 const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB");
@@ -37,10 +38,11 @@ async function boot() {
   show("library");
   $("devOverlay").hidden = !DEV; setInterval(() => { if (DEV) devTick(); }, 500);
   if ("serviceWorker" in navigator && self.isSecureContext && !new URLSearchParams(location.search).has("nosw")) navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(() => {});
-  friends = initFriends({ $, show, games: () => games, startGame: (id, session) => playGame(id, session), onLost: (why) => onSessionLost(why) });
+  friends = initFriends({ $, show, games: () => games, importRefsFile, hasSystem: () => SYS.every((x) => sysInfo[x.key] && sysInfo[x.key].ok), hasRefs: () => !!refsText && validateRefs(refsText).ok,
+    hostDlBlock: () => { if (!SYS.every((x) => sysInfo[x.key] && sysInfo[x.key].ok)) return "Servono BIOS e firmware su questo dispositivo."; if (!refsText) return "Manca refs.json: importalo prima di avviare."; const v = validateRefs(refsText, HOST_REFS); return v.ok ? "" : v.error; }, startGame: (id, session) => playGame(id, session), onLost: (why) => onSessionLost(why) });
   addEventListener("pagehide", (e) => { const s = friends && friends.session; if (s && !e.persisted && s.peer) s.peer.sendCtl({ t: "bye" }); });
   window.dslinkPlay = api();
-  friends.autoJoin(); friends.resume();
+  if (!friends.resume()) friends.autoJoin();
 }
 
 function bindOptions() {
@@ -64,6 +66,7 @@ async function refresh() {
       try { games.push(JSON.parse(new TextDecoder().decode(await store.get(p)))); } catch { /* damaged entry: ignore */ }
     }
     for (const s of SYS) { const b = await store.get("system/" + s.file); sysInfo[s.key] = b ? { size: b.byteLength, ok: s.sizes.includes(b.byteLength) } : null; }
+    const rb = await store.get("system/refs.json"); refsText = rb ? new TextDecoder().decode(rb) : null;      // screen references: this device only, never sent, never logged
   }
   games.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
   renderLibrary();
@@ -90,6 +93,13 @@ function renderLibrary() {
     inp.onchange = () => importSystem(s, inp); lab.append(inp);
     li.append(t, lab); sl.append(li);
   }
+  const rl = document.createElement("li"); rl.dataset.key = "refs";
+  const rt = document.createElement("span"); rt.className = "t"; rt.textContent = "Riferimenti schermate (refs.json), solo per ospitare"; const rs = document.createElement("small");
+  const rv = refsText ? validateRefs(refsText) : null;
+  if (!refsText) rs.textContent = "Non presente"; else if (rv.ok) { rs.textContent = "✓ importato · " + rv.names.length + " schermate"; rs.className = "ok"; } else { rs.textContent = rv.error; rs.className = "bad"; }
+  rt.append(rs);
+  const rlab = document.createElement("label"); rlab.className = "pick"; rlab.textContent = "SCEGLI"; const rin = document.createElement("input"); rin.type = "file"; rin.hidden = true; rin.dataset.sys = "refs";
+  rin.onchange = () => importRefs(rin); rlab.append(rin); rl.append(rt, rlab); sl.append(rl);
 }
 
 // ---------------------------------------------------------------- import (all local)
@@ -127,6 +137,13 @@ async function importSystem(s, inp) {
   if (!s.sizes.includes(buf.byteLength)) { sysInfo[s.key] = { size: buf.byteLength, ok: false }; renderLibrary(); return; }   // wrong file: not stored
   await store.put("system/" + s.file, buf); await refresh();
 }
+async function importRefs(inp) { const f = inp.files[0]; inp.value = ""; if (f) await importRefsFile(f); }
+async function importRefsFile(f) {
+  if (!store) return false;
+  const text = await f.text(), v = validateRefs(text);
+  if (!v.ok) { const keep = refsText; refsText = text; renderLibrary(); refsText = keep; $("libErr").textContent = v.error; return false; }   // wrong file: shown, not stored; its content is never logged
+  $("libErr").textContent = ""; await store.put("system/refs.json", new TextEncoder().encode(text).buffer); await refresh(); return true;
+}
 async function removeGame(g) {
   if (!store || !confirm(`Rimuovere "${g.title}" e il suo salvataggio da questo dispositivo?`)) return;
   for (const n of ["rom.nds", "meta.json", "save"]) await store.del(`library/${g.id}/${n}`);
@@ -140,31 +157,42 @@ const kd = onKey(true), ku = onKey(false);
 
 async function playGame(id, session) {
   if (current || !store) return;
-  const g = games.find((x) => x.id === id); if (!g) return;
-  current = id;
+  const dlGuest = id === null;                           // Download Play guest: NO cartridge, the console boots its own firmware menu
+  const g = dlGuest ? { id: "dl-guest", title: "Download Play" } : games.find((x) => x.id === id); if (!g) return;
+  id = g.id; current = id;
   player = new Player({
     canvas: document.createElement("canvas"),
     onSram: (gid, data) => { saveChain = saveChain.then(() => store.put(`library/${gid}/save`, data)).then(() => { savesWritten++; }).catch(() => { $("libErr").textContent = "Salvataggio non riuscito"; }); },
     onError: (msg) => fail(msg),
-    onShutdown: () => leave(true),
+    onShutdown: () => { window.__lastShutdown = player && player.shutdownInfo; leave(true); },
     onNeedGesture: () => { $("resumeHint").hidden = false; },       // the browser wants a tap before the audio (and the game) may continue
     onResumed: () => { $("resumeHint").hidden = true; },
   });
   player.prepare();                       // the tap's gesture creates the AudioContext
   $("loadingNote").textContent = "Carico " + (g.title || "il gioco") + "…"; show("loading");
   try {
-    const rom = await store.get(`library/${id}/rom.nds`); if (!rom) throw new Error("Gioco non trovato nell'archivio");
+    const rom = dlGuest ? null : await store.get(`library/${id}/rom.nds`); if (!dlGuest && !rom) throw new Error("Gioco non trovato nell'archivio");
     const system = {}; for (const s of SYS) { const b = await store.get("system/" + s.file); if (b && s.sizes.includes(b.byteLength)) system[s.file] = b; }
-    const sram = await store.get(`library/${id}/save`);
+    const sram = dlGuest ? null : await store.get(`library/${id}/save`);
     buildGame();
     await player.start({ id, rom, system, sram, radio: session ? { role: session.role === "host" ? 1 : 2, peer: session.peer } : undefined });
     if (session) session.playing();
+    if (session && session.dlplay) startAssist(session);
     show("game"); $("game").hidden = false; $("app").style.display = "none";
     if (!guard) { history.pushState({ game: true }, ""); guard = true; }
     addEventListener("keydown", kd); addEventListener("keyup", ku);
     if (player.audioBlocked()) $("resumeHint").hidden = false;
   } catch (e) { fail(e && e.message || String(e)); }
 }
+
+// Download Play assistant: the host's game menus / the guest's DS menu are driven automatically (see dlassist.js)
+function startAssist(session) {
+  stopAssist(); let refs = {}; try { refs = refsText ? JSON.parse(refsText.replace(/^\uFEFF/, "")) : {}; } catch { /* host check already refused */ }
+  const role = session.role === "host" ? "host" : "guest";
+  assist = new DlAssist({ role, player, refs, scale: +opt("dlscale", 1) || 1, onStep: (st) => { $("assistStep").textContent = st; $("assistStep").hidden = !st; } });
+  assist.run().then((r) => { if (r.ok) $("assistStep").hidden = true; else if (!assist || !assist.stopped) { $("assistStep").hidden = false; $("assistStep").textContent = "Assistente: " + r.failed; } });
+}
+function stopAssist() { if (assist) { assist.stop(); assist = null; } $("assistStep").hidden = true; }
 
 function buildGame() {
   const root = $("game"); root.innerHTML = ""; root.hidden = false;
@@ -177,6 +205,7 @@ $("confirmNo").onclick = () => { $("confirm").hidden = true; };
 $("confirmYes").onclick = async () => { $("confirm").hidden = true; await leave(false); };
 async function leave(fromCore) {
   if (!current) return;
+  stopAssist();
   if (friends) await friends.endSession();                 // the other player is told (bye) before this side shuts down
   removeEventListener("keydown", kd); removeEventListener("keyup", ku);
   if (!fromCore && player) { await player.save(true); }
@@ -187,6 +216,7 @@ async function leave(fromCore) {
   current = null; show("library");
 }
 function fail(msg) {
+  stopAssist();
   if (friends) friends.endSession().catch(() => {});
   const p = player; player = null; if (p) p.stop().catch(() => {});
   if (controls) { controls.destroy(); controls = null; }
@@ -219,14 +249,16 @@ function devTick() {
 function radioLines(s) {
   const r = s.radio; if (!r) return [];
   const p = r.peer, f = (n, d = 1) => (n || 0).toFixed(d), c = r.core || {};
-  return [`RADIO  ${p.role} ${p.state} ${r.mode}  ordered ${p.radio ? p.radio.ordered : "-"} retx ${p.radio ? p.radio.maxRetransmits : "-"}  core in/out ${c.in || 0}/${c.out || 0}  active ${c.active || 0}`,
+  const dl = s.dl, dc = dl && dl.dl_counters;
+  const dlLine = dl ? [`DL     ${dl.dl_state}  data tx/rx ${dc.data_tx}/${dc.data_rx}  bytes ${dc.data_bytes_tx}/${dc.data_bytes_rx}  cmd/reply ${dc.cmd}/${dc.reply}  beacons ${dc.nin_beacons_tx}/${dc.nin_beacons_rx}`] : [];
+  return [...dlLine, `RADIO  ${p.role} ${p.state} ${r.mode}  ordered ${p.radio ? p.radio.ordered : "-"} retx ${p.radio ? p.radio.maxRetransmits : "-"}  core in/out ${c.in || 0}/${c.out || 0}  active ${c.active || 0}`,
     `       RTT ${f(p.rtt.last)}/${f(p.rtt.avg)}/${f(p.rtt.max)} ms (~1way ${f(p.rtt.avg / 2)})  jitter ${f(p.jitter)} ms  sent ${p.sent} recv ${p.recv} lost ${p.lost} ooo ${p.reordered} late ${p.lateDropped}`,
-    `       drop soft/hard/closed ${p.droppedSoft}/${p.droppedHard}/${p.droppedClosed}  q ${p.queueDepth}/${p.queueMax}  buffered ${p.bufferedAmount}/${p.bufferedMax}  holdMax ${f(p.rxHoldMsMax)} ms  lag ${f(c.lagAvg)}/${f(c.lagMax)} ms  ring drop ${r.ringDropped}`];
+    `       drop soft/hard/closed ${p.droppedSoft}/${p.droppedHard}/${p.droppedClosed}  q ${p.queueDepth}/${p.queueMax}  buffered ${p.bufferedAmount}/${p.bufferedMax}  holdMax ${f(p.rxHoldMsMax)} ms  lag ${f(c.lagAvg)}/${f(c.lagMax)} ms  ring drop ${r.ringDropped} fill ${r.ringFill} B  tx->page ${f(r.txLagAvg, 2)}/${f(r.txLagMax)} ms`];
 }
 
 // ---------------------------------------------------------------- test/diagnostic surface (read-only state of THIS page)
 function api() {
-  return { get player() { return player; }, get friends() { return friends; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
+  return { get player() { return player; }, get friends() { return friends; }, get assist() { return assist; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
     stats: () => (player ? player.stats : null), grab: () => player && player.grab(), isPlaying: () => !!current && !!player && player.running, whenSaved: () => saveChain };
 }
 boot();

@@ -46,7 +46,7 @@ export class Session {
   /** @param {{role:'host'|'guest', base:string, game?:{id:string,code:string,title:string}, iceServers?:object[], radioMode?:object, impair?:object, onChange?:()=>void, onStart?:()=>void, onLost?:(why:string)=>void}} o */
   constructor(o) {
     this.o = o; this.role = o.role; this.sig = new SignalClient(o.base); this.peer = null; this.state = "idle"; this.code = ""; this.why = "";
-    this.me = { ready: false }; this.other = { present: false, ready: false, hidden: false, game: null }; this.quality = null; this.qualityBusy = false; this.gameOk = o.role === "host";
+    this.dlplay = false; this.me = { ready: false }; this.other = { present: false, ready: false, hidden: false, game: null }; this.quality = null; this.qualityBusy = false; this.gameOk = o.role === "host";
     this.t0 = performance.now(); this.timing = { connectMs: 0, firstFrameMs: 0 };
   }
   change(s, why) { if (this.state === "closed" && s !== "closed") return; if (s) { this.state = s; if (why) this.why = why; } if (this.o.onChange) this.o.onChange(this); }
@@ -93,7 +93,17 @@ export class Session {
     this.change();
   }
   onCtl(m) {
-    if (m.t === "hello") { this.other.present = true; this.other.game = m.game; if (this.role === "guest") { this.gameOk = !!(m.game && this.o.hasGame && this.o.hasGame(m.game)); this.hostGame = m.game; } this.change(); }
+    if (m.t === "hello") {
+      this.other.present = true; this.other.game = m.game;
+      if (this.role === "guest") {
+        this.gameOk = !!(m.game && this.o.hasGame && this.o.hasGame(m.game)); this.hostGame = m.game;
+        // no copy of the game here: the friend's console sends it through the DS's own Download Play (no ROM ever travels), if this device has what the DS menu needs
+        this.dlplay = !this.gameOk && !!(m.game && m.game.dlplay && this.o.canDownload && this.o.canDownload(m.game));
+        if (this.peer) this.peer.sendCtl({ t: "mode", dl: this.dlplay, hp: !!self.crossOriginIsolated });
+      }
+      this.change();
+    }
+    else if (m.t === "mode") { this.dlplay = !!m.dl; this.other.hp = m.hp; this.change(); }
     else if (m.t === "ready") { this.other.ready = !!m.v; this.change(); }
     else if (m.t === "quality") { if (this.role === "guest") { this.quality = { level: m.level, label: m.label, oneWayMs: m.oneWayMs }; this.change(); } }
     else if (m.t === "start") { if (this.role === "guest" && this.state === "lobby") this.begin(); }
@@ -101,7 +111,9 @@ export class Session {
     else if (m.t === "bye") { if (this.role === "host" && this.state === "lobby") return; if (this.state !== "closed") this.lost("il giocatore ha lasciato la partita"); }   // a guest leaving the lobby just frees the slot (signaling says "left")
   }
   setReady(v) { this.me.ready = !!v; if (this.peer) this.peer.sendCtl({ t: "ready", v: !!v }); this.change(); }
-  canStart() { return this.role === "host" && this.state === "lobby" && this.me.ready !== undefined && this.other.ready && !!this.peer && this.peer.state === "open"; }
+  /** why the host cannot start yet (shown in the lobby; the room is kept): missing screen references / system files / high-performance mode for Download Play */
+  hostBlock() { return this.role === "host" && this.o.hostCheck ? this.o.hostCheck(this) : ""; }
+  canStart() { return this.role === "host" && this.state === "lobby" && this.other.ready && !!this.peer && this.peer.state === "open" && !this.hostBlock(); }
   /** host: START (the guest has said PRONTO) */
   start() { if (!this.canStart()) return false; this.peer.sendCtl({ t: "start" }); this.begin(); return true; }
   begin() { this.change("starting"); if (this.o.onStart) this.o.onStart(this); }

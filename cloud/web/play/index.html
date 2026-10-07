@@ -74,6 +74,7 @@
     </ul>
     <p class="quality" id="lobbyQuality"></p>
     <p class="hint" id="lobbyNote"></p>
+    <label class="cta file" id="lobbyRefsWrap" hidden><input type="file" id="lobbyRefs" hidden>IMPORTA refs.json</label>
     <div class="actions"><button class="cta primary" id="btnReady" hidden>PRONTO</button><button class="cta primary" id="btnStart" hidden disabled>AVVIA</button><button class="cta" id="btnLobbyLeave">ESCI</button></div>
   </section>
 
@@ -95,6 +96,7 @@
 <div id="game" hidden></div>
 <div id="resumeHint" class="overlay" hidden><div class="card"><h2>Gioco in pausa</h2><p>Tocca per riprendere audio e gioco.</p><button class="cta primary" id="btnResume">RIPRENDI</button></div></div>
 <div id="confirm" class="overlay" hidden><div class="card"><h2>Uscire dal gioco?</h2><p>Il salvataggio viene conservato su questo dispositivo.</p><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ESCI</button></div></div></div>
+<div id="assistStep" class="assist" hidden></div>
 <pre id="devOverlay" hidden></pre>
 <script src="../mp/vendor/qrcode.js"></script>
 <script type="module" src="play.js"></script>

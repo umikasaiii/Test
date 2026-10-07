@@ -30,8 +30,9 @@ Therefore frames from the network must already be readable synchronously:
 
 * **SharedArrayBuffer ring** (`radio-ring.js`): the page writes, the worker reads without an event loop. This is the path real multiplayer games need. It requires a cross-origin isolated page
   (COOP/COEP): the Worker/host can send the headers, or on static hosting the service worker adds them (`sw.js`, off by default; the first use of *Gioca con amici* turns it on and reloads once).
-* **message queue** (no SAB): frames are queued when the worker's event loop runs, i.e. *between* frames. Fine for plain radio traffic (the homebrew test passes), **not** a promise for games whose
-  protocol waits for a reply inside a frame. `?radioring=msg` forces it (A/B test).
+* **message queue** (no SAB): frames are queued when the worker's event loop runs, i.e. *between* frames. Fine for plain radio traffic (the homebrew test passes) but **measured NOT sufficient for
+  Mario Party DS Download Play** (Phase 4: the DS handshake ends in `ERROR`; see `docs/MARIO_PARTY_PWA.md`). `?radioring=msg` forces it (A/B test). Games like that need the **high-performance
+  multiplayer mode** (the SharedArrayBuffer ring), which the lobby requires for Download Play and enables by itself (see below).
 
 `RTCPeerConnection` lives on the main thread (Safari has no `RTCPeerConnection` in workers); the core's frames reach it by `postMessage`.
 

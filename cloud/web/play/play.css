@@ -25,3 +25,5 @@
 .players li { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 12px; background: #0c1428; border: 1px solid #1e2c4a; min-height: 44px; }
 .players .st.ok { color: #5ee08a; } .players .st.wait { color: #ffd166; }
 .quality { font-weight: 700; min-height: 1.4em; } .quality.GREEN { color: #5ee08a; } .quality.YELLOW { color: #ffd166; } .quality.RED { color: #ff6b6b; }
+
+.assist { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 8px); z-index: 20; background: rgba(6,11,23,.85); color: #eaf1ff; border: 1px solid #2a3a5c; border-radius: 999px; padding: 6px 14px; font-size: 13px; pointer-events: none; }
