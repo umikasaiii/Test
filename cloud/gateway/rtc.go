@@ -148,6 +148,7 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	slot := room.Slots[player-1]
+	log.Printf("mp: WEBRTC_START signalling opened for player %d (the guest's WEBRTC_CONNECT follows when ICE is up)", player)
 
 	s.mu.Lock()
 	cfg := webrtc.Configuration{ICEServers: s.ice}
@@ -233,6 +234,9 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
 		log.Printf("room %s player %d: %s", room.Code, player, st)
 		setLive(st == webrtc.PeerConnectionStateConnected)
+		if st == webrtc.PeerConnectionStateConnected {
+			log.Printf("mp: WEBRTC_CONNECT player %d connected (ICE up)", player)
+		}
 		if st == webrtc.PeerConnectionStateFailed || st == webrtc.PeerConnectionStateClosed || st == webrtc.PeerConnectionStateDisconnected {
 			peer.Close()
 		}

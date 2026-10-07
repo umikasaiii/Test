@@ -42,7 +42,7 @@ for (let run = 1; run <= RUNS; run++) {
   const t0 = Date.now();
   try {
     down(); await sleep(800);
-    A = startDevice({ name: 'A', port: 8090, udp: 47841, peerUdp: 47842, firmware: priv, refs: `${priv}/out/refs.json`,
+    A = startDevice({ name: 'A', port: 8090, udp: 47841, peerUdp: 47842, firmware: priv, refs: process.env.NOREFS ? undefined : `${priv}/out/refs.json`,
       extraEnv: { DSLINK_UI_LOOPBACK_ONLY: '1', DSLINK_SHM_PATH: '/tmp/mpdev_A/av.shm', DSLINK_ADVERTISE_IP: LAN, DSLINK_DEV: '1', DSLINK_WEBRTC_ADVERTISE: '1' } });
     await A.ready();
     const bridge = bridgeFor(A);

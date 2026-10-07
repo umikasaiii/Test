@@ -91,11 +91,23 @@ check('guest lobby: no network quality row for a browser guest, PRONTO available
 await pi.click('#btnReady');
 await until(async () => !(await pa.locator('#btnStart').isDisabled()), 10000);
 await pa.screenshot({ path: `${shots}/host-lobby.png` });
+// START is an EVENT on the session the guest already has: from READY to IN_GAME its session id, slot and room code never change and it never leaves the lobby/game flow (no ENDED/ERROR/IDLE, no join screen)
+const gsid = await pi.evaluate(() => localStorage.getItem('dslink.guest.sid'));
+const seen = []; let watching = true;
+(async () => { while (watching) { try { const v = await (await fetch(`${LANBASE}/g/${gsid}/api/mp/state`)).json(); seen.push({ s: v.state, you: v.you, code: v.code }); } catch { /* retry */ } await sleep(100); } })();
+await pi.evaluate(() => { window.__scr = []; setInterval(() => window.__scr.push(document.body.dataset.screen), 100); });
+const youBefore = seen.length ? seen[seen.length - 1].you : undefined, codeBefore = seen.length ? seen[seen.length - 1].code : undefined;
 await pa.click('#btnStart');
 const sa = await waitState(A, (s) => s.state === 'IN_GAME', 90000);
 check('Hosted is chosen by itself for a browser guest and the host reaches IN_GAME', sa.state === 'IN_GAME' && sa.mode.effective === 'hosted', `${sa.state} ${sa.mode && sa.mode.effective}`);
 check('two consoles run on the host device (P1 + the guest\'s)', await until(() => runtimeCount() === 2, 10000), `runtimes ${runtimeCount()}`);
 if (process.env.DEBUG_E2E) { console.log('[debug] api/status', JSON.stringify((await (await fetch(`${A.base}/api/status`)).json()).room).slice(0, 200)); console.log('[debug] guest ingame', JSON.stringify((await (await fetch(`${LANBASE}/g/${await pi.evaluate(() => localStorage.getItem('dslink.guest.sid'))}/api/mp/state`)).json()).ingame)); }
+await until(() => pi.evaluate(() => document.body.classList.contains('ingame')), 30000);
+watching = false; await sleep(150);
+const bad = seen.filter((x) => ['IDLE', 'ENDED', 'ERROR', 'JOINING'].includes(x.s));
+const scr = await pi.evaluate(() => window.__scr);
+check('START keeps the guest\'s session: same session id, slot and room code from READY to IN_GAME, never IDLE/ENDED/ERROR', seen.length > 5 && bad.length === 0 && seen.every((x) => x.you === 1 && x.code === codeBefore) && (await pi.evaluate(() => localStorage.getItem('dslink.guest.sid'))) === gsid, `states ${[...new Set(seen.map((x) => x.s))].join('>')} you ${youBefore} bad ${bad.length}`);
+check('START never sends the guest\'s page back to the join or ended screen (no new room search)', scr.length > 5 && !scr.some((x) => ['join', 'ended', 'error'].includes(x)), `screens ${[...new Set(scr)].join('>')}`);
 const inGameIphone = await until(() => pi.evaluate(() => document.body.classList.contains('ingame') && document.querySelectorAll('#game .ctl-c').length > 0 && !!window.dslinkGame && !!window.dslinkGame.pc), 30000);
 check('the iPhone shows the game screen with the frozen touch controls', inGameIphone);
 await until(() => bA.calls.visible.includes(true), 10000);

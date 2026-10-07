@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -180,4 +182,78 @@ func parsePort(u string) (int, error) {
 		n = n*10 + int(ch-'0')
 	}
 	return n, nil
+}
+
+// START on a game whose Download Play assistant needs screen references (Mario Party DS) when this device has none: the host is told why and the LOBBY STAYS AS IT IS
+// (same room, same guest session, same slot and token). Before, the quiet setup retry ran out and the guest's page showed "PARTITA TERMINATA: Non riesco a trovare la partita".
+func TestStartWithoutScreenReferencesKeepsTheLobbyAndTheGuestSession(t *testing.T) {
+	d := newTwoDev(t)
+	os.Unsetenv("DSLINK_PROFILE_REFS")
+	fw := t.TempDir()
+	for _, f := range []string{"bios7.bin", "bios9.bin", "firmware.bin"} {
+		os.WriteFile(filepath.Join(fw, f), []byte("x"), 0o600)
+	}
+	d.host.env.FirmwareDir = fw
+	os.WriteFile(filepath.Join(d.host.libDir(), "mp.nds"), []byte("x"), 0o600)
+	os.WriteFile(filepath.Join(d.host.libDir(), "mp.json"), []byte(`{"id":"mp","title":"Mario Party DS","gameCode":"A8TE","size":1}`), 0o600)
+	hmux := http.NewServeMux()
+	d.host.registerMp(hmux)
+	front := httptest.NewServer(hmux)
+	defer front.Close()
+	d.host.httpPort, _ = parsePort(front.URL)
+	if e := d.host.mp.Create("mp", "hosted"); e != nil {
+		t.Fatal(e)
+	}
+	code := d.host.mp.view(false)["code"].(string)
+	sid := strings.Repeat("ab12", 5)
+	post := func(op, body string) int {
+		req, _ := http.NewRequest("POST", front.URL+"/g/"+sid+"/api/mp/"+op, strings.NewReader(body))
+		req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	guestView := func() map[string]any {
+		rq, _ := http.NewRequest("GET", front.URL+"/g/"+sid+"/api/mp/state", nil)
+		rs, err := http.DefaultClient.Do(rq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rs.Body.Close()
+		var v map[string]any
+		json.NewDecoder(rs.Body).Decode(&v)
+		return v
+	}
+	if st := post("join", `{"code":"`+code+`"}`); st != 200 {
+		t.Fatalf("join: %d", st)
+	}
+	if st := post("ready", `{"ready":true}`); st != 200 {
+		t.Fatal("ready")
+	}
+	waitFor(t, "host READY", func() bool { return stateOf(d.host) == MpReady })
+	before := guestView()
+	e := d.host.mp.Start()
+	if e == nil || e.Code != "no_refs" {
+		t.Fatalf("START without screen references must be refused with no_refs, got %v", e)
+	}
+	if stateOf(d.host) != MpReady {
+		t.Fatalf("the host stays in READY (lobby open), got %s", stateOf(d.host))
+	}
+	time.Sleep(1500 * time.Millisecond) // the guest keeps polling the host: it must still be in the same session
+	after := guestView()
+	if after["role"] != "guest" || after["you"] != before["you"] || after["code"] != before["code"] {
+		t.Fatalf("the guest session changed: before %v after %v", before["you"], after["you"])
+	}
+	if s := after["state"]; s != string(MpReady) && s != string(MpConnected) {
+		t.Fatalf("the guest must still be in the lobby, got %v (error %v)", s, after["error"])
+	}
+	if _, ok := after["ingame"]; ok {
+		t.Fatal("no game session may exist")
+	}
+	if len(d.host.mp.guestIdx(true)) != 1 {
+		t.Fatal("the guest is still in the host's room")
+	}
 }

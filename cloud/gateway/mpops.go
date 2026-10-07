@@ -94,6 +94,7 @@ func (m *MpSession) Create(gameID, mode string) *MpErr {
 	m.players[0] = &MpPlayer{Name: m.hostName, Role: "host", Connected: true, Ready: true}
 	m.created = time.Now()
 	m.go_(MpWaitingForPeer)
+	m.logf("ROOM_CREATED room=%s game=%s mode=%s", m.roomID, g.ID, mode)
 	m.stopSuper = make(chan struct{})
 	go m.supervise(m.stopSuper)
 	return nil
@@ -167,6 +168,7 @@ func (m *MpSession) handleJoin(w http.ResponseWriter, r *http.Request) {
 	defer m.mu.Unlock()
 	now := time.Now()
 	if m.role != "host" || m.roomID == "" || q.Room != m.roomID || time.Since(m.created) > mpLobbyTTL || (m.state != MpWaitingForPeer && m.state != MpConnected && m.state != MpNetworkCheck && m.state != MpReady) {
+		m.logf("ROOM_NOT_FOUND endpoint=/api/lobby/join room_requested=%s host_room=%s host_state=%s role=%s", q.Room, m.roomID, m.state, m.role)
 		jsonOut(w, 404, map[string]string{"error": "room_expired"})
 		return
 	}
@@ -227,6 +229,7 @@ func (m *MpSession) handleJoin(w http.ResponseWriter, r *http.Request) {
 		g.Pending, g.Connected = true, false
 	}
 	m.players[free] = g
+	m.logf("GUEST_JOINED slot=%d room=%s web=%v", free, m.roomID, g.web)
 	m.logf("guest %q (player %d) joined via %s from %s (pending=%v)", q.Name, free+1, q.Via, addr, g.Pending)
 	if !g.Pending && (m.state == MpWaitingForPeer) {
 		m.go_(MpNetworkCheck)
@@ -378,6 +381,7 @@ func (m *MpSession) refreshReadyLocked() {
 	switch {
 	case allReady && (m.state == MpConnected || m.state == MpNetworkCheck):
 		m.go_(MpReady)
+		m.logf("READY room=%s guests=%d", m.roomID, len(guests))
 	case !allReady && m.state == MpReady:
 		m.go_(MpConnected)
 	}
@@ -541,6 +545,9 @@ func (m *MpSession) Join(req JoinRequest) *MpErr {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		m.logf("join failed: %s", code)
+		if code == "peer_not_found" || code == "room_expired" {
+			m.logf("ROOM_NOT_FOUND endpoint=/api/mp/join web=%v room_requested=%s (host-side state: see the line above / the host log)", m.web, req.Room)
+		}
 		m.resetLocked()
 		return mpErr(code)
 	}
@@ -644,6 +651,9 @@ func (m *MpSession) Join(req JoinRequest) *MpErr {
 		m.go_(MpConnected)
 		m.step = ""
 	}
+	m.logf("JOIN_OK via=%s", via)
+	m.logf("ROOM_ID %s", m.roomID)
+	m.logf("PLAYER_SLOT %d (player %d) web=%v", m.slot, m.slot+1, m.web)
 	m.stopSuper = make(chan struct{})
 	go m.guestLoop(m.stopSuper, nonce)
 	return nil

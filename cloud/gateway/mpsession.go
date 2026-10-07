@@ -99,9 +99,10 @@ type MpSession struct {
 	hostDriverOK, guestDriverOK bool
 
 	// web guest (a browser on another device that plays through THIS gateway, see mpweb.go): a guest session that lives inside the host's gateway
-	web     bool
-	webUA   string
-	webSeen time.Time // the last request from the browser: a browser that went away (Safari in the background) stops the heartbeat the host watches
+	web          bool
+	webUA        string
+	ingameLogged bool      // GAME_SESSION_RECEIVED is logged once per game
+	webSeen      time.Time // the last request from the browser: a browser that went away (Safari in the background) stops the heartbeat the host watches
 
 	// game
 	stopSuper chan struct{}
@@ -130,6 +131,9 @@ func (m *MpSession) go_(to MpState) bool {
 	}
 	if m.state != to {
 		m.logf("%s -> %s", m.state, to)
+		if to == MpInGame {
+			m.logf("ROOM_STATE_IN_GAME room=%s role=%s", m.roomID, m.role)
+		}
 	}
 	m.state = to
 	return true
@@ -307,6 +311,10 @@ func (m *MpSession) view(dev bool) map[string]any {
 	} else if m.role == "guest" && m.plan.Mode == "hosted" && m.plan.HostedToken != "" && m.plan.HostedPlayer >= 2 && (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) {
 		// only once the host's plan for THIS guest (its console number and stream token) has arrived: a page that connects earlier would be told "player 2" and a token that is not its own
 		v["ingame"] = map[string]any{"base": m.hostedBase(), "code": m.plan.HostedCode, "player": m.hostedPlayer(), "token": m.plan.HostedToken}
+		if !m.ingameLogged {
+			m.ingameLogged = true
+			m.logf("GAME_SESSION_RECEIVED room=%s slot=%d player=%d", m.roomID, m.slot, m.hostedPlayer())
+		}
 	}
 	if dev {
 		d := map[string]any{"net": m.net, "plan": m.plan, "log": m.devLog, "roomId": m.roomID, "hostAddr": m.hostAddr}
@@ -359,6 +367,7 @@ func hostPortOf(addr string) string {
 
 // reset drops everything and goes back to IDLE (user left the multiplayer flow). Must be called with m.mu held.
 func (m *MpSession) resetLocked() {
+	m.ingameLogged = false
 	if m.stopSuper != nil {
 		close(m.stopSuper)
 		m.stopSuper = nil

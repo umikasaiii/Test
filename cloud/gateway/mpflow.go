@@ -57,9 +57,17 @@ func (m *MpSession) Start() *MpErr {
 		m.mu.Unlock()
 		return mpErr("not_ready")
 	}
+	m.logf("START_REQUEST room=%s state=%s guests=%d", m.roomID, m.state, len(m.guestIdx(true)))
 	if m.game.Profile != "" && !m.srv.firmwareOK() {
 		m.mu.Unlock()
 		return mpErr("no_firmware")
+	}
+	if m.game.Profile != "" { // the Download Play assistant needs the user's screen references: without them it fails at once and the guests would be sent away with a misleading "game not found"; refuse here instead, the lobby (room, guests, tokens) stays as it is
+		if _, err := loadRefs(); err != nil {
+			m.logf("START_REJECTED no_refs: %v (room %s stays open, guests keep their session)", err, m.roomID)
+			m.mu.Unlock()
+			return mpErr("no_refs")
+		}
 	}
 	for _, i := range m.guestIdx(false) {
 		if m.players[i].web && m.srv.env.NoEncoder { // a browser can only be given a streamed console
@@ -70,6 +78,7 @@ func (m *MpSession) Start() *MpErr {
 	eff, note := m.decideMode()
 	m.modeEffective, m.modeNote = eff, note
 	m.go_(MpStarting)
+	m.logf("ROOM_STATE_STARTING room=%s mode=%s", m.roomID, eff)
 	m.step = "Preparazione partita…"
 	m.attempt = 1
 	m.guestAttempt = 0
@@ -138,6 +147,7 @@ func (m *MpSession) hostLaunch(mode string, stop chan struct{}) {
 		return
 	}
 	m.local = room
+	m.logf("GAME_SESSION_CREATED room=%s session=%s consoles=%d", m.roomID, room.Code, len(room.Slots))
 	if mode == "hosted" {
 		m.plan.HostedCode = room.Code
 		for i, gi := range guestIdx { // guest gi plays on console i+1; each gets only its own console's token (see handleLobbyStatus)
@@ -377,6 +387,9 @@ func (m *MpSession) guestLoop(stop chan struct{}, nonce string) {
 		}
 		m.net, m.netDone = MpNetResult{Class: hs.Net.Class}, hs.Net.Done
 		m.modeChosen, m.modeEffective, m.modeNote = hs.Mode.Chosen, hs.Mode.Effective, hs.Mode.Note
+		if hs.State == MpStarting && m.hostState != MpStarting {
+			m.logf("START_EVENT_RECEIVED room=%s slot=%d session kept (token and slot unchanged)", m.roomID, m.slot)
+		}
 		m.hostState, m.plan = hs.State, hs.Plan
 		if hs.Plan.Attempt > m.guestAttempt { // the host redoes the setup: this device's console is restarted too (it relaunches below once the new port is published)
 			if m.started && hs.Plan.Mode == "distributed" {

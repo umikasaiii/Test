@@ -8,6 +8,7 @@ package main
 // same /api/mp/state document as every other screen. The only difference is the URL prefix /g/<id>/ that selects its session.
 
 import (
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -54,6 +55,7 @@ func (m *MpSession) resolveLocalHost(req JoinRequest) (code, secret, hostAddr, r
 	isHost := h.role == "host"
 	h.mu.Unlock()
 	if h == m || !isHost || room == "" || !lobbyOpen(st) {
+		log.Printf("mp: ROOM_NOT_FOUND endpoint=/g/<sid>/api/mp/join room_requested=%q host_room=%q host_state=%s host=%v", req.Room, room, st, isHost)
 		e = mpErr("peer_not_found")
 		return
 	}
@@ -106,6 +108,7 @@ func (s *Server) webGuestFor(sid, ua string) *webGuest {
 	}
 	m := newMpSession(s)
 	m.web, m.webUA, m.webSeen = true, ua, time.Now()
+	log.Printf("mp: SESSION_ID web guest session %s… created", sid[:6])
 	wg := &webGuest{m: m, mux: http.NewServeMux()}
 	wg.mux.HandleFunc("/api/mp/state", func(w http.ResponseWriter, r *http.Request) { jsonOut(w, 200, m.view(false)) })
 	wg.mux.HandleFunc("/api/mp/join", func(w http.ResponseWriter, r *http.Request) {

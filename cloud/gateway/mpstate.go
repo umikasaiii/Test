@@ -70,6 +70,7 @@ var mpMessages = map[string]string{
 	"setup_timeout":    "Non riesco a trovare la partita.",
 	"not_ready":        "I giocatori non sono ancora pronti.",
 	"no_firmware":      "Mancano i file di sistema Nintendo DS (firmware) su questo dispositivo.",
+	"no_refs":          "Per avviare questo gioco servono i riferimenti delle schermate (refs.json): importali in FILE DI SISTEMA.",
 	"internal":         "Qualcosa è andato storto. Riprova.",
 }
 
