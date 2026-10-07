@@ -33,3 +33,6 @@ firmware*.bin
 *.ppm
 mario_out/
 cloud/worker/wrangler.prod.jsonc
+
+# generated WebAssembly build of the DSLink Runtime (scripts/build_wasm.sh)
+cloud/web/play/core/

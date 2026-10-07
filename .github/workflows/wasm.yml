@@ -1,0 +1,66 @@
+name: wasm
+
+# DSLink PWA + WebAssembly (Foundation 1): the melonDS DS core and the DSLink libretro host compiled with Emscripten, the player page, and an end-to-end browser test
+# (real Chrome, homebrew test ROMs only). Produces the static PWA as an artifact.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  wasm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Private file guard (no ROM / BIOS / firmware / refs in the repository)
+        run: python3 scripts/check_no_private.py
+      - name: Pinned upstream (melonDS DS submodule only)
+        run: git submodule update --init upstream/melonds-ds && cat upstream/versions.env | grep -E "^(MELONDS|EMSCRIPTEN|EMSDK)"
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3 gcc-arm-none-eabi binutils-arm-none-eabi
+          cd cloud/tests && npm install && npx playwright install --with-deps chrome
+      - name: Homebrew test ROMs (own code)
+        run: mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
+      - name: Emscripten SDK (pinned)
+        uses: actions/cache@v4
+        with:
+          path: build/emsdk
+          key: emsdk-${{ hashFiles('upstream/versions.env') }}
+      - name: WASM BUILD (melonDS DS core + DSLink Runtime for WebAssembly)
+        run: scripts/build_wasm.sh
+      - name: PWA end to end in Chrome (load, core init, homebrew boot, video, audio pipeline, input, touch, save, save reload, OPFS + IndexedDB, offline, no network emulation)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_wasm_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playwasm
+      - name: Package the static PWA
+        run: scripts/package_pwa.sh
+      - name: The PWA package carries the code and no private content
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          bad = []
+          for d, _, fs in os.walk("build/pwa"):
+              for f in fs:
+                  low = f.lower()
+                  if low.endswith((".nds", ".srl", ".srm", ".sav")) or low.startswith(("bios", "firmware", "refs")):
+                      bad.append(os.path.join(d, f))
+          print("PWA package guard:", "clean" if not bad else bad)
+          sys.exit(1 if bad else 0)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DSLink-PWA-WASM
+          path: |
+            build/pwa
+            build/wasm/BUILDINFO.txt
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pwa-e2e-screenshots
+          path: /tmp/playwasm/*.png
+          if-no-files-found: ignore

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#060b17">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DSLink">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<title>DSLink · Gioca</title>
+<link rel="stylesheet" href="../controls/controls.css">
+<link rel="stylesheet" href="../mp/mp.css">
+<link rel="stylesheet" href="play.css">
+</head>
+<body>
+<main id="app" aria-live="polite">
+  <section class="screen on" data-screen="library">
+    <header class="brand"><span class="logo">DS<b>Link</b></span><span class="sub">Nintendo DS nel browser</span></header>
+    <p class="notice" id="unsupported" hidden></p>
+
+    <h2>Giochi</h2>
+    <ul class="games" id="gameList"></ul>
+    <label class="cta file" id="addGame"><input type="file" id="romFile" accept=".nds,.srl,application/octet-stream" hidden>＋ Aggiungi un gioco (.nds)</label>
+    <p class="err" id="libErr"></p>
+
+    <h2>File di sistema</h2>
+    <p class="hint">Facoltativi per i gioco homebrew, consigliati per i giochi commerciali. Restano solo su questo dispositivo: non vengono mai inviati, né salvati nel sito.</p>
+    <ul class="games sysfiles" id="sysList"></ul>
+    <p class="hint" id="storageNote"></p>
+
+    <details class="diag"><summary>Compatibilità di questo dispositivo</summary><pre id="diagText"></pre><p class="hint">Solo su questo dispositivo: nessun dato viene inviato.</p></details>
+  </section>
+
+  <section class="screen" data-screen="loading">
+    <div class="spinner"></div><h1>Avvio</h1><p class="hint" id="loadingNote">Carico il Nintendo DS…</p>
+  </section>
+
+  <section class="screen" data-screen="error">
+    <div class="alert">!</div><h1>Non riesco ad avviare</h1><p class="hint" id="errorNote"></p>
+    <div class="actions"><button class="cta primary" id="btnErrBack">INDIETRO</button></div>
+  </section>
+</main>
+
+<div id="game" hidden></div>
+<div id="resumeHint" class="overlay" hidden><div class="card"><h2>Gioco in pausa</h2><p>Tocca per riprendere audio e gioco.</p><button class="cta primary" id="btnResume">RIPRENDI</button></div></div>
+<div id="confirm" class="overlay" hidden><div class="card"><h2>Uscire dal gioco?</h2><p>Il salvataggio viene conservato su questo dispositivo.</p><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ESCI</button></div></div></div>
+<pre id="devOverlay" hidden></pre>
+<script type="module" src="play.js"></script>
+</body>
+</html>

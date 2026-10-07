@@ -1,0 +1,13 @@
+/* DSLink PWA player: same visual language as the multiplayer screens (mp.css); only what is specific to the local player. */
+#game { position:fixed; inset:0; z-index:20; background:#000; } #game[hidden] { display:none; }
+#game canvas { background:#000; }
+.games .row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.games li.game { display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:default; }
+.games li.game .t { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .games li.game small { display:block; color:var(--muted); font-size:13px; }
+.games li.game .play { width:auto; min-height:46px; padding:8px 20px; flex:none; } .games li.game .del { flex:none; appearance:none; border:0; background:none; color:var(--muted); font-size:22px; padding:8px; }
+.sysfiles li { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.sysfiles li .t { flex:1; } .sysfiles li small { display:block; color:var(--muted); font-size:13px; } .sysfiles li small.ok { color:var(--ok); } .sysfiles li small.bad { color:var(--bad); }
+.sysfiles label.pick { flex:none; display:inline-flex; align-items:center; min-height:44px; padding:6px 16px; border-radius:14px; border:1.5px solid var(--edge-dim); font-weight:700; font-size:14px; letter-spacing:.05em; }
+#devOverlay { position:fixed; left:6px; top:calc(6px + env(safe-area-inset-top)); z-index:40; margin:0; padding:6px 8px; border-radius:8px; background:rgba(0,0,0,.62); color:#9fffcf; font:11px/1.35 ui-monospace,Menlo,monospace; pointer-events:none; white-space:pre; } #devOverlay[hidden] { display:none; }
+
+.diag { color:var(--muted); font-size:14px; } .diag summary { cursor:pointer; min-height:44px; display:flex; align-items:center; } .diag pre { margin:0; white-space:pre-wrap; font:12px/1.5 ui-monospace,Menlo,monospace; color:var(--txt); }

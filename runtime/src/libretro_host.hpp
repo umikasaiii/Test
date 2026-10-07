@@ -19,6 +19,9 @@ struct HostConfig {
     std::string contentPath;  // empty = boot without content (when the core supports it)
     std::string systemDir, saveDir;
     std::string optionsFile;  // "key = \"value\"" lines (same format DSLink already generates for RetroArch)
+    std::string optionsText;  // the same lines given directly (WebAssembly build: no file system detour); used when optionsFile is empty
+    const uint8_t* contentPtr = nullptr;  // content already in memory (WebAssembly build): used instead of reading contentPath, no copy is kept
+    size_t contentSize = 0;
     std::string username;     // RETRO_ENVIRONMENT_GET_USERNAME -> melonDS derives the DS MAC from it
     unsigned language = RETRO_LANGUAGE_ENGLISH;
 };

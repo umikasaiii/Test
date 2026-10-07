@@ -1,0 +1,28 @@
+--- a/src/libretro/CMakeLists.txt	2026-10-05 08:36:14.691014151 +0000
++++ b/src/libretro/CMakeLists.txt	2026-10-07 15:26:15.760981870 +0000
+@@ -3,7 +3,9 @@
+ 
+ include(embed-binaries)
+ 
+-if (BUILD_AS_SHARED_LIBRARY)
++if (EMSCRIPTEN)
++    set(LIBRARY_TYPE STATIC)  # DSLink WebAssembly: the core is linked into the DSLink WASM runtime
++elseif (BUILD_AS_SHARED_LIBRARY)
+     set(LIBRARY_TYPE SHARED)
+ else ()
+     set(LIBRARY_TYPE MODULE)
+@@ -199,10 +201,14 @@
+     target_include_directories(melondsds_libretro SYSTEM PRIVATE "${melonDS_SOURCE_DIR}/src/net")
+ 
+     if (HAVE_NETWORKING_DIRECT_MODE)
++        if (EMSCRIPTEN)
++            target_sources(melondsds_libretro PRIVATE ${DSLINK_WASM_PCAP_STUB} ${melonDS_SOURCE_DIR}/src/net/Net_PCap.h)
++        else ()
+         target_sources(melondsds_libretro PRIVATE
+             ${melonDS_SOURCE_DIR}/src/net/Net_PCap.cpp
+             ${melonDS_SOURCE_DIR}/src/net/Net_PCap.h
+         )
++        endif ()
+     endif()
+ endif ()
+ 

@@ -1,6 +1,8 @@
 #include "libretro_host.hpp"
 
+#ifndef DSLINK_WASM
 #include <dlfcn.h>
+#endif
 
 #include <cstdarg>
 #include <cstdio>
@@ -35,6 +37,24 @@ void RETRO_CALLCONV cb_log(enum retro_log_level level, const char* fmt, ...) {
 LibretroHost::LibretroHost() { g_host = this; }
 LibretroHost::~LibretroHost() { stop(); if (g_host == this) g_host = nullptr; }
 
+#ifdef DSLINK_WASM
+// WebAssembly: the melonDS DS core is linked into this module, there is no dlopen; the libretro entry points are bound directly.
+extern "C" {
+void retro_set_environment(retro_environment_t); void retro_set_video_refresh(retro_video_refresh_t); void retro_set_audio_sample(retro_audio_sample_t);
+void retro_set_audio_sample_batch(retro_audio_sample_batch_t); void retro_set_input_poll(retro_input_poll_t); void retro_set_input_state(retro_input_state_t);
+void retro_init(void); void retro_deinit(void); unsigned retro_api_version(void); void retro_get_system_info(struct retro_system_info*);
+void retro_get_system_av_info(struct retro_system_av_info*); bool retro_load_game(const struct retro_game_info*); void retro_unload_game(void); void retro_run(void);
+void* retro_get_memory_data(unsigned); size_t retro_get_memory_size(unsigned);
+}
+bool LibretroHost::loadCore(const std::string&, std::string& err) {
+    p_set_environment = retro_set_environment; p_set_video_refresh = retro_set_video_refresh; p_set_audio_sample = retro_set_audio_sample;
+    p_set_audio_batch = retro_set_audio_sample_batch; p_set_input_poll = retro_set_input_poll; p_set_input_state = retro_set_input_state;
+    p_init = retro_init; p_deinit = retro_deinit; p_api_version = retro_api_version; p_get_system_info = retro_get_system_info; p_get_av_info = retro_get_system_av_info;
+    p_load_game = retro_load_game; p_unload_game = retro_unload_game; p_run = retro_run; p_mem_data = retro_get_memory_data; p_mem_size = retro_get_memory_size;
+    if (p_api_version() != RETRO_API_VERSION) { err = "unsupported libretro API version " + std::to_string(p_api_version()); return false; }
+    return true;
+}
+#else
 template <typename T> static bool sym(void* lib, const char* n, T& out) {
     out = reinterpret_cast<T>(dlsym(lib, n));
     return out != nullptr;
@@ -55,13 +75,16 @@ bool LibretroHost::loadCore(const std::string& path, std::string& err) {
     if (p_api_version() != RETRO_API_VERSION) { err = "unsupported libretro API version " + std::to_string(p_api_version()); return false; }
     return true;
 }
+#endif
 
 void LibretroHost::loadOptionsFile() {
     std::lock_guard<std::mutex> l(optMu_);
     fileOptions_.clear();
     std::ifstream f(cfg_.optionsFile);
+    std::istringstream text(cfg_.optionsText);
+    std::istream& in = cfg_.optionsFile.empty() ? static_cast<std::istream&>(text) : static_cast<std::istream&>(f);
     std::string line;
-    while (std::getline(f, line)) {
+    while (std::getline(in, line)) {
         if (line.empty() || line[0] == '#') continue;
         auto eq = line.find(" = ");
         if (eq == std::string::npos) continue;
@@ -80,7 +103,7 @@ std::string LibretroHost::optionValue(const std::string& key) const {
 
 bool LibretroHost::start(const HostConfig& cfg, std::string& err) {
     cfg_ = cfg;
-    if (!cfg_.optionsFile.empty()) loadOptionsFile();
+    if (!cfg_.optionsFile.empty() || !cfg_.optionsText.empty()) loadOptionsFile();
     p_get_system_info(&sysinfo);  // library name/version, extensions, need_fullpath
     p_set_environment(cb_env);
     p_init();
@@ -95,7 +118,10 @@ bool LibretroHost::start(const HostConfig& cfg, std::string& err) {
     retro_game_info* gp = nullptr;
     if (!cfg_.contentPath.empty()) {
         gi.path = cfg_.contentPath.c_str();
-        if (!sysinfo.need_fullpath) {
+        if (cfg_.contentPtr && cfg_.contentSize) {
+            gi.data = cfg_.contentPtr;
+            gi.size = cfg_.contentSize;
+        } else if (!sysinfo.need_fullpath) {
             std::ifstream f(cfg_.contentPath, std::ios::binary);
             if (!f) { err = "cannot read content " + cfg_.contentPath; return false; }
             contentData_.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
@@ -160,7 +186,9 @@ void LibretroHost::runFrame() {
 void LibretroHost::stop() {
     if (gameLoaded_) { saveSram(); p_unload_game(); gameLoaded_ = false; }
     if (started_) { p_deinit(); started_ = false; }
+#ifndef DSLINK_WASM
     if (lib_) { dlclose(lib_); lib_ = nullptr; }
+#endif
 }
 
 void LibretroHost::videoRefresh(const void* data, unsigned w, unsigned h, size_t pitch) {

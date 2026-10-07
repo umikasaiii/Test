@@ -1,0 +1,41 @@
+name: pwa-pages
+
+# Publishes the DSLink PWA (static files) to GitHub Pages so it can be opened over HTTPS on a phone (Chrome Android, Safari iOS). Manual: run it from the Actions tab.
+# One-time setting in the repository: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions". The page then lives at https://<user>.github.io/<repo>/play/
+# The site contains the player and the WebAssembly core only. ROMs, BIOS and firmware are imported by the user in the browser and never uploaded anywhere.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check_no_private.py
+      - run: git submodule update --init upstream/melonds-ds
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config
+      - uses: actions/cache@v4
+        with:
+          path: build/emsdk
+          key: emsdk-${{ hashFiles('upstream/versions.env') }}
+      - run: scripts/build_wasm.sh
+      - run: scripts/package_pwa.sh
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/pwa
+      - id: deployment
+        uses: actions/deploy-pages@v4
