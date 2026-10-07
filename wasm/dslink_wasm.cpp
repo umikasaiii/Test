@@ -19,7 +19,7 @@ using dsrt::LibretroHost;
 namespace {
 std::unique_ptr<LibretroHost> g_host;
 std::string g_log, g_err, g_sramPath, g_system, g_save, g_content;
-std::vector<uint8_t> g_rgba;           // latest frame, RGBA8888 (what WebGL/Canvas want)
+std::vector<uint8_t> g_frame;           // latest frame as the core delivers it: XRGB8888, i.e. B,G,R,X bytes
 unsigned g_w = 0, g_h = 0;
 uint64_t g_frameSeq = 0;
 std::vector<int16_t> g_audio;          // interleaved stereo produced since the last dsl_take_audio()
@@ -48,13 +48,11 @@ EMSCRIPTEN_KEEPALIVE int dsl_init(const char* systemDir, const char* saveDir) {
     g_log.clear(); g_err.clear();
     g_host->onLog = [](int level, const std::string& s) { if (level >= 1) appendLog(s); };  // INFO and above, never contains file contents
     g_host->onVideo = [](const uint8_t* d, unsigned w, unsigned h, size_t pitch) {
+        // One plain copy of the core's XRGB8888 picture (B,G,R,X in memory). The page uploads it as RGBA and the GPU swaps the channels: no per-pixel loop on the emulation thread.
         g_w = w; g_h = h;
-        g_rgba.resize(size_t(w) * h * 4);
-        for (unsigned y = 0; y < h; ++y) {  // XRGB8888 (little endian: B,G,R,X) -> RGBA
-            const uint8_t* s = d + y * pitch;
-            uint8_t* o = g_rgba.data() + size_t(y) * w * 4;
-            for (unsigned x = 0; x < w; ++x, s += 4, o += 4) { o[0] = s[2]; o[1] = s[1]; o[2] = s[0]; o[3] = 255; }
-        }
+        g_frame.resize(size_t(w) * h * 4);
+        if (pitch == size_t(w) * 4) std::memcpy(g_frame.data(), d, g_frame.size());
+        else for (unsigned y = 0; y < h; ++y) std::memcpy(g_frame.data() + size_t(y) * w * 4, d + y * pitch, size_t(w) * 4);
         ++g_frameSeq;
     };
     g_host->onAudio = [](const int16_t* d, size_t frames) {
@@ -100,7 +98,7 @@ EMSCRIPTEN_KEEPALIVE int dsl_run_frame() {
     return g_host->shutdownRequested() ? 0 : 1;
 }
 
-EMSCRIPTEN_KEEPALIVE const uint8_t* dsl_video_ptr() { return g_rgba.data(); }
+EMSCRIPTEN_KEEPALIVE const uint8_t* dsl_video_ptr() { return g_frame.data(); }
 EMSCRIPTEN_KEEPALIVE int dsl_video_w() { return int(g_w); }
 EMSCRIPTEN_KEEPALIVE int dsl_video_h() { return int(g_h); }
 EMSCRIPTEN_KEEPALIVE double dsl_video_seq() { return double(g_frameSeq); }

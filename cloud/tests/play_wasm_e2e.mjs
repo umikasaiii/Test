@@ -74,9 +74,9 @@ const top = pix(f0, 130, 125), bot = pix(f0, 100, 300);
 check('VIDEO: the picture is the ROM\'s (blue top screen, white bottom screen, 256x384)', top[2] > top[0] + 40 && bot.every((c) => c > 240), `top ${top} bottom ${bot}`);
 const canvasLit = await page.evaluate(() => { const c = document.querySelector('#game canvas'); return !!c && c.width > 10 && c.getBoundingClientRect().height > 100; });
 check('VIDEO: the canvas is laid out by the frozen touch-controls engine', canvasLit);
-check('AUDIO PIPELINE: samples flow worker -> AudioWorklet and are consumed', await until(async () => { const s = await stats(page); return s.audio === 'worklet' && s.samples.sent > 40000 && s.samples.consumed > 20000; }, 15000), JSON.stringify((await stats(page)).samples) + ' underruns ' + (await stats(page)).underruns);
+check('AUDIO PIPELINE: samples flow worker -> AudioWorklet and are consumed', await until(async () => { const s = await stats(page); return s.audio.backend === 'worklet-msg' && s.audio.pushed > 40000 && s.audio.consumed > 20000; }, 15000), JSON.stringify({ backend: (await stats(page)).audio.backend, pushed: (await stats(page)).audio.pushed, consumed: (await stats(page)).audio.consumed }));
 const s2 = await stats(page);
-check('AUDIO: underruns stay low in steady state', s2.underruns < 40, `underruns ${s2.underruns}, buffer ${s2.audioFillMs.toFixed(0)} ms`);
+check('AUDIO: no underrun in steady state, buffer near its target', s2.audio.underEvents === 0 && s2.audio.fillMs > 30 && s2.audio.fillMs < 200, `underruns ${s2.audio.underEvents} (${s2.audio.underSamples} samples), buffer ${s2.audio.fillMs.toFixed(0)} / target ${s2.audio.targetMs.toFixed(0)} ms`);
 await page.screenshot({ path: `${shots}/game-portrait.png` });
 
 // ---- input: the real touch controls (same elements the Android build uses)
@@ -163,7 +163,7 @@ const saved3 = await page.evaluate(async (k) => { const b = await window.dslinkP
 check('INDEXEDDB FALLBACK: ROM + save persist across a reload', saved2 > 0 && saved3 === saved2 && (await page.locator('#gameList li.game').count()) === 1, `save ${saved2} -> ${saved3} bytes`);
 // ---- installed PWA: the shell + core are cached, the game starts with the network cut
 await page.evaluate(() => navigator.serviceWorker.ready);
-const cached = await until(() => page.evaluate(async () => { const c = await caches.open('dslink-play-v1'); const k = (await c.keys()).map((r) => new URL(r.url).pathname); return k.includes('/play/core/dslink_wasm.wasm') && k.includes('/controls/controls.js') ? k.length : 0; }), 20000);
+const cached = await until(() => page.evaluate(async () => { const c = await caches.open('dslink-play-v2'); const k = (await c.keys()).map((r) => new URL(r.url).pathname); return k.includes('/play/core/dslink_wasm.wasm') && k.includes('/controls/controls.js') ? k.length : 0; }), 20000);
 check('PWA OFFLINE: service worker caches the shell and the WASM core', !!cached, `${cached} files cached`);
 await page.context().setOffline(true);
 await page.reload(); await page.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });
@@ -177,14 +177,14 @@ page = await newPage('?audio=sp&store=idb');
 await page.setInputFiles('#romFile', rom1); await until(() => page.locator('#gameList li.game').count());
 await page.click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await sleep(3000);
 const spStats = await stats(page);
-check('AUDIO FALLBACK: without AudioWorklet a ScriptProcessor plays the same stream (buffer fills, few underruns)', spStats.audio === 'scriptprocessor' && spStats.audioFillMs > 20 && spStats.underruns < 40, `${spStats.audio} buffer ${spStats.audioFillMs.toFixed(0)} ms underruns ${spStats.underruns}`);
+check('AUDIO FALLBACK: without AudioWorklet a ScriptProcessor plays the same stream (buffer fills, few underruns)', spStats.audio.backend === 'scriptprocessor' && spStats.audio.fillMs > 20 && spStats.audio.underEvents < 3, `${spStats.audio.backend} buffer ${spStats.audio.fillMs.toFixed(0)} ms underruns ${spStats.audio.underEvents}`);
 await page.context().close();
 // ---- development overlay (?dev=1)
 page = await newPage('?dev=1&store=idb');
 await page.setInputFiles('#romFile', rom1); await until(() => page.locator('#gameList li.game').count());
 await page.click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await sleep(2500);
 const ov = await page.evaluate(() => document.getElementById('devOverlay').textContent);
-check('DEV OVERLAY: emulator fps, render fps, audio underruns, frame time, WASM memory, main-thread stalls', /emu [\d.]+ fps/.test(ov) && /render [\d.]+ fps/.test(ov) && /underruns/.test(ov) && /frame [\d.]+ ms/.test(ov) && /wasm \d+ MB/.test(ov) && /main stalls/.test(ov), ov.replace(/\n/g, ' | '));
+check('DEV OVERLAY: emulator fps, submitted/rendered/dropped frames, upload and draw time, audio backend/buffer/underruns/overrun/queue/rate/health, WASM memory, main-thread stalls', /EMU\s+[\d.]+ fps/.test(ov) && /submit \d+\s+recv \d+\s+drawn \d+\s+drop\(src \d+ \/ render \d+\)/.test(ov) && /upload [\d.]+\/[\d.]+ ms\s+draw [\d.]+\/[\d.]+ ms/.test(ov) && /AUDIO\s+worklet-msg\s+buf \d+\/\d+ ms\s+queue \d+ fr\s+rate \d+>\d+ Hz/.test(ov) && /underruns \d+ ev \/ \d+ smp\s+last10s \d+\s+overrun \d+\s+health \w+\/\w+/.test(ov) && /WASM\s+\d+ MB\s+main stalls \d+/.test(ov), ov.replace(/\n/g, ' | '));
 await page.context().close();
 page = await newPage('?store=idb');
 const dt = await page.evaluate(() => document.getElementById('diagText').textContent);

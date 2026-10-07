@@ -32,6 +32,15 @@
     <ul class="games sysfiles" id="sysList"></ul>
     <p class="hint" id="storageNote"></p>
 
+    <details class="diag"><summary>Impostazioni di test</summary>
+      <div class="opts">
+        <label>Rendering <select id="optRender"><option value="auto">Automatico (thread principale)</option><option value="main">Thread principale</option><option value="worker">Worker (OffscreenCanvas)</option></select></label>
+        <label>Audio <select id="optAudio"><option value="auto">Automatico</option><option value="msg">Worklet + messaggi (senza SAB)</option><option value="sp">ScriptProcessor</option></select></label>
+        <label>Latenza hardware audio <select id="optLatency"><option value="">Interattiva (predefinita)</option><option value="balanced">Bilanciata</option><option value="playback">Riproduzione (più stabile)</option></select></label>
+        <label class="chk"><input type="checkbox" id="optDev"> Overlay diagnostico durante il gioco</label>
+      </div>
+      <p class="hint">Valgono dalla prossima partita. Restano solo su questo dispositivo.</p>
+    </details>
     <details class="diag"><summary>Compatibilità di questo dispositivo</summary><pre id="diagText"></pre><p class="hint">Solo su questo dispositivo: nessun dato viene inviato.</p></details>
   </section>
 

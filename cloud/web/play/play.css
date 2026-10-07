@@ -11,3 +11,4 @@
 #devOverlay { position:fixed; left:6px; top:calc(6px + env(safe-area-inset-top)); z-index:40; margin:0; padding:6px 8px; border-radius:8px; background:rgba(0,0,0,.62); color:#9fffcf; font:11px/1.35 ui-monospace,Menlo,monospace; pointer-events:none; white-space:pre; } #devOverlay[hidden] { display:none; }
 
 .diag { color:var(--muted); font-size:14px; } .diag summary { cursor:pointer; min-height:44px; display:flex; align-items:center; } .diag pre { margin:0; white-space:pre-wrap; font:12px/1.5 ui-monospace,Menlo,monospace; color:var(--txt); }
+.opts { display:flex; flex-direction:column; gap:10px; padding:6px 0; } .opts label { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:14px; color:var(--txt); } .opts select { max-width:55%; min-height:40px; background:rgba(10,20,44,.8); color:var(--txt); border:1.5px solid var(--edge-dim); border-radius:10px; padding:4px 8px; font:inherit; } .opts .chk { justify-content:flex-start; }

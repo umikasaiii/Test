@@ -4,9 +4,10 @@ import { mountControls } from "../controls/controls.js";
 import { openStore, requestPersistence, estimate } from "./storage.js";
 import { sha256Hex } from "./sha256.js";
 import { Player, detectCaps } from "./player.js";
+import { opt, setOpt } from "./options.js";
 
 const $ = (id) => document.getElementById(id);
-const DEV = new URLSearchParams(location.search).has("dev") || (() => { try { return localStorage.getItem("dslink.dev") === "1"; } catch { return false; } })();
+let DEV = opt("dev", "") === "1" || (() => { try { return localStorage.getItem("dslink.dev") === "1"; } catch { return false; } })();
 const SYS = [
   { key: "bios7", file: "bios7.bin", title: "BIOS ARM7", sizes: [16384] },
   { key: "bios9", file: "bios9.bin", title: "BIOS ARM9", sizes: [4096] },
@@ -30,14 +31,19 @@ async function boot() {
     store = await openStore(prefer);
   } catch (e) { $("libErr").textContent = "Archivio del browser non disponibile: " + (e && e.message || e); }
   if (store) { requestPersistence(); $("storageNote").textContent = "Archivio: " + (store.kind === "opfs" ? "OPFS" : "IndexedDB") + (store.why ? " (" + store.why + ")" : ""); }
-  renderDiag();
+  renderDiag(); bindOptions();
   await refresh();
   show("library");
-  if (DEV) { $("devOverlay").hidden = false; setInterval(devTick, 500); }
+  $("devOverlay").hidden = !DEV; setInterval(() => { if (DEV) devTick(); }, 500);
   if ("serviceWorker" in navigator && self.isSecureContext && !new URLSearchParams(location.search).has("nosw")) navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(() => {});
   window.dslinkPlay = api();
 }
 
+function bindOptions() {
+  const sel = (id, name, def) => { const e = $(id); e.value = opt(name, def); e.onchange = () => setOpt(name, e.value); };
+  sel("optRender", "render", "auto"); sel("optAudio", "audio", "auto"); sel("optLatency", "latency", "");
+  $("optDev").checked = DEV; $("optDev").onchange = () => { DEV = $("optDev").checked; setOpt("dev", DEV ? "1" : ""); $("devOverlay").hidden = !DEV; };
+}
 function renderDiag() {
   const yn = (v) => (v ? "sì" : "NO");
   const lines = [`WebAssembly: ${yn(caps.wasm)}`, `Web Worker (module): ${yn(caps.moduleWorker)}`, `WebGL2: ${yn(caps.webgl2)}  WebGL: ${yn(caps.webgl)}`, `AudioWorklet: ${yn(caps.audioWorklet)}  AudioContext: ${yn(caps.audioContext)}`,
@@ -137,6 +143,8 @@ async function playGame(id) {
     onSram: (gid, data) => { saveChain = saveChain.then(() => store.put(`library/${gid}/save`, data)).then(() => { savesWritten++; }).catch(() => { $("libErr").textContent = "Salvataggio non riuscito"; }); },
     onError: (msg) => fail(msg),
     onShutdown: () => leave(true),
+    onNeedGesture: () => { $("resumeHint").hidden = false; },       // the browser wants a tap before the audio (and the game) may continue
+    onResumed: () => { $("resumeHint").hidden = true; },
   });
   player.prepare();                       // the tap's gesture creates the AudioContext
   $("loadingNote").textContent = "Carico " + (g.title || "il gioco") + "…"; show("loading");
@@ -180,20 +188,24 @@ function fail(msg) {
 }
 $("btnErrBack").onclick = () => show("library");
 $("btnResume").onclick = async () => { if (player) { await player.unlockAudio(); await player.resume(); } $("resumeHint").hidden = true; };
-document.addEventListener("visibilitychange", () => { if (!document.hidden) setTimeout(() => { if (player && player.audioBlocked()) $("resumeHint").hidden = false; }, 600); });   // after the player's own resume had a chance (iOS may need a tap)
 addEventListener("popstate", () => { if (current) { history.pushState({ game: true }, ""); askLeave(); } else guard = false; });
 
 // ---------------------------------------------------------------- development overlay (this device only, never sent anywhere)
 function devTick() {
   if (!player) { $("devOverlay").textContent = `DSLink dev · ${store ? store.kind : "-"} · ${Object.entries(caps || {}).filter(([, v]) => v === true).map(([k]) => k).join(" ")}`; return; }
-  const s = player.stats;
-  $("devOverlay").textContent = [`emu ${s.emuFps.toFixed(1)} fps   render ${s.renderFps.toFixed(1)} fps (${s.video})`, `frame ${s.frameMsAvg.toFixed(2)} ms avg / ${s.frameMsMax.toFixed(1)} ms max   dropped ${s.drops}`,
-    `audio ${s.audio}  underruns ${s.underruns}  buf ${s.audioFillMs.toFixed(0)} ms`, `wasm ${s.wasmMB.toFixed(0)} MB   main stalls ${s.stalls}`, `store ${store.kind}`].join("\n");
+  const s = player.stats, a = s.audio, f = (n, d = 1) => (n || 0).toFixed(d);
+  $("devOverlay").textContent = [
+    `EMU    ${f(s.emuFps)} fps  frame ${f(s.frameMsAvg, 2)}/${f(s.frameMsMax)} ms  late ${f(s.tickLateAvgMs, 2)}/${f(s.tickLateMaxMs)} ms`,
+    `VIDEO  submit ${s.submitted}  recv ${s.received}  drawn ${s.rendered}  drop(src ${s.droppedAtSource} / render ${s.droppedRender})  q ${s.queued}`,
+    `RENDER ${f(s.renderFps)} fps (${s.video})  upload ${f(s.uploadMsAvg, 2)}/${f(s.uploadMsMax)} ms  draw ${f(s.drawMsAvg, 2)}/${f(s.drawMsMax)} ms  main ${f(s.mainFrameMsAvg, 2)}/${f(s.mainFrameMsMax)} ms`,
+    `AUDIO  ${a.backend}  buf ${f(a.fillMs, 0)}/${f(a.targetMs, 0)} ms  queue ${a.queueFrames || 0} fr  rate ${Math.round(a.srcRate || 0)}>${Math.round(a.ctxRate || 0)} Hz  lat ${f(a.baseLatencyMs, 0)}+${f(a.outputLatencyMs, 0)} ms`,
+    `       underruns ${a.underEvents || 0} ev / ${a.underSamples || 0} smp  last10s ${a.under10s || 0}  overrun ${a.overruns || 0}  health ${a.state || "-"}/${a.ctxState}  late ${a.lateQuanta || 0}  gap ${f(a.msgGapMaxMs, 0)} ms`,
+    `WASM   ${f(s.wasmMB, 0)} MB   main stalls ${s.stalls} (long ${s.longTasks})   ${s.lifecycle.paused ? "PAUSED " + s.lifecycle.reason : "running"}   store ${store.kind}`].join("\n");
 }
 
 // ---------------------------------------------------------------- test/diagnostic surface (read-only state of THIS page)
 function api() {
   return { get player() { return player; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
-    stats: () => (player ? { ...player.stats, samples: player.samples } : null), grab: () => player && player.grab(), isPlaying: () => !!current && !!player && player.running, whenSaved: () => saveChain };
+    stats: () => (player ? player.stats : null), grab: () => player && player.grab(), isPlaying: () => !!current && !!player && player.running, whenSaved: () => saveChain };
 }
 boot();

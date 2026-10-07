@@ -32,10 +32,16 @@ jobs:
           key: emsdk-${{ hashFiles('upstream/versions.env') }}
       - name: WASM BUILD (melonDS DS core + DSLink Runtime for WebAssembly)
         run: scripts/build_wasm.sh
+      - name: AUDIO RING unit test (adaptive buffer, drift controller, underrun events, overrun guard)
+        run: node cloud/tests/audio_ring_unit.mjs
       - name: PWA end to end in Chrome (load, core init, homebrew boot, video, audio pipeline, input, touch, save, save reload, OPFS + IndexedDB, offline, no network emulation)
         env:
           CHROME: /opt/google/chrome/chrome
         run: cd cloud/tests && node play_wasm_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playwasm
+      - name: PWA mobile hardening (audio underruns, render pacing, main-thread stalls, throttled CPU, background/interruption/bfcache, rotation, OffscreenCanvas render worker, SharedArrayBuffer audio path)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_wasm_hardening.mjs "$PWD/../../build/rom/dslink_test_1.nds" /tmp/playhard
       - name: Package the static PWA
         run: scripts/package_pwa.sh
       - name: The PWA package carries the code and no private content
@@ -62,5 +68,7 @@ jobs:
         if: always()
         with:
           name: pwa-e2e-screenshots
-          path: /tmp/playwasm/*.png
+          path: |
+            /tmp/playwasm/*.png
+            /tmp/playhard/*.png
           if-no-files-found: ignore
