@@ -133,7 +133,7 @@ try {
   await readyAndStart(pa, pb);
   check('Hosted flow: both devices reach the game', await bothIn(pa, pb));
   const ha = await A.state(true), hb = await B.state(true);
-  check('Hosted: both consoles run on the HOST (local radio), the guest device runs none and watches the host\'s stream over direct WebRTC', ha.mode.effective === 'hosted' && ha.dev.slots.length === 2 && ha.dev.slots[0].radio === 'local' && runtimePidsFor('B').length === 0 && hb.ingame.base.startsWith('http://127.0.0.1:8090') && (await pb.evaluate(() => window.dslinkGame.pc.connectionState === 'connected' && window.dslinkGame.video.videoWidth > 0)));
+  check('Hosted: both consoles run on the HOST (local radio), the guest device runs none and watches the host\'s stream over direct WebRTC', ha.mode.effective === 'hosted' && ha.dev.slots.length === 2 && ha.dev.slots[0].radio === 'local' && runtimePidsFor('B').length === 0 && hb.ingame.base.startsWith('http://127.0.0.1:8090') && (await until(() => pb.evaluate(() => window.dslinkGame.pc.connectionState === 'connected' && window.dslinkGame.video.videoWidth > 0), 15000)));
   await shot(pb, '15-ingame-hosted-guest');
   await pa.evaluate(() => window.dslinkGame.controls.openMenu()); await pa.click('.ctl-menu [data-act=leave]'); await pa.click('#confirmYes');
   check('Hosted: closing ends both sides cleanly', !!(await until(async () => (await screenIs(pb, 'ended')) && runtimeCount() === 0, 20000)));
