@@ -182,6 +182,27 @@ class EndToEndTest {
         assertTrue("Runtime gone", until(15000) { metrics()[16] == 0.0 || !File("/proc").listFiles()!!.any { p -> p.name.toIntOrNull() != null && runCatching { File(p, "cmdline").readText().contains("libdslink_runtime") }.getOrDefault(false) } })
     }
 
+    @Test fun singlePlayerRunsOneLocalConsoleAndKeepsItsSave() {
+        val id = uploadHomebrew()
+        assertTrue("GIOCA starts Single Player", Gw.post("/api/mp/single", JSONObject().put("gameId", id)))
+        assertTrue("straight to IN_GAME, no lobby", until(60000) { state() == "IN_GAME" })
+        val st = Gw.state(true)!!
+        assertTrue("single session", st.optBoolean("single") && st.optString("code").isEmpty() && st.optString("qr").isEmpty())
+        assertEquals("one Runtime only", 1, runtimeProcesses())
+        val cmd = File("/proc").listFiles()!!.filter { p -> p.name.toIntOrNull() != null && runCatching { File(p, "cmdline").readText().contains("libdslink_runtime") }.getOrDefault(false) }
+            .map { File(it, "cmdline").readText().split('\u0000') }.first()
+        assertTrue("shared memory only: no encoder/stream/radio arguments ($cmd)", cmd.contains("--shm") && cmd.none { it == "--av" || it == "--codec" || it.startsWith("--mp-") || it.startsWith("--lan-") })
+        assertTrue("page uses the native display, no video element", until(15000) { js("document.body.classList.contains('native') && document.querySelectorAll('#game video').length===0") == "true" })
+        assertTrue("video local ${mm()}", until(25000) { val m = metrics(); m[16] == 1.0 && m[12] > 25 && m[0] > 20 })
+        assertTrue("audio local", until(15000) { metrics()[6] == 1.0 })
+        Native.nativeButton(8, true); SystemClock.sleep(600)
+        val c = pixel(Native.nativeGrabFrame()!!, 214, 74); Native.nativeButton(8, false)
+        assertTrue("input reaches the core ($c)", c.first > 200 && c.second < 120)
+        assertTrue("exit", Gw.post("/api/mp/cancel", JSONObject()))
+        assertTrue("Runtime gone", until(15000) { runtimeProcesses() == 0 })
+        assertTrue("the game's own save was written on exit", File(Stack.filesRoot(ctx), "library/saves/$id/melonDS DS/$id.srm").let { it.exists() && it.length() > 0 })
+    }
+
     @Test fun backAsksBeforeLeavingASession() {
         assertTrue(startSolo())
         assertTrue(until(15000) { js("document.body.classList.contains('ingame')") == "true" })

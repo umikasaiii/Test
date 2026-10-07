@@ -68,6 +68,11 @@ func (s *Server) registerMp(mux *http.ServeMux) {
 		readBody(r, &q)
 		mpReply(w, m.Create(q.GameID, q.Mode), nil)
 	})
+	mux.HandleFunc("/api/mp/single", func(w http.ResponseWriter, r *http.Request) {
+		var q struct{ GameID string }
+		readBody(r, &q)
+		mpReply(w, m.StartSingle(q.GameID), nil)
+	})
 	if s.env.TestHooks {
 		mux.HandleFunc("/api/mp/dev/solo", func(w http.ResponseWriter, r *http.Request) {
 			var q struct{ GameID string }

@@ -130,6 +130,15 @@ jobs:
           DSLINK_CFGTOOL: ${{ github.workspace }}/build/dslink/dslink_cfgtool
           DSLINK_ROMCHECK: ${{ github.workspace }}/build/dslink/dslink_romcheck
         run: cd cloud/tests && node mp_native_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" "$PWD/../../build/rt/shm_probe" /tmp/mpnative
+      - name: single player e2e (GIOCA: one Runtime, no room/WebRTC/encoder, per-game save)
+        env:
+          CHROME: /opt/google/chrome/chrome
+          DSLINK_GATEWAY: ${{ github.workspace }}/build/dslink-gateway
+          DSLINK_RUNTIME: ${{ github.workspace }}/build/rt/dslink-runtime
+          DSLINK_CORE: ${{ github.workspace }}/build/core/src/libretro/melondsds_libretro.so
+          DSLINK_CFGTOOL: ${{ github.workspace }}/build/dslink/dslink_cfgtool
+          DSLINK_ROMCHECK: ${{ github.workspace }}/build/dslink/dslink_romcheck
+        run: cd cloud/tests && node mp_single_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" "$PWD/../../build/rt/shm_probe" /tmp/mpsingle
       - name: Hosted V0 end to end - phone host + iPhone-like browser guest (gateway started as the Android app starts it, guest page on the LAN address, WebRTC video/audio/input; homebrew only)
         env:
           CHROME: /opt/google/chrome/chrome

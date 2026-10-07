@@ -77,6 +77,8 @@ type Slot struct {
 	AudioTrack  webrtc.TrackLocal
 	rt          *RuntimeLink
 	Lan         *LanSpec      // Distributed Mode: LAN RadioTransport instead of the in-process bridge
+	Single      bool          // Single Player: no radio bridge at all (no --mp-*/--lan-* arguments)
+	SaveDir     string        // Single Player: persistent per-game save folder (default: the slot's scratch folder)
 	Events      atomic.Uint64 // input messages received from the browser
 	peerRttUs   atomic.Int64  // the browser's WebRTC round trip (ICE candidate pair), microseconds; 0 = not measured yet
 	peerLive    atomic.Int32  // browsers currently connected to this slot's stream

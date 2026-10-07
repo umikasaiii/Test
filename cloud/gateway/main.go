@@ -32,6 +32,8 @@ type Room struct {
 	SHA256       string
 	Created      time.Time
 	Solo         bool      // cloud solo session: only slot 1 runs
+	Single       bool      // Single Player: one console, no radio, no multiplayer room
+	SaveDir      string    // Single Player: persistent save folder of this game
 	FirmwareDirs [3]string // cloud sessions: each slot's own firmware
 	ContentBase  string    // cloud sessions: where to persist saves
 	Ticket       string
@@ -254,6 +256,7 @@ func (s *Server) startSlotsN(room *Room, rom1 string, guestRoms []string) error 
 				room.Slots[i] = nil
 			}
 		}
+		room.Slots[0].Single, room.Slots[0].SaveDir = room.Single, room.SaveDir
 		if err := room.Slots[0].StartRuntime(mp); err != nil {
 			return fmt.Errorf("slot 1: %w", err)
 		}

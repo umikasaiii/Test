@@ -37,7 +37,10 @@
     <ul class="games" id="gameList"></ul>
     <label class="cta file" id="addGame"><input type="file" id="romFile" accept=".nds" hidden>＋ Aggiungi un gioco</label>
     <p class="err" id="createErr"></p>
-    <button class="cta primary" id="btnMakeRoom" disabled>CREA STANZA</button>
+    <div class="gamecta" id="gameCta" hidden>
+      <button class="cta primary" id="btnPlay">GIOCA</button>
+      <button class="cta" id="btnMakeRoom" disabled>GIOCA CON AMICI</button>
+    </div>
   </section>
 
   <section class="screen" data-screen="join">

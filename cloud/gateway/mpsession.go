@@ -65,6 +65,7 @@ type MpSession struct {
 	modeNote             string
 	hostName             string
 	devID                string       // random per gateway process, sent when joining
+	single               bool         // Single Player: no room, no peers
 	solo                 bool         // test hook: a console with nobody else in the room (no supervision of a missing peer)
 	attempt              int          // host: current try of the DS-level setup (1..mpSetupAttempts)
 	guestAttempt         int          // guest: the host's attempt this device has acted on
@@ -297,6 +298,7 @@ func (m *MpSession) view(dev bool) map[string]any {
 		"net": map[string]any{"done": m.netDone, "class": m.net.Class, "label": label, "hint": hint}, "step": m.step, "error": m.err, "canStart": canStart,
 		"expiresInSec": int((mpLobbyTTL - time.Since(m.created)).Seconds()),
 		"you":          m.slot,
+		"single":       m.single,
 		"platform":     map[string]any{"native": m.srv.env.ShmPath != "" && !m.web, "hostedHost": !m.srv.env.NoEncoder, "web": m.web},
 	}
 	if (m.state == MpStarting || m.state == MpDownloadPlay || m.state == MpInGame || m.state == MpReconnecting) && m.local != nil {
@@ -384,7 +386,7 @@ func (m *MpSession) resetLocked() {
 	m.slot, m.hostedGuests, m.guestDriversDone, m.dlDone = 0, 0, 0, nil
 	m.net, m.netDone, m.step, m.err = MpNetResult{}, false, "", nil
 	m.modeEffective, m.modeNote, m.plan, m.started = "", "", mpPlan{}, false
-	m.attempt, m.guestAttempt, m.solo = 0, 0, false
+	m.attempt, m.guestAttempt, m.solo, m.single = 0, 0, false, false
 	m.hostState = ""
 	m.hostDriverOK, m.guestDriverOK, m.radioSeen, m.keepEnded = false, false, false, false
 	m.badJoins, m.lockedUntil = nil, time.Time{}

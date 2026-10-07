@@ -74,3 +74,5 @@ html.native, html.native body { background: transparent !important; }
 body.guest .hostonly, body.guest #btnCreate, body.guest #recent, body.guest #btnSysFiles, body.guest #btnScan, body.guest #devJoin, body.guest .netrow, body.guest #netHint { display: none !important; }
 body.guest [data-screen=home] .sub::after { content: " · Ospite"; }
 html, body { overscroll-behavior: none; }
+
+.gamecta { display:flex; flex-direction:column; gap:10px; } .gamecta[hidden] { display:none; }

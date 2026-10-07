@@ -99,7 +99,7 @@ async function renderCreate() {
   const ul = $("gameList"); ul.innerHTML = "";
   if (!games.length) { const li = document.createElement("li"); li.textContent = "La libreria è vuota. Aggiungi un gioco."; ul.append(li); }
   games.forEach((g) => { const li = document.createElement("li"); li.className = selected === g.id ? "sel" : ""; li.innerHTML = `<span></span><span class="tick">✓</span>`; li.firstChild.textContent = g.title; li.onclick = () => { selected = g.id; renderCreate(); }; ul.append(li); });
-  $("btnMakeRoom").disabled = !selected;
+  $("gameCta").hidden = !selected; $("btnMakeRoom").disabled = !selected;
 }
 $("btnCreate").onclick = () => { selected = null; $("createErr").textContent = ""; go("create"); };
 $("btnJoin").onclick = () => { $("joinErr").textContent = ""; go("join"); };
@@ -108,6 +108,14 @@ $("romFile").onchange = async (e) => {
   $("createErr").textContent = "Aggiungo il gioco…"; const r = await api("POST", "/api/mp/library", fd);
   $("createErr").textContent = r.ok ? "" : (r.j.error || "File non valido."); if (r.ok) selected = r.j.id; e.target.value = ""; renderCreate();
 };
+// GIOCA: Single Player, one console on this device, no room, no guests, no network
+$("btnPlay").onclick = async () => {
+  const g = games.find((x) => x.id === selected); if (!g) return;
+  const r = await api("POST", "/api/mp/single", { gameId: g.id });
+  if (!r.ok) { $("createErr").textContent = r.j.error.message; return; }
+  remember(g); await poll();
+};
+// GIOCA CON AMICI: the multiplayer flow, unchanged
 $("btnMakeRoom").onclick = async () => {
   const g = games.find((x) => x.id === selected); if (!g) return;
   const r = await api("POST", "/api/mp/create", { gameId: g.id, mode: devMode() });
