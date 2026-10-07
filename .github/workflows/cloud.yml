@@ -130,7 +130,7 @@ jobs:
           DSLINK_CFGTOOL: ${{ github.workspace }}/build/dslink/dslink_cfgtool
           DSLINK_ROMCHECK: ${{ github.workspace }}/build/dslink/dslink_romcheck
         run: cd cloud/tests && node mp_native_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" "$PWD/../../build/rt/shm_probe" /tmp/mpnative
-      - name: single player e2e (GIOCA: one Runtime, no room/WebRTC/encoder, per-game save)
+      - name: single player e2e (GIOCA - one Runtime, no room/WebRTC/encoder, per-game save)
         env:
           CHROME: /opt/google/chrome/chrome
           DSLINK_GATEWAY: ${{ github.workspace }}/build/dslink-gateway
