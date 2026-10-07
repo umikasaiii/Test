@@ -54,7 +54,7 @@ object Stack {
             put("DSLINK_WORKDIR", File(root, "work").path)
             put("DSLINK_LIBRARY", File(root, "library").path)
             put("DSLINK_FIRMWARE_DIR", systemDir(ctx).path)
-            File(systemDir(ctx), "refs.json").takeIf { it.exists() }?.let { put("DSLINK_PROFILE_REFS", it.path) }   // the user's own screen references for the Download Play assistant (private)
+            put("DSLINK_PROFILE_REFS", File(systemDir(ctx), "refs.json").path)   // the user's own screen references for the Download Play assistant (private); the path is fixed, so a file imported while the app is running is used at the next START (no restart)
             put("DSLINK_SHM_PATH", shmPath(ctx))
             put("DSLINK_WEBRTC_ADVERTISE", "1")      // Hosted: the stream to another device (an iPhone) advertises the Wi-Fi/hotspot address the app reported
             put("DSLINK_UI_LOOPBACK_ONLY", "1")      // other phones may only reach the peer lobby protocol

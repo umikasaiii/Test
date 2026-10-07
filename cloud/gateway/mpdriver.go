@@ -6,6 +6,7 @@ package main
 // from the user's own game). Without them the assistant cannot run and the start fails with a friendly message.
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,16 +40,21 @@ var errStopped = errors.New("stopped")
 
 func loadRefs() (map[string]dlRef, error) {
 	p := os.Getenv("DSLINK_PROFILE_REFS")
+	if p == "" { // not configured explicitly: the file the user imported next to the BIOS/firmware files
+		if d := os.Getenv("DSLINK_FIRMWARE_DIR"); d != "" {
+			p = filepath.Join(d, "refs.json")
+		}
+	}
 	if p == "" {
 		return nil, errors.New("no screen references configured")
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("no screen references imported (refs.json)")
 	}
 	var r map[string]dlRef
-	if err := json.Unmarshal(b, &r); err != nil {
-		return nil, err
+	if err := json.Unmarshal(bytes.TrimSpace(bytes.TrimPrefix(b, []byte("\xef\xbb\xbf"))), &r); err != nil { // a phone's text editor may have added a byte-order mark
+		return nil, errors.New("screen references are not valid JSON")
 	}
 	return r, nil
 }

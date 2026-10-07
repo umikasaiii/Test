@@ -184,22 +184,39 @@ func parsePort(u string) (int, error) {
 	return n, nil
 }
 
-// START on a game whose Download Play assistant needs screen references (Mario Party DS) when this device has none: the host is told why and the LOBBY STAYS AS IT IS
-// (same room, same guest session, same slot and token). Before, the quiet setup retry ran out and the guest's page showed "PARTITA TERMINATA: Non riesco a trovare la partita".
-func TestStartWithoutScreenReferencesKeepsTheLobbyAndTheGuestSession(t *testing.T) {
+// validRefsJSON: the shape of a real refs.json (5 required screens, each with a 256-character 0/1 hash per screen), with made-up bits: the tests never need the user's file
+func validRefsJSON() string {
+	h := strings.Repeat("01", 128)
+	var parts []string
+	for _, k := range []string{"host_main_menu", "host_find_players", "client_ds_menu", "client_dl_open", "client_discovered"} {
+		parts = append(parts, `"`+k+`":{"top":"`+h+`","bot":"`+h+`"}`)
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+// marioLobby: a host with a Mario-profile game (Download Play assistant needed) and one browser guest, READY. refs decides what this device has imported (nothing, a file, ...).
+type marioLobbyT struct {
+	d         *twoDev
+	guestView func() map[string]any
+}
+
+func marioLobby(t *testing.T, refs func(fwDir string)) *marioLobbyT {
 	d := newTwoDev(t)
 	os.Unsetenv("DSLINK_PROFILE_REFS")
+	os.Unsetenv("DSLINK_FIRMWARE_DIR")
 	fw := t.TempDir()
 	for _, f := range []string{"bios7.bin", "bios9.bin", "firmware.bin"} {
 		os.WriteFile(filepath.Join(fw, f), []byte("x"), 0o600)
 	}
 	d.host.env.FirmwareDir = fw
+	refs(fw)
+	t.Cleanup(func() { os.Unsetenv("DSLINK_PROFILE_REFS"); os.Unsetenv("DSLINK_FIRMWARE_DIR") })
 	os.WriteFile(filepath.Join(d.host.libDir(), "mp.nds"), []byte("x"), 0o600)
 	os.WriteFile(filepath.Join(d.host.libDir(), "mp.json"), []byte(`{"id":"mp","title":"Mario Party DS","gameCode":"A8TE","size":1}`), 0o600)
 	hmux := http.NewServeMux()
 	d.host.registerMp(hmux)
 	front := httptest.NewServer(hmux)
-	defer front.Close()
+	t.Cleanup(front.Close)
 	d.host.httpPort, _ = parsePort(front.URL)
 	if e := d.host.mp.Create("mp", "hosted"); e != nil {
 		t.Fatal(e)
@@ -216,7 +233,8 @@ func TestStartWithoutScreenReferencesKeepsTheLobbyAndTheGuestSession(t *testing.
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	guestView := func() map[string]any {
+	l := &marioLobbyT{d: d}
+	l.guestView = func() map[string]any {
 		rq, _ := http.NewRequest("GET", front.URL+"/g/"+sid+"/api/mp/state", nil)
 		rs, err := http.DefaultClient.Do(rq)
 		if err != nil {
@@ -234,7 +252,15 @@ func TestStartWithoutScreenReferencesKeepsTheLobbyAndTheGuestSession(t *testing.
 		t.Fatal("ready")
 	}
 	waitFor(t, "host READY", func() bool { return stateOf(d.host) == MpReady })
-	before := guestView()
+	return l
+}
+
+// START on a game whose Download Play assistant needs screen references (Mario Party DS) when this device has none: the host is told why and the LOBBY STAYS AS IT IS
+// (same room, same guest session, same slot and token). Before, the quiet setup retry ran out and the guest's page showed "PARTITA TERMINATA: Non riesco a trovare la partita".
+func TestStartWithoutScreenReferencesKeepsTheLobbyAndTheGuestSession(t *testing.T) {
+	l := marioLobby(t, func(string) {})
+	d := l.d
+	before := l.guestView()
 	e := d.host.mp.Start()
 	if e == nil || e.Code != "no_refs" {
 		t.Fatalf("START without screen references must be refused with no_refs, got %v", e)
@@ -243,7 +269,7 @@ func TestStartWithoutScreenReferencesKeepsTheLobbyAndTheGuestSession(t *testing.
 		t.Fatalf("the host stays in READY (lobby open), got %s", stateOf(d.host))
 	}
 	time.Sleep(1500 * time.Millisecond) // the guest keeps polling the host: it must still be in the same session
-	after := guestView()
+	after := l.guestView()
 	if after["role"] != "guest" || after["you"] != before["you"] || after["code"] != before["code"] {
 		t.Fatalf("the guest session changed: before %v after %v", before["you"], after["you"])
 	}
@@ -255,5 +281,53 @@ func TestStartWithoutScreenReferencesKeepsTheLobbyAndTheGuestSession(t *testing.
 	}
 	if len(d.host.mp.guestIdx(true)) != 1 {
 		t.Fatal("the guest is still in the host's room")
+	}
+}
+
+// START with valid references is accepted, however the file reached the device: named by DSLINK_PROFILE_REFS (the app sets it to the fixed path of the imported file), found next to the
+// BIOS/firmware files when the variable is not set, or saved by a phone editor with a byte-order mark and a trailing newline.
+func TestStartWithValidScreenReferencesIsAccepted(t *testing.T) {
+	cases := map[string]func(fw string){
+		"env path": func(fw string) {
+			p := filepath.Join(fw, "refs.json")
+			os.WriteFile(p, []byte(validRefsJSON()), 0o600)
+			os.Setenv("DSLINK_PROFILE_REFS", p)
+		},
+		"env path to a file imported after the app started": func(fw string) {
+			os.Setenv("DSLINK_PROFILE_REFS", filepath.Join(fw, "refs.json")) // the path is fixed from the start; the file arrives later
+			os.WriteFile(filepath.Join(fw, "refs.json"), []byte(validRefsJSON()), 0o600)
+		},
+		"next to the firmware files, no variable": func(fw string) {
+			os.WriteFile(filepath.Join(fw, "refs.json"), []byte(validRefsJSON()), 0o600)
+			os.Setenv("DSLINK_FIRMWARE_DIR", fw)
+		},
+		"byte-order mark and trailing newline": func(fw string) {
+			p := filepath.Join(fw, "refs.json")
+			os.WriteFile(p, []byte("\xef\xbb\xbf"+validRefsJSON()+"\n"), 0o600)
+			os.Setenv("DSLINK_PROFILE_REFS", p)
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			l := marioLobby(t, setup)
+			if e := l.d.host.mp.Start(); e != nil {
+				t.Fatalf("START with valid references must be accepted, got %v", e)
+			}
+			if s := stateOf(l.d.host); s != MpStarting {
+				t.Fatalf("the host moves on to STARTING, got %s", s)
+			}
+			waitFor(t, "the launch (which cannot find a Runtime here) is over before the scratch directories are removed", func() bool { return stateOf(l.d.host) != MpStarting })
+			l.d.host.mp.Reset()
+			time.Sleep(300 * time.Millisecond)
+		})
+	}
+	// a damaged file is refused like a missing one: the lobby stays
+	l := marioLobby(t, func(fw string) {
+		p := filepath.Join(fw, "refs.json")
+		os.WriteFile(p, []byte(`{"host_main_menu":`), 0o600)
+		os.Setenv("DSLINK_PROFILE_REFS", p)
+	})
+	if e := l.d.host.mp.Start(); e == nil || e.Code != "no_refs" || stateOf(l.d.host) != MpReady {
+		t.Fatalf("a damaged refs.json is refused and the lobby stays: %v %s", e, stateOf(l.d.host))
 	}
 }
