@@ -1,11 +1,13 @@
 import type { Presence } from "./presence";
 import type { GameSession } from "./session";
+import type { SignalRoom } from "./signal";
 
 export interface Env {
   DB: D1Database;
   STORE: R2Bucket;                    // PRIVATE bucket: never public, never behind a custom domain
   PRESENCE: DurableObjectNamespace<Presence>;
   SESSION: DurableObjectNamespace<GameSession>;
+  SIGNAL: DurableObjectNamespace<SignalRoom>;   // PWA <-> PWA signaling rooms (ephemeral)
   CONTAINER?: DurableObjectNamespace;  // DSLinkContainer (production only)
   ASSETS?: Fetcher;
   DEV_GATEWAY?: string;                // dev/test only: local gateway standing in for the Container

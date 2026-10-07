@@ -12,12 +12,15 @@
 #include <vector>
 
 #include "libretro_host.hpp"
+#include "mp_bridge.hpp"
+#include "webrtc_link.hpp"
 
 using dsrt::HostConfig;
 using dsrt::LibretroHost;
 
 namespace {
 std::unique_ptr<LibretroHost> g_host;
+std::unique_ptr<dsrt::MpBridge> g_bridge;   // Distributed: the Multiplayer Bridge over a WebRTC DataChannel (null in Single Player)
 std::string g_log, g_err, g_sramPath, g_system, g_save, g_content;
 std::vector<uint8_t> g_frame;           // latest frame as the core delivers it: XRGB8888, i.e. B,G,R,X bytes
 unsigned g_w = 0, g_h = 0;
@@ -68,18 +71,25 @@ EMSCRIPTEN_KEEPALIVE uint8_t* dsl_alloc(size_t n) { return static_cast<uint8_t*>
 EMSCRIPTEN_KEEPALIVE void dsl_free(uint8_t* p) { std::free(p); }
 
 // 'options' = melonDS DS core options, one `key = "value"` per line.
-EMSCRIPTEN_KEEPALIVE int dsl_start(const char* options, const char* systemDir, const char* saveDir, const char* contentName, uint8_t* rom, size_t romSize) {
+// radioRole: 0 = Single Player, 1 = Distributed host (player 1), 2 = Distributed guest (player 2); the transport is the page's RTCDataChannel (webrtc_link.hpp)
+EMSCRIPTEN_KEEPALIVE int dsl_start(const char* options, const char* systemDir, const char* saveDir, const char* contentName, uint8_t* rom, size_t romSize, int radioRole) {
     g_err.clear();
     if (!g_host) { g_err = "not initialised"; return 0; }
     g_rom = rom; g_romSize = romSize;
     HostConfig cfg;
     cfg.systemDir = systemDir; cfg.saveDir = saveDir; cfg.optionsText = options ? options : "";
-    cfg.username = "DSLinkWeb";
+    cfg.username = radioRole == 1 ? "DSLinkP1" : radioRole == 2 ? "DSLinkP2" : "DSLinkWeb";   // the DS Wi-Fi MAC derives from the user name: the two consoles of a session must differ
     g_content = std::string("/rom/") + contentName;   // the core derives the save name from this
     cfg.contentPath = g_content;
     cfg.contentPtr = rom; cfg.contentSize = romSize;
     std::string err;
     if (!g_host->start(cfg, err)) { g_err = err; return 0; }
+    if (radioRole == 1 || radioRole == 2) {
+        g_bridge.reset(new dsrt::MpBridge());
+        std::unique_ptr<dsrt::RadioLink> link(new dsrt::WebRtcLink(radioRole == 1));
+        const bool ok = radioRole == 1 ? g_bridge->attachHost(*g_host, std::move(link), err) : g_bridge->attachGuest(*g_host, std::move(link), 1, err);
+        if (!ok) { g_err = err; g_bridge.reset(); return 0; }
+    }
     // SRAM: <saves>/<core name>/<content basename>.srm (same layout as the desktop Runtime)
     std::string base = contentName;
     auto dot = base.find_last_of('.');
@@ -91,6 +101,7 @@ EMSCRIPTEN_KEEPALIVE int dsl_start(const char* options, const char* systemDir, c
 EMSCRIPTEN_KEEPALIVE int dsl_run_frame() {
     if (!g_host) return 0;
     auto t0 = std::chrono::steady_clock::now();
+    if (g_bridge) g_bridge->pump();            // as the native Runtime: deliver the radio frames that arrived, BEFORE the core runs its frame
     g_host->runFrame();
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     g_lastFrameMs = ms;
@@ -123,7 +134,11 @@ EMSCRIPTEN_KEEPALIVE void dsl_set_touch(int down, float x, float y) {
 EMSCRIPTEN_KEEPALIVE int dsl_sram_size() { return g_host ? int(g_host->sramSize()) : 0; }
 EMSCRIPTEN_KEEPALIVE int dsl_save_sram() { if (!g_host) return 0; g_host->saveSram(); return 1; }
 EMSCRIPTEN_KEEPALIVE const char* dsl_sram_path() { return g_sramPath.c_str(); }
-EMSCRIPTEN_KEEPALIVE void dsl_stop() { if (g_host) { g_host->stop(); g_host.reset(); } g_rom = nullptr; g_romSize = 0; }
+EMSCRIPTEN_KEEPALIVE double dsl_radio_in() { return g_bridge ? double(g_bridge->packetsIn()) : 0; }
+EMSCRIPTEN_KEEPALIVE double dsl_radio_out() { return g_bridge ? double(g_bridge->packetsOut()) : 0; }
+EMSCRIPTEN_KEEPALIVE int dsl_radio_active() { return g_bridge && g_bridge->sessionActive() ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE int dsl_radio_peers() { return g_bridge ? int(g_bridge->peers()) : 0; }
+EMSCRIPTEN_KEEPALIVE void dsl_stop() { if (g_bridge) { g_bridge->stop(); g_bridge.reset(); } if (g_host) { g_host->stop(); g_host.reset(); } g_rom = nullptr; g_romSize = 0; }
 
 EMSCRIPTEN_KEEPALIVE const char* dsl_error() { return g_err.c_str(); }
 EMSCRIPTEN_KEEPALIVE const char* dsl_log() { return g_log.c_str(); }

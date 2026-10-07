@@ -15,7 +15,7 @@ file(GLOB_RECURSE CORE_LIBS "${CORE_BUILD}/*.a" "${DEPS_BUILD}/*-build/*.a")
 # the core archive is named .so by the upstream build (static archive); the others are plain .a
 list(FILTER CORE_LIBS EXCLUDE REGEX "CMakeFiles")
 
-add_executable(dslink_wasm dslink_wasm.cpp ../runtime/src/libretro_host.cpp)
+add_executable(dslink_wasm dslink_wasm.cpp webrtc_link.cpp ../runtime/src/libretro_host.cpp ../runtime/src/mp_bridge.cpp ../runtime/src/dlplay_diag.cpp)
 target_include_directories(dslink_wasm PRIVATE ../runtime/src ${LIBRETRO_INCLUDE})
 target_compile_definitions(dslink_wasm PRIVATE DSLINK_WASM=1)
 target_compile_options(dslink_wasm PRIVATE -fwasm-exceptions -O3)

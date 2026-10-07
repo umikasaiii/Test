@@ -6,10 +6,12 @@ import { hostFor } from "./container";
 import { handleInvites } from "./invites";
 import { handleLibrary, purgeUserData } from "./library";
 import { HttpError, json, logEvent, readJson, str, timingSafeEqual } from "./util";
+import { handleSignal } from "./signal";
 
 export { Presence } from "./presence";
 export { GameSession } from "./session";
 export { DSLinkContainer } from "./container";
+export { SignalRoom } from "./signal";
 
 const sessionStub = (env: Env, id: string) => {
   let did: DurableObjectId;
@@ -147,6 +149,7 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     try {
       const url = new URL(req.url);
+      if (url.pathname.startsWith("/signal/")) return await handleSignal(env, req);   // PWA multiplayer signaling: no accounts, cross-origin allowed (rooms are ephemeral and token protected)
       if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/internal/")) {
         return env.ASSETS ? env.ASSETS.fetch(req) : new Response("not found", { status: 404 });
       }

@@ -27,6 +27,10 @@
     <label class="cta file" id="addGame"><input type="file" id="romFile" accept=".nds,.srl,application/octet-stream" hidden>＋ Aggiungi un gioco (.nds)</label>
     <p class="err" id="libErr"></p>
 
+    <h2>Gioca con amici</h2>
+    <p class="hint">Due dispositivi, ognuno con il suo gioco: tra i due passa solo la radio del DS. Serve lo stesso gioco su entrambi.</p>
+    <div class="row" id="friendsRow"><button class="cta primary" id="btnCreate">CREA PARTITA</button><button class="cta" id="btnJoin">UNISCITI</button></div>
+
     <h2>File di sistema</h2>
     <p class="hint">Facoltativi per i gioco homebrew, consigliati per i giochi commerciali. Restano solo su questo dispositivo: non vengono mai inviati, né salvati nel sito.</p>
     <ul class="games sysfiles" id="sysList"></ul>
@@ -37,11 +41,45 @@
         <label>Rendering <select id="optRender"><option value="auto">Automatico (thread principale)</option><option value="main">Thread principale</option><option value="worker">Worker (OffscreenCanvas)</option></select></label>
         <label>Audio <select id="optAudio"><option value="auto">Automatico</option><option value="msg">Worklet + messaggi (senza SAB)</option><option value="sp">ScriptProcessor</option></select></label>
         <label>Latenza hardware audio <select id="optLatency"><option value="">Interattiva (predefinita)</option><option value="balanced">Bilanciata</option><option value="playback">Riproduzione (più stabile)</option></select></label>
+        <label>Ricezione radio <select id="optRadioRing"><option value="auto">Automatica (SAB se disponibile)</option><option value="msg">Solo messaggi</option></select></label>
         <label class="chk"><input type="checkbox" id="optDev"> Overlay diagnostico durante il gioco</label>
       </div>
       <p class="hint">Valgono dalla prossima partita. Restano solo su questo dispositivo.</p>
     </details>
     <details class="diag"><summary>Compatibilità di questo dispositivo</summary><pre id="diagText"></pre><p class="hint">Solo su questo dispositivo: nessun dato viene inviato.</p></details>
+  </section>
+
+  <section class="screen" data-screen="friends-create">
+    <h1>Crea partita</h1><p class="hint">Scegli il gioco, poi fai inserire il codice all'amico.</p>
+    <select id="friendGame" class="sel"></select>
+    <div class="actions"><button class="cta primary" id="btnMakeRoom">CREA</button><button class="cta" id="btnCreateBack">INDIETRO</button></div>
+    <p class="err" id="createErr"></p>
+  </section>
+
+  <section class="screen" data-screen="friends-join">
+    <h1>Unisciti</h1><p class="hint">Inserisci il codice di 6 cifre o inquadra il QR dell'amico.</p>
+    <input id="joinCode" class="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="000000">
+    <video id="scanVideo" playsinline muted hidden></video>
+    <p class="hint" id="scanHint"></p>
+    <div class="actions"><button class="cta primary" id="btnDoJoin">UNISCITI</button><button class="cta" id="btnScan">SCANSIONA QR</button><button class="cta" id="btnJoinBack">INDIETRO</button></div>
+    <p class="err" id="joinErr"></p>
+  </section>
+
+  <section class="screen" data-screen="lobby">
+    <h1 id="lobbyTitle">Sala</h1>
+    <div id="lobbyCode" class="bigcode" hidden><span id="codeText"></span><canvas id="codeQr" width="160" height="160"></canvas></div>
+    <ul class="players" id="players">
+      <li data-slot="host"><b>HOST</b> <span class="st" id="stHost">—</span></li>
+      <li data-slot="guest"><b>PLAYER 2</b> <span class="st" id="stGuest">—</span></li>
+    </ul>
+    <p class="quality" id="lobbyQuality"></p>
+    <p class="hint" id="lobbyNote"></p>
+    <div class="actions"><button class="cta primary" id="btnReady" hidden>PRONTO</button><button class="cta primary" id="btnStart" hidden disabled>AVVIA</button><button class="cta" id="btnLobbyLeave">ESCI</button></div>
+  </section>
+
+  <section class="screen" data-screen="lost">
+    <div class="alert">!</div><h1>Connessione persa</h1><p class="hint" id="lostNote"></p>
+    <div class="actions"><button class="cta primary" id="btnLostBack">INDIETRO</button></div>
   </section>
 
   <section class="screen" data-screen="loading">
@@ -58,6 +96,7 @@
 <div id="resumeHint" class="overlay" hidden><div class="card"><h2>Gioco in pausa</h2><p>Tocca per riprendere audio e gioco.</p><button class="cta primary" id="btnResume">RIPRENDI</button></div></div>
 <div id="confirm" class="overlay" hidden><div class="card"><h2>Uscire dal gioco?</h2><p>Il salvataggio viene conservato su questo dispositivo.</p><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ESCI</button></div></div></div>
 <pre id="devOverlay" hidden></pre>
+<script src="../mp/vendor/qrcode.js"></script>
 <script type="module" src="play.js"></script>
 </body>
 </html>

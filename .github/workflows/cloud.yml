@@ -106,6 +106,8 @@ jobs:
             build/dslink-gateway -addr :8080 -web cloud/web > /tmp/gw.log 2>&1 &
           cd cloud/worker && npx wrangler d1 migrations apply dslink --local -c wrangler.dev.jsonc && (npx wrangler dev -c wrangler.dev.jsonc --port 8787 --local > /tmp/wrangler.log 2>&1 &)
           for i in $(seq 1 40); do curl -sf localhost:8787/api/health && break; sleep 1; done
+      - name: PWA signaling contract on the real Worker (Durable Object rooms: code, tokens, whitelisted messages, expiry-free cleanup, no payload)
+        run: cd cloud/tests && node signal_contract.mjs http://localhost:8787
       - name: PWA end-to-end
         env: { CHROME: /opt/google/chrome/chrome }
         run: cd cloud/tests && node pwa_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"

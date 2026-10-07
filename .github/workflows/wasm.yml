@@ -42,6 +42,16 @@ jobs:
         env:
           CHROME: /opt/google/chrome/chrome
         run: cd cloud/tests && node play_wasm_hardening.mjs "$PWD/../../build/rom/dslink_test_1.nds" /tmp/playhard
+      - name: Distributed signaling contract (Node room server, same room module as the Worker)
+        run: node cloud/tests/signal_contract.mjs
+      - name: DISTRIBUTED PWA <-> PWA in Chrome (two browsers, two melonDS WASM, one WebRTC DataChannel with only DS radio frames; lobby, quality gate, A->B, B->A, no media stream, disconnect, reconnect, cleanup)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_wasm_distributed.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playdist
+      - name: DISTRIBUTED network fault matrix (0/5/8/10 ms, jitter, 1% and 3% loss, ordered comparison)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_wasm_distributed_matrix.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playdist
       - name: Package the static PWA
         run: scripts/package_pwa.sh
       - name: The PWA package carries the code and no private content
@@ -71,4 +81,6 @@ jobs:
           path: |
             /tmp/playwasm/*.png
             /tmp/playhard/*.png
+            /tmp/playdist/*.png
+            /tmp/playdist/matrix.json
           if-no-files-found: ignore

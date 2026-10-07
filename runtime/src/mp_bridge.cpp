@@ -151,12 +151,14 @@ void MpBridge::wireLan() {
         [this](uint16_t id) { for (size_t i = 0; i < conns_.size(); i++) if (conns_[i].id == id) { dropConn(i); return; } });
 }
 
+#ifndef DSLINK_WASM
 bool MpBridge::startLanHost(LibretroHost& host, LanConfig& cfg, std::string& err) {
     host_ = &host;
     g_mp = this;
     if (!host.hasNetpacket()) { err = "core has no netpacket interface"; return false; }
-    lan_ = std::make_unique<LanLink>();
-    if (!lan_->hostStart(cfg, err)) { lan_.reset(); return false; }
+    auto link = std::make_unique<LanLink>();
+    if (!link->hostStart(cfg, err)) return false;
+    lan_ = std::move(link);
     wireLan();
     role_ = Role::Host;
     startSession(0);
@@ -167,13 +169,38 @@ bool MpBridge::startLanClient(LibretroHost& host, const LanConfig& cfg, int time
     host_ = &host;
     g_mp = this;
     if (!host.hasNetpacket()) { err = "core has no netpacket interface"; return false; }
-    lan_ = std::make_unique<LanLink>();
+    auto link = std::make_unique<LanLink>();
     uint16_t id = 0;
-    if (!lan_->clientJoin(cfg, timeoutMs, id, err)) { lan_.reset(); return false; }
+    if (!link->clientJoin(cfg, timeoutMs, id, err)) return false;
+    lan_ = std::move(link);
     wireLan();
     Conn c; c.id = 0; conns_.push_back(std::move(c));
     role_ = Role::Client;
     startSession(id);
+    return true;
+}
+#endif
+
+bool MpBridge::attachHost(LibretroHost& host, std::unique_ptr<RadioLink> link, std::string& err) {
+    host_ = &host;
+    g_mp = this;
+    if (!host.hasNetpacket()) { err = "core has no netpacket interface"; return false; }
+    lan_ = std::move(link);
+    wireLan();
+    role_ = Role::Host;
+    startSession(0);
+    return true;
+}
+
+bool MpBridge::attachGuest(LibretroHost& host, std::unique_ptr<RadioLink> link, uint16_t myId, std::string& err) {
+    host_ = &host;
+    g_mp = this;
+    if (!host.hasNetpacket()) { err = "core has no netpacket interface"; return false; }
+    lan_ = std::move(link);
+    wireLan();
+    Conn c; c.id = 0; conns_.push_back(std::move(c));
+    role_ = Role::Client;
+    startSession(myId);
     return true;
 }
 

@@ -2,6 +2,7 @@
 // video goes out through a small pool of reused buffers, audio goes straight to the AudioWorklet (SharedArrayBuffer ring when the page is cross-origin isolated, otherwise a
 // MessagePort with recycled buffers). Single thread build: no WASM threads are required (they are not available on every Safari/iOS setup). No network of any kind is used here.
 import createDslink from "./core/dslink_wasm.js";
+import { workerRadioFromShared, workerRadioFromMessages } from "./radio-ring.js";
 
 const CORE_OPTIONS = [
   'melonds_console_mode = "ds"', 'melonds_boot_mode = "direct"', 'melonds_mac_address_mode = "from-username"',
@@ -15,6 +16,8 @@ const VPOOL = 4; let vfree = [], vlen = 0, vsubmitted = 0, vdropped = 0, seqSent
 // audio
 let aPort = null, aFree = [], aSab = null, aCtrl = null, aCap = 0, aWrite = 0, audioFrames = 0, audioDropped = 0, audioMode = "none";
 // stats
+// radio (Distributed): the page owns the WebRTC DataChannel; frames from the other console are read here synchronously (SharedArrayBuffer ring) or queued between frames (message fallback)
+let radio = null, radioRole = 0, radioTxCount = 0, lagN = 0, lagSum = 0, lagMax = 0;
 let statT = 0, statFrames = 0, statEmuMs = 0, statMax = 0, lateSum = 0, lateMax = 0;
 const post = (m, tr) => self.postMessage(m, tr || []);
 const cstr = (s) => { const n = M.lengthBytesUTF8(s) + 1, p = M._malloc(n); M.stringToUTF8(s, p, n); return p; };
@@ -31,12 +34,19 @@ function startGame(msg) {
   for (const [name, buf] of Object.entries(msg.system || {})) if (buf) M.FS.writeFile(`/system/melonDS DS/${name}`, new Uint8Array(buf));
   romId = msg.id; sramFile = `/saves/melonDS DS/${romId}.srm`;
   if (msg.sram) { M.FS.writeFile(sramFile, new Uint8Array(msg.sram)); lastSram = new Uint8Array(msg.sram); } else { try { M.FS.unlink(sramFile); } catch { /* none */ } lastSram = null; }
+  radioRole = msg.radio ? msg.radio.role : 0; radio = null; self.__dslRadio = null; radioTxCount = 0; lagN = 0; lagSum = 0; lagMax = 0;
+  if (radioRole) {
+    const lag = (ms) => { lagN++; lagSum += ms; if (ms > lagMax) lagMax = ms; };
+    const postTx = (dest, src, buf) => { radioTxCount++; self.postMessage({ t: "radioTx", dest, src, buf }, [buf.buffer]); };
+    radio = msg.radio.shared ? workerRadioFromShared(msg.radio.shared, postTx, lag) : workerRadioFromMessages(postTx, lag);
+    self.__dslRadio = radio;
+  }
   const rom = new Uint8Array(msg.rom), ptr = M._dsl_alloc(rom.byteLength);
   M.HEAPU8.set(rom, ptr);                                   // the core reads the cartridge in place, nothing else holds a copy
-  if (!M._dsl_start(cstr(CORE_OPTIONS), cstr("/system"), cstr("/saves"), cstr(romId + ".nds"), ptr, rom.byteLength)) { post({ t: "error", msg: "Avvio non riuscito: " + M.UTF8ToString(M._dsl_error()) }); return; }
+  if (!M._dsl_start(cstr(CORE_OPTIONS), cstr("/system"), cstr("/saves"), cstr(romId + ".nds"), ptr, rom.byteLength, radioRole)) { post({ t: "error", msg: "Avvio non riuscito: " + M.UTF8ToString(M._dsl_error()) }); return; }
   sampleRate = M._dsl_sample_rate() || 32768; frameMs = 1000 / (M._dsl_fps() || 59.8261);
   started = true; paused = false; next = performance.now(); frames = 0; statT = next; resetStats();
-  post({ t: "started", sampleRate, fps: 1000 / frameMs, w: M._dsl_video_w(), h: M._dsl_video_h(), audio: audioMode });
+  post({ t: "started", sampleRate, fps: 1000 / frameMs, w: M._dsl_video_w(), h: M._dsl_video_h(), audio: audioMode, radio: radio ? radio.mode : "off" });
   schedule();
 }
 function resetStats() { statFrames = 0; statEmuMs = 0; statMax = 0; lateSum = 0; lateMax = 0; }
@@ -96,7 +106,8 @@ function tick() {
   if (now - statT >= 1000) {
     const sec = (now - statT) / 1000;
     post({ t: "stats", emuFps: statFrames / sec, frameMsAvg: statFrames ? statEmuMs / statFrames : 0, frameMsMax: statMax, tickLateAvgMs: statFrames ? lateSum / statFrames : 0, tickLateMaxMs: lateMax,
-      submitted: vsubmitted, droppedAtSource: vdropped, audioFrames, audioDropped, wasmBytes: M.HEAPU8.byteLength, frames });
+      submitted: vsubmitted, droppedAtSource: vdropped, audioFrames, audioDropped, wasmBytes: M.HEAPU8.byteLength, frames,
+      radio: radio ? { mode: radio.mode, in: M._dsl_radio_in(), out: M._dsl_radio_out(), active: M._dsl_radio_active(), peers: M._dsl_radio_peers(), txPosted: radioTxCount, lagAvg: lagN ? lagSum / lagN : 0, lagMax, lagN } : null });
     statT = now; resetStats();
   }
   schedule();
@@ -112,6 +123,7 @@ self.onmessage = async (e) => {
       case "videoPort": vPort = m.port; vPort.onmessage = (ev) => { const b = ev.data && ev.data.recycle; if (b && b.byteLength === vlen && vfree.length < VPOOL) vfree.push(b); }; break;
       case "audioSab": aSab = new Int16Array(m.data); aCtrl = new Int32Array(m.ctrl); aCap = m.cap; aWrite = Atomics.load(aCtrl, 0); audioMode = "sab"; break;
       case "start": startGame(m); break;
+      case "radioRx": case "radioState": case "radioFlush": if (radio && radio.onMessage) radio.onMessage(m); break;
       case "buttons": if (started) M._dsl_set_buttons(m.mask); break;
       case "touch": if (started) M._dsl_set_touch(m.d ? 1 : 0, m.x, m.y); break;
       case "recycle": if (m.buf && m.buf.byteLength === vlen && vfree.length < VPOOL) vfree.push(m.buf); break;
@@ -119,7 +131,7 @@ self.onmessage = async (e) => {
       case "resume": if (started && paused) { paused = false; next = performance.now(); statT = next; resetStats(); schedule(); } break;
       case "save": takeSram(!!m.force); post({ t: "saved", token: m.token }); break;
       case "ping": post({ t: "pong", token: m.token }); break;
-      case "stop": paused = true; clearTimeout(timer); timer = 0; takeSram(true); M._dsl_stop(); started = false; post({ t: "stopped" }); break;
+      case "stop": if (radio && radio.onMessage) radio.onMessage({ t: "radioState", state: 2 }); paused = true; clearTimeout(timer); timer = 0; takeSram(true); M._dsl_stop(); started = false; post({ t: "stopped" }); break;
       case "log": post({ t: "log", text: M.UTF8ToString(M._dsl_log()) }); M._dsl_log_clear(); break;
     }
   } catch (err) { post({ t: "error", msg: String(err && err.message || err) }); }

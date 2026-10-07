@@ -4,6 +4,7 @@
 import { createRenderer } from "./video.js";
 import { AudioRing } from "./audio-worklet.js";
 import { opt } from "./options.js";
+import { createSharedRadio, RadioRxProducer, epochMs } from "./radio-ring.js";
 
 const PAD = { b: 0, y: 1, select: 2, start: 3, up: 4, down: 5, left: 6, right: 7, a: 8, x: 9, l: 10, r: 11 };   // RETRO_DEVICE_ID_JOYPAD_*
 const QUEUE_MAX = 3;                                                                                              // pictures waiting for a vsync before the oldest are dropped
@@ -42,7 +43,7 @@ export class Player {
     if (this.ctx && this.ctx.resume) this.ctx.resume().catch(() => {});
   }
 
-  async start({ id, rom, system, sram }) {
+  async start({ id, rom, system, sram, radio }) {
     const keep = this.ctx; this.ctx = null; await this.stop(); this.ctx = keep;       // a previous game is closed first; the AudioContext made in the tap is kept
     this.prepare();
     const worker = this.worker = new Worker(new URL("./emulator.worker.js", import.meta.url), { type: "module" });
@@ -55,8 +56,10 @@ export class Player {
     await ready;
     const started = new Promise((resolve) => { this._started = resolve; });
     const tr = [rom]; if (system) for (const b of Object.values(system)) if (b) tr.push(b); if (sram) tr.push(sram);
-    worker.postMessage({ t: "start", id, rom, system, sram }, tr);
+    const rcfg = this.setupRadio(radio);
+    worker.postMessage({ t: "start", id, rom, system, sram, radio: rcfg }, tr);
     const info = await started;
+    if (radio) this.radioOpen(radio.peer.state === "open" || radio.peer.state === "degraded" ? 1 : 0);
     this.srcRate = info.sampleRate; this.sendAudioRate(info.sampleRate);
     this.running = true; this.paused = false; this.pauseReason = "";
     document.addEventListener("visibilitychange", this._vis); addEventListener("pagehide", this._hide); addEventListener("pageshow", this._show);
@@ -66,6 +69,33 @@ export class Player {
     this.raf = requestAnimationFrame((t) => this.frameLoop(t));
     return info;
   }
+
+  // ------------------------------------------------------------------ radio (Distributed): the RTCDataChannel lives on this thread (Safari has no RTCPeerConnection in workers); the core's frames cross to it by postMessage,
+  // the other console's frames come back through a SharedArrayBuffer ring when the page is isolated (a game that waits for replies inside a frame needs this) or through the worker's message queue.
+  setupRadio(radio) {
+    this.radio = null; this.radioProducer = null;
+    if (!radio) return null;
+    const peer = radio.peer, forced = opt("radioring", "auto");
+    const shared = self.crossOriginIsolated && typeof SharedArrayBuffer === "function" && forced !== "msg" ? createSharedRadio() : null;
+    this.radio = { role: radio.role, peer, mode: shared ? "sab" : "msg", pushed: 0, droppedPaused: 0 };
+    if (shared) this.radioProducer = new RadioRxProducer(shared);
+    peer.o.onFrame = (dest, src, payload, at) => this.radioPush(dest, src, payload, at);
+    peer.o.onState = ((prev) => (s, why) => { if (prev) prev(s, why); if (this.radio) this.radioOpen(s === "open" || s === "degraded" ? 1 : s === "connecting" || s === "new" ? 0 : 2); })(peer.o.onState);
+    return { role: radio.role, shared };
+  }
+  radioOpen(state) {
+    if (!this.radio) return;
+    if (this.radioProducer) this.radioProducer.setState(state); else if (this.worker) this.worker.postMessage({ t: "radioState", state });
+  }
+  radioPush(dest, src, payload, at) {
+    const r = this.radio; if (!r || !this.worker) return;
+    if (this.paused) { r.droppedPaused++; return; }                                    // a console that is not running never builds a backlog
+    r.pushed++;
+    if (this.radioProducer) this.radioProducer.push(dest, src, payload, at ? performance.timeOrigin + at : epochMs());
+    else { const b = new Uint8Array(4 + payload.length); b[0] = dest & 255; b[1] = dest >> 8; b[2] = src & 255; b[3] = src >> 8; b.set(payload, 4); const buf = b.buffer;   // same record the ring holds: [dest u16][src u16][frame]
+      this.worker.postMessage({ t: "radioRx", buf, at: at ? performance.timeOrigin + at : epochMs() }, [buf]); }
+  }
+  radioFlush() { if (!this.radio) return; if (this.radioProducer) this.radioProducer.flush(); else if (this.worker) this.worker.postMessage({ t: "radioFlush" }); }
 
   // ------------------------------------------------------------------ video: main-thread renderer (default, verified everywhere) or an OffscreenCanvas render worker (optional, automatic fallback)
   async setupVideo() {
@@ -149,6 +179,7 @@ export class Player {
         while (this.queue.length > QUEUE_MAX) { const d = this.queue.shift(); this.v.droppedRender++; this.recycle(d.buf); }   // bounded latency: the page is behind, the oldest picture goes
         break;
       }
+      case "radioTx": if (this.radio) this.radio.peer.sendFrame(m.dest, m.src, new Uint8Array(m.buf)); break;
       case "stats": this.workerStats = m; break;
       case "sram": this.onSram(m.id, m.data); break;
       case "saved": if (this._saved && this._saved.token === m.token) this._saved.resolve(); break;
@@ -193,6 +224,7 @@ export class Player {
       submitted: ws.submitted || 0, droppedAtSource: ws.droppedAtSource || 0, frames: ws.frames || 0, received: v.received, rendered: v.rendered, droppedRender: v.droppedRender,
       renderFps: v.renderFps, mainFrameMsAvg: v.mainFrameMsAvg, mainFrameMsMax: v.mainFrameMsMax, uploadMsAvg: v.uploadMsAvg || 0, uploadMsMax: v.uploadMsMax || 0, drawMsAvg: v.drawMsAvg || 0, drawMsMax: v.drawMsMax || 0,
       stalls: v.stalls, longTasks: v.longTasks, wasmMB: (ws.wasmBytes || 0) / 1048576, queued: rwm ? rwm.queued : this.queue.length, audio: a, audioSourceDropped: ws.audioDropped || 0, audioFramesProduced: ws.audioFrames || 0,
+      radio: this.radio ? { mode: this.radio.mode, role: this.radio.role, pushed: this.radio.pushed, droppedPaused: this.radio.droppedPaused, ringDropped: this.radioProducer ? this.radioProducer.dropped : 0, ringFill: this.radioProducer ? this.radioProducer.fillBytes : 0, core: ws.radio || null, peer: this.radio.peer.metrics() } : null,
       lifecycle: { ...this.lifecycle, paused: this.paused, reason: this.pauseReason }, underruns: a.underEvents || 0 };
   }
 
@@ -226,6 +258,7 @@ export class Player {
     if (!this.running) return;
     this.pauseReason = reason; if (this.paused) return; this.paused = true;
     this.worker.postMessage({ t: "pause" });
+    if (this.radio) this.radio.peer.sendCtl({ t: "vis", hidden: true });                // tell the other player, so a silent peer is not mistaken for a lost one
     for (const f of this.queue) this.recycle(f.buf); this.queue.length = 0; if (this.rw) this.rw.postMessage({ t: "pause" });
     if (this.ctx && this.ctx.suspend && reason !== "audio") this.ctx.suspend().catch(() => {});
     this.releaseWake();
@@ -239,6 +272,7 @@ export class Player {
     try { if (this.ctx && this.ctx.state !== "running") await Promise.race([this.ctx.resume(), new Promise((r) => setTimeout(r, 900))]); } catch { /* needs a gesture */ }
     if (this.ctx && this.ctx.state !== "running") { this.pauseReason = "audio"; this.onNeedGesture(); return; }   // iOS: a tap is needed; the game stays paused (clean), the page shows RIPRENDI
     this.flushAudio();                                                                 // stale audio from before the pause is not played
+    this.radioFlush(); if (this.radio) this.radio.peer.sendCtl({ t: "vis", hidden: false });   // brief resync: no radio backlog from before the pause
     this.paused = false; this.pauseReason = ""; if (this.rw) this.rw.postMessage({ t: "resume" }); this.worker.postMessage({ t: "resume" });
     this.lifecycle.lastResumeMs = performance.now() - t0; this.acquireWake(); this.onResumed();
   }
@@ -266,6 +300,7 @@ export class Player {
     if (this.ctx) { try { await this.ctx.close(); } catch { /* closed */ } this.ctx = null; }
     if (this.renderer) { this.renderer.destroy(); this.renderer = null; }
     if (this._rwRo) { this._rwRo.disconnect(); this._rwRo = null; } if (this.rw) { this.rw.terminate(); this.rw = null; } this.rwMetrics = null;
+    if (this.radio) { this.radioOpen(2); this.radio = null; this.radioProducer = null; }
     this.mask = 0; this.queue.length = 0; this.paused = false; this.pauseReason = ""; this.ring = null; this.audioMetrics = null; this.workerStats = null; this.audioBackend = "none";
   }
 }

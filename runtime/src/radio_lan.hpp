@@ -6,6 +6,8 @@
 #pragma once
 #include <netinet/in.h>
 
+#include "radio_link.hpp"
+
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -32,45 +34,33 @@ struct LanConfig {
     uint32_t seed = 0;                // 0 = random
 };
 
-struct LanStats {
-    uint64_t txPackets = 0, rxPackets = 0, txBytes = 0, rxBytes = 0;
-    uint64_t lost = 0;                // sequence gaps given up on
-    uint64_t reordered = 0;           // arrived out of order but inside the re-sequencer window (delivered in order)
-    uint64_t lateDropped = 0;         // arrived after their gap was declared lost
-    uint64_t duplicates = 0, badAuth = 0, badFormat = 0, joinRejected = 0, impairDropped = 0;
-    double jitterMs = 0, rttMs = 0, rttMinMs = 1e9, rttMaxMs = 0;
-    uint64_t rttSamples = 0;
-    uint64_t queueMax = 0;            // datagrams waiting in one poll / re-sequencer + impairment queues
-    double queueAvg = 0; uint64_t queueN = 0;
-};
 
-class LanLink {
+
+class LanLink : public RadioLink {
 public:
-    using DataFn = std::function<void(uint16_t peerId, uint16_t dest, uint16_t src, const uint8_t* p, size_t n)>;
-    using JoinFn = std::function<bool(uint16_t peerId)>;     // host: accept the new peer? (the bridge's netpacket.connected)
-    using LostFn = std::function<void(uint16_t peerId)>;
-    ~LanLink();
+    ~LanLink() override;
 
     // Host: bind, listen for joins and discovery requests. Fills code/secret if empty.
     bool hostStart(LanConfig& cfg, std::string& err);
     // Guest: find the host (discovery or direct address), join, return the assigned id.
     bool clientJoin(const LanConfig& cfg, int timeoutMs, uint16_t& assignedId, std::string& err);
-    void stop();
+    void stop() override;
 
-    void setHandlers(DataFn d, JoinFn j, LostFn l) { onData_ = std::move(d); onJoin_ = std::move(j); onLost_ = std::move(l); }
+    void setHandlers(DataFn d, JoinFn j, LostFn l) override { onData_ = std::move(d); onJoin_ = std::move(j); onLost_ = std::move(l); }
     // one bridge tick: read datagrams, release the impairment queue, re-sequencer deadlines, pings, timeouts
-    void poll();
+    void poll() override;
     // payload for the netpacket 'send' path. peerId: host -> that client; guest -> ignored (always the host)
-    void sendData(uint16_t peerId, uint16_t dest, uint16_t src, const void* p, size_t n);
+    void sendData(uint16_t peerId, uint16_t dest, uint16_t src, const void* p, size_t n) override;
 
-    bool isHost() const { return host_; }
-    size_t peers() const { return peers_.size(); }
-    uint16_t myId() const { return myId_; }
+    bool isHost() const override { return host_; }
+    size_t peers() const override { return peers_.size(); }
+    uint16_t myId() const override { return myId_; }
     uint32_t sessionId() const { return session_; }
-    int port() const { return port_; }
-    const LanStats& stats() const { return st_; }
-    std::string joinUri(const std::string& ip) const;     // dslink://join?c=CODE&s=SECRET&h=IP:PORT
-    std::string json() const;
+    int port() const override { return port_; }
+    const LanStats& stats() const override { return st_; }
+    const char* name() const override { return "lan"; }
+    std::string joinUri(const std::string& ip) const override;     // dslink://join?c=CODE&s=SECRET&h=IP:PORT
+    std::string json() const override;
 
     static bool parseUri(const std::string& uri, LanConfig& cfg);
     static std::string makeCode();

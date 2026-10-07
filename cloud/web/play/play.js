@@ -5,6 +5,7 @@ import { openStore, requestPersistence, estimate } from "./storage.js";
 import { sha256Hex } from "./sha256.js";
 import { Player, detectCaps } from "./player.js";
 import { opt, setOpt } from "./options.js";
+import { initFriends } from "./friends.js";
 
 const $ = (id) => document.getElementById(id);
 let DEV = opt("dev", "") === "1" || (() => { try { return localStorage.getItem("dslink.dev") === "1"; } catch { return false; } })();
@@ -13,7 +14,7 @@ const SYS = [
   { key: "bios9", file: "bios9.bin", title: "BIOS ARM9", sizes: [4096] },
   { key: "firmware", file: "firmware.bin", title: "Firmware", sizes: [131072, 262144, 524288] },
 ];
-let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0;
+let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0, friends = null;
 
 const show = (name) => { document.body.dataset.screen = name; document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("on", s.dataset.screen === name)); };
 const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB");
@@ -36,12 +37,15 @@ async function boot() {
   show("library");
   $("devOverlay").hidden = !DEV; setInterval(() => { if (DEV) devTick(); }, 500);
   if ("serviceWorker" in navigator && self.isSecureContext && !new URLSearchParams(location.search).has("nosw")) navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(() => {});
+  friends = initFriends({ $, show, games: () => games, startGame: (id, session) => playGame(id, session), onLost: (why) => onSessionLost(why) });
+  addEventListener("pagehide", (e) => { const s = friends && friends.session; if (s && !e.persisted && s.peer) s.peer.sendCtl({ t: "bye" }); });
   window.dslinkPlay = api();
+  friends.autoJoin(); friends.resume();
 }
 
 function bindOptions() {
   const sel = (id, name, def) => { const e = $(id); e.value = opt(name, def); e.onchange = () => setOpt(name, e.value); };
-  sel("optRender", "render", "auto"); sel("optAudio", "audio", "auto"); sel("optLatency", "latency", "");
+  sel("optRadioRing", "radioring", "auto"); sel("optRender", "render", "auto"); sel("optAudio", "audio", "auto"); sel("optLatency", "latency", "");
   $("optDev").checked = DEV; $("optDev").onchange = () => { DEV = $("optDev").checked; setOpt("dev", DEV ? "1" : ""); $("devOverlay").hidden = !DEV; };
 }
 function renderDiag() {
@@ -134,7 +138,7 @@ const KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: 
 const onKey = (d) => (e) => { const k = KEYS[e.key]; if (k && player) { player.btn(k, d); e.preventDefault(); } };
 const kd = onKey(true), ku = onKey(false);
 
-async function playGame(id) {
+async function playGame(id, session) {
   if (current || !store) return;
   const g = games.find((x) => x.id === id); if (!g) return;
   current = id;
@@ -153,7 +157,8 @@ async function playGame(id) {
     const system = {}; for (const s of SYS) { const b = await store.get("system/" + s.file); if (b && s.sizes.includes(b.byteLength)) system[s.file] = b; }
     const sram = await store.get(`library/${id}/save`);
     buildGame();
-    await player.start({ id, rom, system, sram });
+    await player.start({ id, rom, system, sram, radio: session ? { role: session.role === "host" ? 1 : 2, peer: session.peer } : undefined });
+    if (session) session.playing();
     show("game"); $("game").hidden = false; $("app").style.display = "none";
     if (!guard) { history.pushState({ game: true }, ""); guard = true; }
     addEventListener("keydown", kd); addEventListener("keyup", ku);
@@ -172,6 +177,7 @@ $("confirmNo").onclick = () => { $("confirm").hidden = true; };
 $("confirmYes").onclick = async () => { $("confirm").hidden = true; await leave(false); };
 async function leave(fromCore) {
   if (!current) return;
+  if (friends) await friends.endSession();                 // the other player is told (bye) before this side shuts down
   removeEventListener("keydown", kd); removeEventListener("keyup", ku);
   if (!fromCore && player) { await player.save(true); }
   const p = player; player = null; if (p) await p.stop();
@@ -181,6 +187,7 @@ async function leave(fromCore) {
   current = null; show("library");
 }
 function fail(msg) {
+  if (friends) friends.endSession().catch(() => {});
   const p = player; player = null; if (p) p.stop().catch(() => {});
   if (controls) { controls.destroy(); controls = null; }
   $("game").hidden = true; $("game").innerHTML = ""; $("app").style.display = ""; current = null;
@@ -189,6 +196,11 @@ function fail(msg) {
 $("btnErrBack").onclick = () => show("library");
 $("btnResume").onclick = async () => { if (player) { await player.unlockAudio(); await player.resume(); } $("resumeHint").hidden = true; };
 addEventListener("popstate", () => { if (current) { history.pushState({ game: true }, ""); askLeave(); } else guard = false; });
+
+async function onSessionLost(why) {
+  if (current) await leave(false);          // no zombie worker/core: the local game is closed (its save is kept) and the user is told why
+  if (friends) await friends.lost(why);
+}
 
 // ---------------------------------------------------------------- development overlay (this device only, never sent anywhere)
 function devTick() {
@@ -200,12 +212,21 @@ function devTick() {
     `RENDER ${f(s.renderFps)} fps (${s.video})  upload ${f(s.uploadMsAvg, 2)}/${f(s.uploadMsMax)} ms  draw ${f(s.drawMsAvg, 2)}/${f(s.drawMsMax)} ms  main ${f(s.mainFrameMsAvg, 2)}/${f(s.mainFrameMsMax)} ms`,
     `AUDIO  ${a.backend}  buf ${f(a.fillMs, 0)}/${f(a.targetMs, 0)} ms  queue ${a.queueFrames || 0} fr  rate ${Math.round(a.srcRate || 0)}>${Math.round(a.ctxRate || 0)} Hz  lat ${f(a.baseLatencyMs, 0)}+${f(a.outputLatencyMs, 0)} ms`,
     `       underruns ${a.underEvents || 0} ev / ${a.underSamples || 0} smp  last10s ${a.under10s || 0}  overrun ${a.overruns || 0}  health ${a.state || "-"}/${a.ctxState}  late ${a.lateQuanta || 0}  gap ${f(a.msgGapMaxMs, 0)} ms`,
+    ...radioLines(s),
     `WASM   ${f(s.wasmMB, 0)} MB   main stalls ${s.stalls} (long ${s.longTasks})   ${s.lifecycle.paused ? "PAUSED " + s.lifecycle.reason : "running"}   store ${store.kind}`].join("\n");
+}
+
+function radioLines(s) {
+  const r = s.radio; if (!r) return [];
+  const p = r.peer, f = (n, d = 1) => (n || 0).toFixed(d), c = r.core || {};
+  return [`RADIO  ${p.role} ${p.state} ${r.mode}  ordered ${p.radio ? p.radio.ordered : "-"} retx ${p.radio ? p.radio.maxRetransmits : "-"}  core in/out ${c.in || 0}/${c.out || 0}  active ${c.active || 0}`,
+    `       RTT ${f(p.rtt.last)}/${f(p.rtt.avg)}/${f(p.rtt.max)} ms (~1way ${f(p.rtt.avg / 2)})  jitter ${f(p.jitter)} ms  sent ${p.sent} recv ${p.recv} lost ${p.lost} ooo ${p.reordered} late ${p.lateDropped}`,
+    `       drop soft/hard/closed ${p.droppedSoft}/${p.droppedHard}/${p.droppedClosed}  q ${p.queueDepth}/${p.queueMax}  buffered ${p.bufferedAmount}/${p.bufferedMax}  holdMax ${f(p.rxHoldMsMax)} ms  lag ${f(c.lagAvg)}/${f(c.lagMax)} ms  ring drop ${r.ringDropped}`];
 }
 
 // ---------------------------------------------------------------- test/diagnostic surface (read-only state of THIS page)
 function api() {
-  return { get player() { return player; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
+  return { get player() { return player; }, get friends() { return friends; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
     stats: () => (player ? player.stats : null), grab: () => player && player.grab(), isPlaying: () => !!current && !!player && player.running, whenSaved: () => saveChain };
 }
 boot();

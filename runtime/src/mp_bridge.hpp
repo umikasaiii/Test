@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "libretro_host.hpp"
+#include "radio_link.hpp"
 #include "radio_lan.hpp"
 
 namespace dsrt {
@@ -29,8 +30,11 @@ public:
     // LAN RadioTransport (Distributed Mode): the same bridge over DSLink Radio Protocol / UDP instead of the in-container Unix socket.
     bool startLanHost(LibretroHost& host, LanConfig& cfg, std::string& err);                       // fills cfg.code / cfg.secretHex when empty
     bool startLanClient(LibretroHost& host, const LanConfig& cfg, int timeoutMs, std::string& err);
-    const LanLink* lan() const { return lan_.get(); }
-    const char* transportName() const { return lan_ ? "lan" : "local"; }
+    // Any other RadioTransport (the PWA's WebRTC DataChannel): the bridge takes the link over. Host: the guest joins during poll(); guest: 'myId' is its assigned id.
+    bool attachHost(LibretroHost& host, std::unique_ptr<RadioLink> link, std::string& err);
+    bool attachGuest(LibretroHost& host, std::unique_ptr<RadioLink> link, uint16_t myId, std::string& err);
+    const RadioLink* lan() const { return lan_.get(); }       // the active datagram/DataChannel transport (null for the in-container Unix socket)
+    const char* transportName() const { return lan_ ? lan_->name() : "local"; }
 
     void setDiag(DlDiag* d) { diag_ = d; }  // passive observer of the wireless frames (Download Play diagnostics)
     Role role() const { return role_; }
@@ -52,7 +56,7 @@ private:
     void writeFrame(int fd, uint16_t dest, uint16_t src, const void* p, size_t n);
     void sendFrame(Conn& c, uint16_t dest, uint16_t src, const void* p, size_t n);   // transport dispatch (stream or LAN datagram)
     void wireLan();
-    std::unique_ptr<LanLink> lan_;
+    std::unique_ptr<RadioLink> lan_;
     void dropConn(size_t idx);
     void startSession(uint16_t id);
 

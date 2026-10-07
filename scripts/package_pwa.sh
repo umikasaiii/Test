@@ -9,6 +9,7 @@ rm -rf "$OUT" && mkdir -p "$OUT/mp"
 cp -r "$ROOT/cloud/web/play" "$OUT/play"
 cp -r "$ROOT/cloud/worker/public/controls" "$OUT/controls"
 cp "$ROOT/cloud/web/mp/mp.css" "$OUT/mp/mp.css"
+mkdir -p "$OUT/mp/vendor" && cp "$ROOT/cloud/web/mp/vendor/qrcode.js" "$ROOT/cloud/web/mp/vendor/jsQR.js" "$OUT/mp/vendor/"
 cat > "$OUT/index.html" <<'HTML'
 <!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=play/"><title>DSLink</title><a href="play/">DSLink</a>
 HTML

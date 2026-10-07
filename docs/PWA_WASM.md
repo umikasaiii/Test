@@ -129,3 +129,8 @@ Library → "Impostazioni di test": render path (auto/main/worker), audio path (
 ## Still open
 
 Not verified on iPhone/Safari or on a phone after this change (HONOR/IPHONE VERIFIED = NO until tested physically). Possible next steps if the Honor still shows frame time ≈13 ms for heavy 3D games: a SIMD build (Safari 16.4+, would need a non-SIMD fallback), LTO, or a threaded build for hosts that can send COOP/COEP.
+
+# Phase 3 — Distributed PWA ↔ PWA (WebRTC DataChannel)
+
+Two players, two PWAs, only the DS radio frames cross a DataChannel (no video/audio streaming). See **docs/DISTRIBUTED_PWA.md** (architecture, `RadioLink` transport abstraction, binary
+protocol, backpressure, signaling, lobby/quality gate, tests and the not-yet-verified Honor/iPhone status).
