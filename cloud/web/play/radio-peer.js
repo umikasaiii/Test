@@ -107,7 +107,12 @@ export class RadioPeer {
     else if (c === "disconnected" || i === "disconnected") { this.markDown(); if (this.state === "open") this.setState("degraded"); this.armGrace(); }
     else if (c === "connected" || i === "connected" || i === "completed") this.recovered();
   }
-  markDown() { if (!this.downSince) this.downSince = now(); }
+  /** ICE says the path is gone: the silence that follows is expected (grace + restarts), so the liveness watch pauses; a hard ceiling (netGraceMs) still ends a path that never comes back */
+  markDown() {
+    if (!this.downSince) this.downSince = now();
+    this.pausedWatch = true;
+    if (!this.netT) this.netT = setTimeout(() => { this.netT = 0; if (this.downSince) this.setState("lost", "la connessione è caduta e non è tornata in tempo"); }, this.o.netGraceMs);
+  }
   /** the path is back (or was never lost): forget the grace/restart timers, resume, tell the session how long the radio was silent */
   recovered() {
     if (this.graceT) { clearTimeout(this.graceT); this.graceT = 0; }
@@ -247,6 +252,7 @@ export class RadioPeer {
   onPong(seq) {
     const t0 = this.pings.get(seq); if (t0 === undefined) return; this.pings.delete(seq);
     const rtt = now() - t0, r = this.m.rtt; this.lastPong = now();
+    if (this.downSince && t0 > this.downSince && this.pc && this.pc.connectionState === "connected") this.recovered();      // an answer to a ping sent AFTER the interruption: the path works (an ICE restart on a still-healthy path raises no state event)
     if (this.lastPongSeq >= 0 && ((seq - this.lastPongSeq) & 0xFFFF) > 0x8000) this.m.pongReordered++; this.lastPongSeq = seq;
     const prev = r.last; r.last = rtt; r.n++; r.avg += (rtt - r.avg) / Math.min(r.n, 20); if (rtt < r.min) r.min = rtt; if (rtt > r.max) r.max = rtt;
     if (r.n > 1) this.m.jitter += (Math.abs(rtt - prev) - this.m.jitter) / 16;                           // RFC 3550 style smoothed inter-sample variation
@@ -275,7 +281,11 @@ export class RadioPeer {
     const silent = t - this.lastPong;
     if ((this.state === "open" || this.state === "degraded") && !this.pausedWatch) {
       const limit = this.peerHidden ? 30000 : this.o.peerTimeoutMs;                                      // a peer that told us it went to the background is allowed a long silence
-      if (silent > limit) this.setState("lost", this.peerHidden ? "il giocatore è rimasto in background" : "nessuna risposta dal giocatore");
+      if (silent > limit) {
+        if (!this.peerHidden && this.o.iceServers.length && this.pc && this.state !== "closed") {         // Internet: a silent path is an outage to heal (ICE restart), not yet the end; netGraceMs and the game's outage limit decide
+          this.markDown(); this.setState("degraded"); this.lastPong = t; this.requestRestart("silence");
+        } else this.setState("lost", this.peerHidden ? "il giocatore è rimasto in background" : "nessuna risposta dal giocatore");
+      }
     }
   }
   /** test hook: an outage of the link (everything sent or received is dropped) for `ms` */
