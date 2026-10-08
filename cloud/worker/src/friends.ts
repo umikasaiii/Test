@@ -1,6 +1,7 @@
 import type { Env, User } from "./env";
 import { publicUser } from "./auth";
 import { HttpError, json, now, randomId, readJson, str } from "./util";
+import { cancelInvitesBetween } from "./playinvites";
 
 export const presenceOf = (env: Env, userId: string) => env.PRESENCE.get(env.PRESENCE.idFromName(userId));
 export const notify = (env: Env, userId: string, msg: Record<string, unknown>) => presenceOf(env, userId).event(msg).catch(() => 0);
@@ -23,9 +24,9 @@ async function listFriends(env: Env, user: User) {
      JOIN users u ON u.id = CASE WHEN f.user_a = ?1 THEN f.user_b ELSE f.user_a END
      WHERE f.user_a = ?1 OR f.user_b = ?1 ORDER BY u.display_name COLLATE NOCASE`).bind(user.id).all<User>();
   return Promise.all(rows.results.map(async (u) => {
-    let status = "OFFLINE";
-    try { status = (await presenceOf(env, u.id).status()).status; } catch { /* presence unreachable: treat as offline, never as online */ }
-    return { ...publicUser(u), status };
+    let status = "OFFLINE", game: { id: string; title: string } | null = null;
+    try { const p = await presenceOf(env, u.id).status(); status = p.status; game = p.game; } catch { /* presence unreachable: treat as offline, never as online */ }
+    return { ...publicUser(u), status, game };
   }));
 }
 
@@ -50,6 +51,8 @@ export async function handleFriends(env: Env, req: Request, path: string, user: 
     const target = await env.DB.prepare("SELECT id, username, display_name, avatar, created_at FROM users WHERE username = ?").bind(username).first<User>();
     if (!target) throw new HttpError(404, "user_not_found");
     if (target.id === user.id) throw new HttpError(400, "cannot_add_self");
+    if (await env.DB.prepare("SELECT 1 AS x FROM blocks WHERE blocker = ? AND blocked = ?").bind(target.id, user.id).first()) throw new HttpError(404, "user_not_found");   // they blocked me: they do not exist for me
+    if (await env.DB.prepare("SELECT 1 AS x FROM blocks WHERE blocker = ? AND blocked = ?").bind(user.id, target.id).first()) throw new HttpError(409, "user_blocked", "unblock first");
     if (await areFriends(env, user.id, target.id)) throw new HttpError(409, "already_friends");
     const t = now();
     // the other side already asked us: asking back simply accepts
@@ -61,9 +64,11 @@ export async function handleFriends(env: Env, req: Request, path: string, user: 
       return json({ status: "accepted", friend: publicUser(target) }, 200);
     }
     const id = randomId(12);
-    try {
-      await env.DB.prepare("INSERT INTO friend_requests (id, from_user, to_user, status, created_at, updated_at) VALUES (?,?,?,'pending',?,?)").bind(id, user.id, target.id, t, t).run();
+    let ins;
+    try {   // conditional insert: a block that lands between the check above and this write still wins (no request after a block, even in a race)
+      ins = await env.DB.prepare("INSERT INTO friend_requests (id, from_user, to_user, status, created_at, updated_at) SELECT ?1, ?2, ?3, 'pending', ?4, ?4 WHERE NOT EXISTS (SELECT 1 FROM blocks WHERE (blocker = ?2 AND blocked = ?3) OR (blocker = ?3 AND blocked = ?2))").bind(id, user.id, target.id, t).run();
     } catch { throw new HttpError(409, "request_already_pending"); }
+    if (!ins.meta.changes) throw new HttpError(404, "user_not_found");
     await notify(env, target.id, { t: "friend_request", id, user: publicUser(user) });
     return json({ status: "pending", id }, 201);
   }
@@ -95,6 +100,7 @@ export async function handleFriends(env: Env, req: Request, path: string, user: 
     if (!res.meta.changes) throw new HttpError(404, "not_friends");
     // pending invites between the two are void
     await env.DB.prepare("UPDATE invites SET status = 'cancelled' WHERE status = 'pending' AND ((from_user = ?1 AND to_user = ?2) OR (from_user = ?2 AND to_user = ?1))").bind(user.id, mm[1]).run();
+    await cancelInvitesBetween(env, user.id, mm[1]);
     await notify(env, mm[1], { t: "friend_update", kind: "removed", user: publicUser(user) });
     return json({ ok: true });
   }

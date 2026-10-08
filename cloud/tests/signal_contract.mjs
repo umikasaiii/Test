@@ -64,6 +64,17 @@ g3.close();
 check('a guest whose page vanished is detected (peer left) after the grace period', !!(await h2.wait((e) => e.event === 'peer' && e.data.state === 'left', shortTtl ? 5000 : 40000)));
 clearInterval(hb); h2.close();
 
+// room states (phase 5): CREATED > WAITING > READY > STARTING > IN_GAME, CLOSED; only the host moves the room
+const c5 = await post('/signal/create'); const h5 = sse(c5.j.code, c5.j.token); await h5.wait((e) => e.event === 'state' && e.data.state === 'WAITING');
+const j5 = await post('/signal/join', { code: c5.j.code }); const g5 = sse(c5.j.code, j5.j.token);
+check('ROOM STATES: WAITING while alone, READY when the guest is connected (both sides told)', !!(await h5.wait((e) => e.event === 'state' && e.data.state === 'READY')) && !!(await g5.wait((e) => e.event === 'state' && e.data.state === 'READY')));
+check('ROOM STATES: the guest cannot move the room, an unknown state is refused', (await post('/signal/state', { code: c5.j.code, token: j5.j.token, state: 'STARTING' })).status === 403 && (await post('/signal/state', { code: c5.j.code, token: c5.j.token, state: 'NOPE' })).status === 400);
+await post('/signal/state', { code: c5.j.code, token: c5.j.token, state: 'STARTING' }); await post('/signal/state', { code: c5.j.code, token: c5.j.token, state: 'IN_GAME' });
+check('ROOM STATES: STARTING then IN_GAME reach the guest', !!(await g5.wait((e) => e.event === 'state' && e.data.state === 'STARTING'))  && !!(await g5.wait((e) => e.event === 'state' && e.data.state === 'IN_GAME')));
+await post('/signal/leave', { code: c5.j.code, token: c5.j.token });
+check('ROOM STATES: CLOSED when the host leaves, and the room is gone (cleanup)', !!(await g5.wait((e) => e.event === 'state' && e.data.state === 'CLOSED')) && (await post('/signal/join', { code: c5.j.code })).status === 404);
+h5.close(); g5.close();
+
 // no content: the only things a room knows are the code, two tokens and relayed JSON of the whitelisted kinds
 if (sig) check('rooms hold no payload: stats only count rooms', Object.keys(sig.stats).every((k) => typeof sig.stats[k] === 'number'));
 // expiry

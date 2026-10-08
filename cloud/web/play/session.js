@@ -5,9 +5,11 @@ import { RadioPeer, rateQuality } from "./radio-peer.js";
 
 const HEARTBEAT_MS = 8000;
 
-/** Base URL of the signaling service: ?signal=URL (tests, LAN) > the page's own origin (the Worker serves /signal on the same host). */
+/** Base URL of the signaling service. Normal use needs NO configuration: the DSLink Cloud address comes from cloud-config.json, written at deploy time (see cloud.js).
+ *  ?signal=URL is only a developer override (tests, a LAN server); with no config at all the page's own origin is used (the Worker serves /signal on the same host). */
 export function signalBase(opt) {
   const v = opt && opt("signal", ""); if (v) return String(v).replace(/\/$/, "");
+  const c = self.__dslinkConfig && self.__dslinkConfig.signal; if (c) return String(c).replace(/\/$/, "");
   return location.origin;
 }
 
@@ -33,6 +35,10 @@ export class SignalClient {
     this.es.onerror = () => { if (this.es && this.es.readyState === 2 && !this.closed) this.onClosed("signaling"); };
     this.hb = setInterval(() => this.send({ k: "hello" }), HEARTBEAT_MS);             // proves this page is alive to the room
   }
+  /** a room created elsewhere (an accepted invite): both tokens are issued by the account API, nothing is created or joined by code */
+  attach(code, token) { this.code = code; this.token = token; this.open(); return code; }
+  /** the host moves the room through STARTING / IN_GAME (the room tells both sides; best effort) */
+  setState(state) { if (this.closed) return; this.post("state", { code: this.code, token: this.token, state }).catch(() => {}); }
   send(data) { if (this.closed) return; this.post("send", { code: this.code, token: this.token, data }).catch(() => {}); }
   async leave() {
     if (this.closed) return; this.closed = true; clearInterval(this.hb);
@@ -57,6 +63,11 @@ export class Session {
   async join(code) {
     this.code = await this.sig.join(code); this.wire(); this.change("connecting");
     return this.code;
+  }
+  /** enter a room made by an accepted invite: no code to type, the tokens already say who is who */
+  attach(code, token) {
+    this.code = code; this.wire(); this.change(this.role === "host" ? "waiting" : "connecting"); this.sig.attach(code, token);
+    return code;
   }
   wire() {
     const sig = this.sig;
@@ -116,8 +127,8 @@ export class Session {
   canStart() { return this.role === "host" && this.state === "lobby" && this.other.ready && !!this.peer && this.peer.state === "open" && !this.hostBlock(); }
   /** host: START (the guest has said PRONTO) */
   start() { if (!this.canStart()) return false; this.peer.sendCtl({ t: "start" }); this.begin(); return true; }
-  begin() { this.change("starting"); if (this.o.onStart) this.o.onStart(this); }
-  playing() { this.change("playing"); }
+  begin() { this.change("starting"); if (this.role === "host") this.sig.setState("STARTING"); if (this.o.onStart) this.o.onStart(this); }
+  playing() { this.change("playing"); if (this.role === "host") this.sig.setState("IN_GAME"); }
 
   async close(why = "") {
     if (this.state === "closed") return;

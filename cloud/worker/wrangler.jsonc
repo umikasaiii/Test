@@ -1,20 +1,19 @@
 {
-  // DSLink Cloud (Phase 4/5). NOT DEPLOYED: needs the account's D1/R2 ids and `wrangler deploy` with credentials.
+  // DSLink Cloud BASE (phase 5): account, profile, library metadata, friends, presence, invites, room + WebRTC signaling. NO emulation, NO ROM/BIOS/firmware/save storage, NO Containers, NO R2.
+  // The PWA (build/pwa, produced by scripts/package_pwa.sh) is served by this same Worker, so https://<worker>/play/ needs no configuration at all.
+  // `wrangler deploy` needs credentials: see docs/CLOUD_BASE.md (scripts/cf_prepare.py fills in the D1 id and the origin).
   "name": "dslink-cloud",
   "main": "src/index.ts",
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
-  "assets": { "directory": "./public", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*", "/internal/*", "/signal/*"] },
+  "assets": { "directory": "../../build/pwa", "binding": "ASSETS", "not_found_handling": "404-page", "run_worker_first": ["/api/*", "/internal/*", "/signal/*"] },
   "d1_databases": [{ "binding": "DB", "database_name": "dslink", "database_id": "REPLACE_WITH_D1_ID", "migrations_dir": "migrations" }],
-  "r2_buckets": [{ "binding": "STORE", "bucket_name": "dslink-private" }],
   "durable_objects": { "bindings": [
     { "name": "PRESENCE", "class_name": "Presence" },
     { "name": "SESSION", "class_name": "GameSession" },
-    { "name": "SIGNAL", "class_name": "SignalRoom" },
-    { "name": "CONTAINER", "class_name": "DSLinkContainer" }
+    { "name": "SIGNAL", "class_name": "SignalRoom" }
   ] },
-  "containers": [{ "class_name": "DSLinkContainer", "image": "../Dockerfile.runtime", "image_build_context": "../..", "max_instances": 20, "instance_type": "standard-3" }],
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession", "DSLinkContainer"] }, { "tag": "v2", "new_sqlite_classes": ["SignalRoom"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession"] }, { "tag": "v2", "new_sqlite_classes": ["SignalRoom"] }],
   "vars": { "RP_NAME": "DSLink", "ORIGINS": "https://dslink.example.workers.dev", "RP_ID": "dslink.example.workers.dev", "ENVIRONMENT": "production" }
-  // secrets (wrangler secret put): INTERNAL_TOKEN, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (presigned uploads), R2_BUCKET_NAME
+  // secrets (wrangler secret put): INTERNAL_TOKEN (only if the legacy /internal routes are ever used)
 }

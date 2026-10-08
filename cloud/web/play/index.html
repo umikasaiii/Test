@@ -19,7 +19,7 @@
 <body>
 <main id="app" aria-live="polite">
   <section class="screen on" data-screen="library">
-    <header class="brand"><span class="logo">DS<b>Link</b></span><span class="sub">Nintendo DS nel browser</span></header>
+    <header class="brand"><span class="logo">DS<b>Link</b></span><span class="sub">Nintendo DS nel browser</span><button class="chip" id="btnAccount" data-mode="anon">ACCEDI</button></header>
     <p class="notice" id="unsupported" hidden></p>
 
     <h2>Giochi</h2>
@@ -47,6 +47,45 @@
       <p class="hint">Valgono dalla prossima partita. Restano solo su questo dispositivo.</p>
     </details>
     <details class="diag"><summary>Compatibilità di questo dispositivo</summary><pre id="diagText"></pre><p class="hint">Solo su questo dispositivo: nessun dato viene inviato.</p></details>
+  </section>
+
+  <section class="screen" data-screen="account">
+    <h1>Il tuo account DSLink</h1>
+    <p class="hint">Serve solo per amici, inviti e libreria sul cloud. Giocare da solo non richiede un account.</p>
+    <input id="authUser" class="sel" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="nome utente (a-z 0-9 _)" maxlength="20">
+    <input id="authDisplay" class="sel" autocomplete="nickname" placeholder="nome visualizzato (facoltativo)" maxlength="32">
+    <div class="actions"><button class="cta primary" id="btnPkCreate">CREA ACCOUNT CON PASSKEY</button><button class="cta" id="btnPkLogin">ACCEDI CON PASSKEY</button></div>
+    <p class="hint" id="authPasskeyNote" hidden>Questo browser non offre le passkey: usa la password qui sotto.</p>
+    <details class="diag"><summary>Usa una password</summary>
+      <input id="authPass" class="sel" type="password" autocomplete="current-password" placeholder="password (almeno 10 caratteri)">
+      <div class="actions"><button class="cta" id="btnPwCreate">CREA CON PASSWORD</button><button class="cta" id="btnPwLogin">ACCEDI CON PASSWORD</button></div></details>
+    <p class="err" id="authErr"></p>
+    <div class="actions"><button class="cta" id="btnAuthBack">INDIETRO</button></div>
+  </section>
+
+  <section class="screen" data-screen="profile">
+    <div class="prof"><span class="avbig" id="profAvatar">🎮</span><h1 id="profName"></h1><p class="hint" id="profUser"></p><p class="pres" id="profStatus"></p></div>
+    <div class="actions"><button class="cta primary" id="btnProfFriends">AMICI</button><button class="cta" id="btnProfLibrary">LIBRERIA</button><button class="cta" id="btnProfEdit">MODIFICA PROFILO</button></div>
+    <div id="profEdit" hidden><input id="editName" class="sel" maxlength="32" placeholder="nome visualizzato"><select id="editAvatar" class="sel"></select><div class="actions"><button class="cta primary" id="btnEditSave">SALVA</button></div></div>
+    <div class="actions"><button class="cta" id="btnProfSessions">DISPOSITIVI</button><button class="cta danger" id="btnProfLogout">ESCI</button></div>
+    <div id="profSessions" hidden></div>
+    <div class="actions"><button class="cta" id="btnProfBack">INDIETRO</button></div>
+  </section>
+
+  <section class="screen" data-screen="friends">
+    <h1>Amici</h1>
+    <input id="friendSearch" class="sel" placeholder="Cerca un nome utente…" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <ul class="games" id="searchList"></ul>
+    <h2 id="reqHead" hidden>Richieste</h2><ul class="games" id="reqList"></ul>
+    <h2>I tuoi amici</h2><ul class="games" id="friendList"></ul>
+    <h2 id="blockHead" hidden>Bloccati</h2><ul class="games" id="blockList"></ul>
+    <div class="actions"><button class="cta" id="btnFriendsBack">INDIETRO</button></div>
+  </section>
+
+  <section class="screen" data-screen="cloudlib">
+    <h1>Libreria sul cloud</h1><p class="hint">Qui c'è l'elenco dei tuoi giochi, non i file: ROM, BIOS e salvataggi restano su ogni dispositivo.</p>
+    <ul class="games" id="cloudLibList"></ul>
+    <div class="actions"><button class="cta" id="btnCloudLibBack">INDIETRO</button></div>
   </section>
 
   <section class="screen" data-screen="friends-create">
@@ -97,6 +136,9 @@
 <div id="resumeHint" class="overlay" hidden><div class="card"><h2>Gioco in pausa</h2><p>Tocca per riprendere audio e gioco.</p><button class="cta primary" id="btnResume">RIPRENDI</button></div></div>
 <div id="confirm" class="overlay" hidden><div class="card"><h2>Uscire dal gioco?</h2><p>Il salvataggio viene conservato su questo dispositivo.</p><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ESCI</button></div></div></div>
 <div id="assistStep" class="assist" hidden></div>
+<div id="cloudToast" class="assist" hidden></div>
+<div id="inviteBox" class="overlay" hidden><div class="card"><h2>Invito a giocare</h2><p id="invWho"></p><div class="row"><button class="cta" id="btnInvRefuse">RIFIUTA</button><button class="cta primary" id="btnInvAccept">ACCETTA</button></div></div></div>
+<div id="pickGame" class="overlay" hidden><div class="card"><h2>Invita <span id="pickWho"></span></h2><p>A quale gioco?</p><ul class="games" id="pickList"></ul><div class="row"><button class="cta" id="btnPickCancel">ANNULLA</button></div></div></div>
 <pre id="devOverlay" hidden></pre>
 <script src="../mp/vendor/qrcode.js"></script>
 <script type="module" src="play.js"></script>

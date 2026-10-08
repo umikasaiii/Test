@@ -1,13 +1,18 @@
 name: deploy-cloudflare
-# Real Cloudflare deployment (Worker + Static Assets/PWA + Durable Objects + D1 + private R2 + Containers + Realtime TURN) and a PUBLIC end-to-end test.
-# Needs repository secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID  (optional: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY for presigned uploads).
-# Token permissions: Workers Scripts:Edit, D1:Edit, Workers R2 Storage:Edit, Containers/Cloudchamber:Edit, Account Settings:Read, Realtime/Calls:Edit (see docs/CLOUDFLARE_DEPLOY.md).
+
+# DSLink Cloud base: Worker (API + signaling) + Durable Objects + D1 + the PWA as static assets, all on ONE origin. No Containers, no R2, no TURN.
+# Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (token: Workers Scripts:Edit, D1:Edit, Account Settings:Read). See docs/CLOUD_BASE.md.
+# Optional repository variable DSLINK_EXTRA_ORIGINS: comma separated exact origins of a static host (e.g. a Netlify test site) allowed to call the API.
 on:
   workflow_dispatch:
     inputs:
-      run_public_e2e: { description: "Run the public browser end-to-end test after deploying", type: boolean, default: true }
+      run_public_e2e:
+        description: Run the public browser test after deploying
+        type: boolean
+        default: true
 concurrency: deploy-cloudflare
-permissions: { contents: read }
+permissions:
+  contents: read
 
 jobs:
   deploy:
@@ -16,49 +21,55 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-    outputs: { url: "${{ steps.prep.outputs.URL }}" }
+      DSLINK_EXTRA_ORIGINS: ${{ vars.DSLINK_EXTRA_ORIGINS }}
+    outputs:
+      url: ${{ steps.prep.outputs.URL }}
     steps:
       - name: Credentials present
         run: |
           [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::add the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID"; exit 1; }
       - uses: actions/checkout@v4
-        with: { submodules: recursive }
       - uses: actions/setup-node@v4
-        with: { node-version: "22" }
-      - name: Guard: no private files in the tree (never baked into the image)
+        with:
+          node-version: "22"
+      - name: Private file guard
         run: python3 scripts/check_no_private.py
-      - name: Worker checks (types + unit tests) before touching production
+      - name: Worker checks (types and tests) before touching production
         run: cd cloud/worker && npm ci --legacy-peer-deps && npx tsc --noEmit && npx vitest run
-      - name: Provision D1 + private R2 and write wrangler.prod.jsonc
+      - name: Pinned upstream
+        run: git submodule update --init upstream/melonds-ds
+      - name: Emscripten SDK (pinned)
+        uses: actions/cache@v4
+        with:
+          path: build/emsdk
+          key: emsdk-${{ hashFiles('upstream/versions.env') }}
+      - name: WASM build and PWA package (same-origin config, no cloud address needed)
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3
+          scripts/build_wasm.sh
+          scripts/package_pwa.sh
+      - name: Provision D1 and write wrangler.prod.jsonc
         id: prep
         run: python3 scripts/cf_prepare.py | tee -a "$GITHUB_OUTPUT"
       - name: D1 migrations (remote)
         run: cd cloud/worker && npx wrangler d1 migrations apply dslink --remote -c wrangler.prod.jsonc
-      - name: Deploy Worker + assets + Durable Objects + Container image (built here, RetroArch is not in it)
+      - name: Deploy Worker, assets and Durable Objects
         run: cd cloud/worker && npx wrangler deploy -c wrangler.prod.jsonc
-      - name: Secrets (created only if missing)
+      - name: Secret INTERNAL_TOKEN (created only if missing)
         working-directory: cloud/worker
-        env:
-          R2_KEY: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           have=$(npx wrangler secret list -c wrangler.prod.jsonc --format json | python3 -c 'import sys,json;print(" ".join(s["name"] for s in json.load(sys.stdin)))')
-          put() { printf '%s' "$2" | npx wrangler secret put "$1" -c wrangler.prod.jsonc >/dev/null; echo "set $1"; }
-          case " $have " in *" INTERNAL_TOKEN "*) ;; *) put INTERNAL_TOKEN "$(openssl rand -hex 32)";; esac
-          case " $have " in *" TURN_KEY_API_TOKEN "*) ;; *)
-            r=$(curl -sf -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/calls/turn_keys" -H "authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'content-type: application/json' -d '{"name":"dslink-turn"}') || { echo "::error::cannot create the TURN key (token needs Realtime/Calls edit)"; exit 1; }
-            put TURN_KEY_ID "$(echo "$r" | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["uid"])')"
-            put TURN_KEY_API_TOKEN "$(echo "$r" | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["key"])')";;
-          esac
-          if [ -n "$R2_KEY" ] && [ -n "$R2_SECRET" ]; then
-            put R2_ACCESS_KEY_ID "$R2_KEY"; put R2_SECRET_ACCESS_KEY "$R2_SECRET"; put R2_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"; put R2_BUCKET_NAME dslink-private
-          fi
+          case " $have " in *" INTERNAL_TOKEN "*) ;; *) openssl rand -hex 32 | npx wrangler secret put INTERNAL_TOKEN -c wrangler.prod.jsonc >/dev/null; echo "set INTERNAL_TOKEN";; esac
       - name: Smoke test the public URL
         run: |
           url="${{ steps.prep.outputs.URL }}"
           for i in $(seq 1 30); do curl -sf "$url/api/health" && break; sleep 4; done
-          curl -sf "$url/api/health"; echo; curl -sf "$url/api/config" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("ice servers:",len(d["iceServers"]),"turn" if any("turn" in str(s) for s in d["iceServers"]) else "STUN ONLY")'
-          curl -sI "$url/" | grep -i "content-security-policy\|strict-transport" || true
+          curl -sf "$url/api/health"; echo
+          curl -sf -o /dev/null "$url/play/" && echo "PWA served"
+          curl -sf -X POST "$url/signal/create" -H 'content-type: application/json' -d '{}' | head -c 120; echo
+          echo "CLOUD API URL: $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "SIGNALING URL: $url/signal" >> "$GITHUB_STEP_SUMMARY"
+          echo "PWA URL: $url/play/" >> "$GITHUB_STEP_SUMMARY"
 
   public-e2e:
     needs: deploy
@@ -67,20 +78,17 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-        with: { submodules: recursive }
       - uses: actions/setup-node@v4
-        with: { node-version: "22" }
-      - name: Dependencies + homebrew test ROMs (own code, no commercial content)
+        with:
+          node-version: "22"
+      - name: Dependencies and homebrew test ROMs (own code)
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi python3
           mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
           cd cloud/tests && npm install && npx playwright install --with-deps chrome
-      - name: PUBLIC end-to-end (two accounts, friends, invite, cloud session on a real Cloudflare Container, WebRTC through TURN)
-        env: { CHROME: /opt/google/chrome/chrome }
-        run: cd cloud/tests && node pwa_e2e.mjs "${{ needs.deploy.outputs.url }}" "$PWD/../../build/rom/dslink_test_1.nds"
-      - name: R2 (real) library: upload, per-user authorisation, cross-account denial, save, delete
-        env: { CHROME: /opt/google/chrome/chrome }
-        run: cd cloud/tests && node r2_real.mjs "${{ needs.deploy.outputs.url }}" "$PWD/../../build/rom/dslink_test_1.nds"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: public-e2e-screenshots, path: "/tmp/pwa_*_game.png" }
+      - name: PUBLIC end to end (accounts, friends, presence, invite, create room, code join, WebRTC)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: |
+          cd cloud/tests
+          node play_cloud_e2e.mjs "${{ needs.deploy.outputs.url }}" "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playcloud

@@ -6,6 +6,8 @@ import { sha256Hex } from "./sha256.js";
 import { Player, detectCaps } from "./player.js";
 import { opt, setOpt } from "./options.js";
 import { initFriends } from "./friends.js";
+import { loadConfig, Cloud, passkeysSupported } from "./cloud.js";
+import { initCloudUI } from "./cloudui.js";
 import { DlAssist, validateRefs, HOST_REFS } from "./dlassist.js";
 
 const $ = (id) => document.getElementById(id);
@@ -15,7 +17,7 @@ const SYS = [
   { key: "bios9", file: "bios9.bin", title: "BIOS ARM9", sizes: [4096] },
   { key: "firmware", file: "firmware.bin", title: "Firmware", sizes: [131072, 262144, 524288] },
 ];
-let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0, friends = null, refsText = null, assist = null;
+let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0, friends = null, cloud = null, cloudUi = null, refsText = null, assist = null;
 
 const show = (name) => { document.body.dataset.screen = name; document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("on", s.dataset.screen === name)); };
 const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB");
@@ -38,11 +40,18 @@ async function boot() {
   show("library");
   $("devOverlay").hidden = !DEV; setInterval(() => { if (DEV) devTick(); }, 500);
   if ("serviceWorker" in navigator && self.isSecureContext && !new URLSearchParams(location.search).has("nosw")) navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(() => {});
-  friends = initFriends({ $, show, games: () => games, importRefsFile, hasSystem: () => SYS.every((x) => sysInfo[x.key] && sysInfo[x.key].ok), hasRefs: () => !!refsText && validateRefs(refsText).ok,
+  friends = initFriends({ $, show, games: () => games, gameByCloudId: (gid) => localByGameId().get(gid), importRefsFile, hasSystem: () => SYS.every((x) => sysInfo[x.key] && sysInfo[x.key].ok), hasRefs: () => !!refsText && validateRefs(refsText).ok,
     hostDlBlock: () => { if (!SYS.every((x) => sysInfo[x.key] && sysInfo[x.key].ok)) return "Servono BIOS e firmware su questo dispositivo."; if (!refsText) return "Manca refs.json: importalo prima di avviare."; const v = validateRefs(refsText, HOST_REFS); return v.ok ? "" : v.error; }, startGame: (id, session) => playGame(id, session), onLost: (why) => onSessionLost(why) });
+  // DSLink Cloud: OPTIONAL (account, friends, invites, library metadata). Where it lives comes from cloud-config.json - no setup. Nothing below blocks or breaks playing locally.
+  const cfg = await loadConfig(opt).catch(() => ({ api: "", signal: "", ws: "" }));
+  cloud = new Cloud(cfg);
+  cloudUi = initCloudUI({ $, show, cloud, passkeys: passkeysSupported, syncLibrary, localByGameId, playLocal: (id) => playGame(id), startInvite: (o) => friends.startInvite(o) });
+  cloud.on((ev) => { if (ev === "login") { cloud.setActivity("menu"); syncLibrary(); } });
+  cloud.restore().catch(() => {});
   addEventListener("pagehide", (e) => { const s = friends && friends.session; if (s && !e.persisted && s.peer) s.peer.sendCtl({ t: "bye" }); });
   window.dslinkPlay = api();
   if (!friends.resume()) friends.autoJoin();
+  document.addEventListener("visibilitychange", () => { if (cloud && cloud.state === "user" && !document.hidden) { cloud.sendState(); cloud.refreshAll().catch(() => {}); } });
 }
 
 function bindOptions() {
@@ -58,6 +67,17 @@ function renderDiag() {
     `Thread WASM possibili (SharedArrayBuffer + isolamento): ${yn(caps.sab && caps.crossOriginIsolated)} (non necessari)`];
   $("diagText").textContent = lines.join("\n");
 }
+// The cloud identifies a game by platform + product code (stable across devices and regions of the same dump); the file itself is only ever local.
+const gameIdOf = (g) => (g && g.code ? "nds-" + String(g.code).toLowerCase().replace(/[^a-z0-9]/g, "") : "");
+function localByGameId() { const m = new Map(); for (const g of games) { const id = gameIdOf(g); if (id.length >= 5 && !m.has(id)) m.set(id, g); } return m; }
+let syncT = 0;
+function syncLibrary() {                       // push this device's library METADATA (never files) after login and whenever the local library changes
+  clearTimeout(syncT); syncT = setTimeout(() => {
+    if (!cloud || cloud.state !== "user") return;
+    const entries = games.filter((g) => gameIdOf(g).length >= 5).map((g) => ({ gameId: gameIdOf(g), platform: "nds", title: g.title || g.code, productCode: g.code, coreId: "melonds-ds", multiplayerMode: "distributed", downloadPlaySupported: false }));
+    cloud.syncLibrary(entries).catch(() => {});
+  }, 400);
+}
 async function refresh() {
   games = [];
   if (store) {
@@ -69,7 +89,7 @@ async function refresh() {
     const rb = await store.get("system/refs.json"); refsText = rb ? new TextDecoder().decode(rb) : null;      // screen references: this device only, never sent, never logged
   }
   games.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
-  renderLibrary();
+  renderLibrary(); syncLibrary();
 }
 
 function renderLibrary() {
@@ -177,6 +197,7 @@ async function playGame(id, session) {
     buildGame();
     await player.start({ id, rom, system, sram, radio: session ? { role: session.role === "host" ? 1 : 2, peer: session.peer } : undefined });
     if (session) session.playing();
+    if (cloud) { cloud.setActivity("game", gameIdOf(g)); if (!dlGuest) cloud.markPlayed(gameIdOf(g)).catch(() => {}); }
     if (session && session.dlplay) startAssist(session);
     show("game"); $("game").hidden = false; $("app").style.display = "none";
     if (!guard) { history.pushState({ game: true }, ""); guard = true; }
@@ -213,7 +234,7 @@ async function leave(fromCore) {
   await saveChain;                                         // the last save is on disk before the library shows again
   if (controls) { controls.destroy(); controls = null; }
   $("game").hidden = true; $("game").innerHTML = ""; $("app").style.display = ""; $("resumeHint").hidden = true;
-  current = null; show("library");
+  current = null; show("library"); if (cloud) cloud.setActivity("menu");
 }
 function fail(msg) {
   stopAssist();
@@ -221,7 +242,7 @@ function fail(msg) {
   const p = player; player = null; if (p) p.stop().catch(() => {});
   if (controls) { controls.destroy(); controls = null; }
   $("game").hidden = true; $("game").innerHTML = ""; $("app").style.display = ""; current = null;
-  $("errorNote").textContent = msg; show("error");
+  $("errorNote").textContent = msg; show("error"); if (cloud) cloud.setActivity("menu");
 }
 $("btnErrBack").onclick = () => show("library");
 $("btnResume").onclick = async () => { if (player) { await player.unlockAudio(); await player.resume(); } $("resumeHint").hidden = true; };
@@ -258,7 +279,7 @@ function radioLines(s) {
 
 // ---------------------------------------------------------------- test/diagnostic surface (read-only state of THIS page)
 function api() {
-  return { get player() { return player; }, get friends() { return friends; }, get assist() { return assist; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
+  return { get player() { return player; }, get friends() { return friends; }, get cloud() { return cloud; }, get cloudUi() { return cloudUi; }, get assist() { return assist; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
     stats: () => (player ? player.stats : null), grab: () => player && player.grab(), isPlaying: () => !!current && !!player && player.running, whenSaved: () => saveChain };
 }
 boot();

@@ -1,0 +1,12 @@
+{
+  // Local run of the Cloud base with the PWA served by the Worker (wrangler dev -c wrangler.cloud.dev.jsonc --local): real Worker runtime, real D1 (local), real Durable Objects.
+  "name": "dslink-cloud-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "../../build/pwa", "binding": "ASSETS", "not_found_handling": "404-page", "run_worker_first": ["/api/*", "/internal/*", "/signal/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "dslink", "database_id": "local", "migrations_dir": "migrations" }],
+  "durable_objects": { "bindings": [ { "name": "PRESENCE", "class_name": "Presence" }, { "name": "SESSION", "class_name": "GameSession" }, { "name": "SIGNAL", "class_name": "SignalRoom" } ] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession"] }, { "tag": "v2", "new_sqlite_classes": ["SignalRoom"] }],
+  "vars": { "RP_NAME": "DSLink", "ORIGINS": "http://localhost:8787,http://127.0.0.1:8787,http://localhost:8790", "RP_ID": "localhost", "ENVIRONMENT": "dev", "INTERNAL_TOKEN": "internal-secret" }
+}

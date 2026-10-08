@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Idempotent Cloudflare provisioning for DSLink (run by .github/workflows/deploy.yml; needs CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID).
 
-Creates (only if missing): D1 database `dslink`, private R2 bucket `dslink-private`, a Realtime TURN key. Writes cloud/worker/wrangler.prod.jsonc
+Creates (only if missing): D1 database `dslink` (and, only if the chosen config binds one, the private R2 bucket `dslink-private`). Writes cloud/worker/wrangler.prod.jsonc
 (no secrets inside) with the real D1 id and the account's workers.dev origin. Secrets are set with `wrangler secret put` by the workflow.
 Prints `KEY=value` lines for the workflow (never secret values). Stdlib only.
 """
@@ -27,16 +27,20 @@ def call(method, path, body=None, ok404=False):
 # D1
 found = call("GET", "/d1/database?name=dslink")["result"]
 d1 = next((d for d in found if d["name"] == "dslink"), None) or call("POST", "/d1/database", {"name": "dslink"})["result"]
-# R2 (private: no public access, no custom domain is ever attached by this script)
-if call("GET", "/r2/buckets/dslink-private", ok404=True) is None:
+CONFIG = os.environ.get("DSLINK_WRANGLER_CONFIG", "cloud/worker/wrangler.jsonc")
+# R2 only for the legacy hosted config (private: no public access, no custom domain is ever attached by this script). The Cloud base has no R2.
+if "r2_buckets" in open(CONFIG).read() and call("GET", "/r2/buckets/dslink-private", ok404=True) is None:
     call("POST", "/r2/buckets", {"name": "dslink-private"})
 sub = call("GET", "/workers/subdomain")["result"]["subdomain"]
 host = f"{NAME}.{sub}.workers.dev"
 
-cfg = open("cloud/worker/wrangler.jsonc").read()
+cfg = open(CONFIG).read()
 cfg = re.sub(r"(?m)^\s*//.*$|(?<=\S)\s+//\s.*$", "", cfg)        # JSONC comments only: full-line, or " // text" after code (URLs have no space before //)
 cfg = cfg.replace("REPLACE_WITH_D1_ID", d1["uuid"])
 cfg = cfg.replace("dslink.example.workers.dev", host)
+extra = [o.strip() for o in os.environ.get("DSLINK_EXTRA_ORIGINS", "").split(",") if o.strip()]       # e.g. https://my-dslink.netlify.app (exact origins only: they are allowed to call the API with credentials)
+if extra:
+    cfg = cfg.replace(f'"ORIGINS": "https://{host}"', '"ORIGINS": "' + ",".join([f"https://{host}"] + extra) + '"')
 cfg = cfg.replace('"name": "dslink-cloud"', f'"name": "{NAME}"')
 open("cloud/worker/wrangler.prod.jsonc", "w").write(cfg)
 

@@ -9,6 +9,7 @@ const TTL_MS = 10 * 60_000;
 
 export class SignalRoom extends DurableObject<Env> {
   private room: Room | null = null;
+  private claimed = false;
 
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url), p = url.pathname;
@@ -29,9 +30,25 @@ export class SignalRoom extends DurableObject<Env> {
       return r.subscribe(role) ?? reply(404, { error: "no_room" });
     }
     if (p === "/send") { const b = await body(); const role = r.roleOf(b.token); if (!role) return reply(404, { error: "no_room" }); const res = r.send(role, b.data); return "error" in res ? reply(res.status, { error: res.error }) : reply(200, res); }
+    if (p === "/state") { const b = await body(); const role = r.roleOf(b.token); if (!role) return reply(404, { error: "no_room" }); const res = r.setPhase(role, b.state); return "error" in res ? reply(res.status, { error: res.error }) : reply(200, res); }
     if (p === "/leave") { const b = await body(); const role = r.roleOf(b.token); if (role) r.leave(role, "left"); if (r.closed) { this.room = null; await this.ctx.storage.deleteAll(); } return reply(200, { ok: true }); }
     return reply(404, { error: "not_found" });
   }
+
+  // ---- called by the Worker (account API), never reachable from the internet: a room made for one invited friend ----
+  /** create an invite-only room: the host token goes to the inviter now, the guest token stays here until the invitee claims it (once) */
+  async createInvite(code: string): Promise<{ code: string; hostToken: string; ttlSec: number } | null> {
+    if (this.room && !this.room.expired()) return null;
+    this.room = new Room(code, { ttlMs: TTL_MS, inviteOnly: true }); this.claimed = false;
+    await this.ctx.storage.setAlarm(Date.now() + 5_000);
+    return { code, hostToken: this.room.tok.host, ttlSec: TTL_MS / 1000 };
+  }
+  async claimGuest(): Promise<string | null> {
+    if (!this.room || this.room.expired() || !this.room.inviteOnly || this.claimed) return null;
+    this.claimed = true; return this.room.tok.guest;
+  }
+  async closeRoom(why = "closed"): Promise<void> { if (this.room) { this.room.leave("host", why); this.room = null; await this.ctx.storage.deleteAll(); } }
+  async roomState(): Promise<string> { return this.room && !this.room.expired() ? this.room.state : "CLOSED"; }
 
   async alarm(): Promise<void> {
     if (this.room && !this.room.expired()) { this.room.ping(); await this.ctx.storage.setAlarm(Date.now() + 5_000); return; }   // heartbeat for open streams while the room lives (a failed write = that page is gone)
@@ -60,7 +77,7 @@ export async function handleSignal(env: Env, req: Request): Promise<Response> {
   if (req.method === "POST") { try { payload = await req.json(); } catch { payload = {}; } code = String(payload.code ?? code); }
   if (!/^\d{6}$/.test(code)) { if (p === "/join") failed(ip); return reply(404, { error: "no_room" }); }
   if (p === "/join") { if (limited(ip)) return reply(429, { error: "locked" }); }
-  if (!["/join", "/events", "/send", "/leave"].includes(p)) return reply(404, { error: "not_found" });
+  if (!["/join", "/events", "/send", "/leave", "/state"].includes(p)) return reply(404, { error: "not_found" });
   const forward = req.method === "GET" ? new Request("http://do" + p + url.search) : new Request("http://do" + p, { method: "POST", body: JSON.stringify(payload) });
   const res = await stubFor(code).fetch(forward);
   if (p === "/join" && res.status !== 200) failed(ip);

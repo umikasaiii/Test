@@ -27,3 +27,16 @@
 .quality { font-weight: 700; min-height: 1.4em; } .quality.GREEN { color: #5ee08a; } .quality.YELLOW { color: #ffd166; } .quality.RED { color: #ff6b6b; }
 
 .assist { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 8px); z-index: 20; background: rgba(6,11,23,.85); color: #eaf1ff; border: 1px solid #2a3a5c; border-radius: 999px; padding: 6px 14px; font-size: 13px; pointer-events: none; }
+
+/* ---- DSLink Cloud (functional minimum; the redesign is a later phase) ---- */
+.brand { position: relative; }
+.chip { margin-left: auto; min-height: 36px; border-radius: 999px; border: 1px solid #2a3a5c; background: #0c1428; color: #eaf1ff; padding: 0 14px; font-size: 13px; position: relative; }
+.chip[data-badge]:not([data-badge=""])::after { content: attr(data-badge); position: absolute; top: -6px; right: -4px; background: #ff4d6d; color: #fff; border-radius: 999px; font-size: 11px; min-width: 18px; height: 18px; line-height: 18px; text-align: center; }
+.chip[data-mode=offline] { opacity: .7; }
+.prof { text-align: center; } .avbig { font-size: 64px; display: block; } .prof h1 { margin: 6px 0 0; }
+.pres { font-size: 13px; padding: 2px 8px; border-radius: 999px; background: #1b2540; } .pres.online, .pres.menu { color: #5ee08a; } .pres.in_game { color: #ffd166; } .pres.offline { color: #8896b3; }
+.who { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; } .who .av { font-size: 26px; } .who .nm { display: flex; flex-direction: column; min-width: 0; } .who small { opacity: .7; }
+.acts { display: flex; gap: 6px; flex-wrap: wrap; } .mini { min-height: 40px; border-radius: 10px; border: 1px solid #2a3a5c; background: #0c1428; color: #eaf1ff; padding: 0 12px; font-size: 13px; }
+.mini.primary { background: #2b6cff; border-color: #2b6cff; } .mini.danger { border-color: #7a2b3a; color: #ff8fa3; } .mini[disabled] { opacity: .4; }
+.row2 { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; }
+#friendList li, #reqList li, #searchList li, #blockList li { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }

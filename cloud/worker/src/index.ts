@@ -5,8 +5,11 @@ import { handleFriends, presenceOf } from "./friends";
 import { hostFor } from "./container";
 import { handleInvites } from "./invites";
 import { handleLibrary, purgeUserData } from "./library";
-import { HttpError, json, logEvent, readJson, str, timingSafeEqual } from "./util";
+import { HttpError, json, logEvent, now, randomId, readJson, str, timingSafeEqual } from "./util";
 import { handleSignal } from "./signal";
+import { handleSocial } from "./social";
+import { handleCatalog } from "./catalog";
+import { handlePlayInvites } from "./playinvites";
 
 export { Presence } from "./presence";
 export { GameSession } from "./session";
@@ -18,6 +21,21 @@ const sessionStub = (env: Env, id: string) => {
   try { did = env.SESSION.idFromString(id); } catch { throw new HttpError(404, "session_not_found"); }
   return env.SESSION.get(did);
 };
+
+const allowedOrigins = (env: Env) => env.ORIGINS.split(",").map((x) => x.trim()).filter(Boolean);
+/** CORS with credentials: ONLY an exact origin from the ORIGINS allow-list is echoed back (never "*", which browsers refuse together with cookies anyway); everything else gets no CORS headers at all. */
+function corsFor(env: Env, req: Request): Record<string, string> {
+  const o = req.headers.get("origin");
+  if (!o || !allowedOrigins(env).includes(o)) return {};
+  return { "access-control-allow-origin": o, "access-control-allow-credentials": "true", vary: "Origin" };
+}
+function withCors(env: Env, req: Request, res: Response): Response {
+  const h = corsFor(env, req);
+  if (res.status === 101 || !Object.keys(h).length) return res;
+  const out = new Response(res.body, res);
+  for (const [k, v] of Object.entries(h)) out.headers.set(k, v);
+  return out;
+}
 
 /** CSRF: state-changing requests must come from one of our origins (browsers always send Origin on those) */
 function checkOrigin(env: Env, req: Request) {
@@ -68,6 +86,23 @@ async function route(env: Env, req: Request): Promise<Response> {
     return json({ iceServers: await browserIce(env), ...(env.ICE_POLICY === "relay" ? { iceTransportPolicy: "relay" } : {}) }, 200, { "cache-control": "no-store" });
   }
 
+  if (path === "/api/ws" && req.headers.get("upgrade") === "websocket") {
+    // browsers cannot add headers to a WebSocket, and a page on another origin has no cookie: it opens the socket with a one-shot ticket (30 s) minted by POST /api/ws-ticket
+    const o = req.headers.get("origin");
+    if (o && !allowedOrigins(env).includes(o) && o !== new URL(req.url).origin) throw new HttpError(403, "bad_origin");   // cross-site WebSocket hijacking guard
+    const ticket = url.searchParams.get("ticket");
+    let u: User | null = null;
+    if (ticket) {
+      const row = await env.DB.prepare("DELETE FROM challenges WHERE id = ? AND kind = 'ws' RETURNING data, expires_at").bind(ticket.slice(0, 64)).first<{ data: string; expires_at: number }>();
+      if (row && row.expires_at > now()) u = await env.DB.prepare("SELECT id, username, display_name, avatar, created_at FROM users WHERE id = ? AND status = 'active'").bind(row.data).first<User>();
+    } else u = await authenticate(env, req);
+    if (!u) throw new HttpError(401, "unauthenticated");
+    const h = new Headers(req.headers);
+    h.set("x-dslink-user", u.id);
+    h.set("x-dslink-device", (req.headers.get("user-agent") ?? "").slice(0, 60));
+    return presenceOf(env, u.id).fetch(new Request(req.url, { headers: h }));
+  }
+
   const user = await authenticate(env, req);
   const pub = await handleAuth(env, req, path, user);
   if (pub) return pub;
@@ -92,13 +127,19 @@ async function route(env: Env, req: Request): Promise<Response> {
     return json({ ok: true, deletedObjects: r.objects }, 200, { "set-cookie": "dsl_session=; HttpOnly; Path=/; Max-Age=0" });
   }
 
-  if (path === "/api/ws" && req.headers.get("upgrade") === "websocket") {
-    const h = new Headers(req.headers);
-    h.set("x-dslink-user", user.id);
-    h.set("x-dslink-device", (req.headers.get("user-agent") ?? "").slice(0, 60));
-    return presenceOf(env, user.id).fetch(new Request(req.url, { headers: h }));
+  if (path === "/api/ws-ticket" && req.method === "POST") {
+    await env.DB.prepare("DELETE FROM challenges WHERE expires_at < ?").bind(now()).run();
+    const id = randomId(18);
+    await env.DB.prepare("INSERT INTO challenges (id, kind, data, expires_at) VALUES (?,'ws',?,?)").bind(id, user.id, now() + 30_000).run();
+    return json({ ticket: id, expiresInSec: 30 });
   }
 
+  const soc = await handleSocial(env, req, path, user);
+  if (soc) return soc;
+  const cat = await handleCatalog(env, req, path, user);
+  if (cat) return cat;
+  const pinv = await handlePlayInvites(env, req, path, user);
+  if (pinv) return pinv;
   const lib = await handleLibrary(env, req, path, user);
   if (lib) return lib;
   const fr = await handleFriends(env, req, path, user);
@@ -147,6 +188,21 @@ async function route(env: Env, req: Request): Promise<Response> {
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
+    const url0 = new URL(req.url);
+    if (url0.pathname.startsWith("/api/")) {
+      if (req.method === "OPTIONS") {                                      // CORS preflight: answered only for allow-listed origins
+        const h = corsFor(env, req);
+        if (!Object.keys(h).length) return new Response(null, { status: 403 });
+        return new Response(null, { status: 204, headers: { ...h, "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS", "access-control-allow-headers": "content-type, authorization", "access-control-max-age": "600" } });
+      }
+      return withCors(env, req, await handleRequest(req, env));
+    }
+    return handleRequest(req, env);
+  },
+} satisfies ExportedHandler<Env>;
+
+async function handleRequest(req: Request, env: Env): Promise<Response> {
+  {
     try {
       const url = new URL(req.url);
       if (url.pathname.startsWith("/signal/")) return await handleSignal(env, req);   // PWA multiplayer signaling: no accounts, cross-origin allowed (rooms are ephemeral and token protected)
@@ -159,5 +215,5 @@ export default {
       logEvent("unhandled_error", { message: String((e as Error)?.message ?? e).slice(0, 160) });
       return json({ error: "internal_error" }, 500);
     }
-  },
-} satisfies ExportedHandler<Env>;
+  }
+}

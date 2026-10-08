@@ -40,6 +40,11 @@ export function createSignalHandler({ ttlMs = 600000, graceMs = 6000, staleMs = 
       if (!r || !role || r.expired()) return reply(404, { error: "no_room" });
       const res = r.send(role, b.data); return reply(res.status || 200, res.status ? { error: res.error } : res);
     }
+    if (p === "/signal/state" && req.method === "POST") {
+      const b = await body(); const r = rooms.get(b.code); const role = r && r.roleOf(b.token);
+      if (!r || !role || r.expired()) return reply(404, { error: "no_room" });
+      const res = r.setPhase(role, b.state); return reply(res.status || 200, res.status ? { error: res.error } : res);
+    }
     if (p === "/signal/leave" && req.method === "POST") {
       const b = await body(); const r = rooms.get(b.code); const role = r && r.roleOf(b.token);
       if (r && role) r.leave(role, "left"); return reply(200, { ok: true });

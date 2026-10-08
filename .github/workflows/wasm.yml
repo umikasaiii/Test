@@ -60,6 +60,20 @@ jobs:
         run: cd cloud/tests && node play_wasm_distributed_matrix.mjs "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playdist
       - name: Package the static PWA
         run: scripts/package_pwa.sh
+      - name: CLOUD BASE worker (types, D1 migrations, auth, social, presence, invites, signaling Durable Objects)
+        run: cd cloud/worker && npm ci --legacy-peer-deps && npx tsc --noEmit && npx vitest run
+      - name: CLOUD BASE real Worker end to end (D1 migrations local, PWA served by the Worker, accounts, friends, presence, invite to room, create room, code and QR join, WebRTC)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: |
+          cd cloud/worker
+          npx wrangler d1 migrations apply dslink --local -c wrangler.cloud.dev.jsonc
+          (npx wrangler dev -c wrangler.cloud.dev.jsonc --port 8787 --local > /tmp/wrangler.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf http://localhost:8787/api/health && break; sleep 2; done
+          cd ../tests
+          node signal_contract.mjs http://localhost:8787
+          node play_cloud_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playcloud
+          node play_cloud_static.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
       - name: The PWA package carries the code and no private content
         run: |
           python3 - <<'PY'

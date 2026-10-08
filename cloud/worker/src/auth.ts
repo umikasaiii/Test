@@ -14,15 +14,21 @@ const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 export const AVATARS = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10", "a11"];
 
 const origins = (env: Env) => env.ORIGINS.split(",").map((s) => s.trim()).filter(Boolean);
+/** The WebAuthn RP ID must be the page's own domain: it is taken from the (allow-listed) Origin of the request, so a PWA on its own domain and the Worker's own pages each get passkeys that work there. */
+export const rpIdFor = (env: Env, req: Request): string => { const o = req.headers.get("origin"); if (o && origins(env).includes(o)) { try { return new URL(o).hostname; } catch { /* fall through */ } } return env.RP_ID; };
 
 export async function hashPassword(password: string, salt: Uint8Array<ArrayBuffer>, iters = PBKDF2_ITERS): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password.normalize("NFKC")), "PBKDF2", false, ["deriveBits"]);
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iters }, key, 256));
 }
 
-function cookieFor(token: string, env: Env, maxAgeSec: number): string {
-  const secure = env.ENVIRONMENT === "test" || env.ENVIRONMENT === "dev" ? "" : "; Secure";   // localhost development only
-  return `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+/** The session cookie is HttpOnly, never readable by scripts. Same-site use (the PWA served by this Worker, or proxied under the same host): SameSite=Lax. An allow-listed OTHER origin (a PWA on its own
+ *  domain) needs SameSite=None; Secure. (Safari blocks third-party cookies whatever we say: serve the PWA from this origin or proxy /api through it - see docs/CLOUD_BASE.md.) */
+export const isCrossOrigin = (req: Request) => { const o = req.headers.get("origin"); try { return !!o && new URL(o).origin !== new URL(req.url).origin; } catch { return false; } };
+function cookieFor(token: string, env: Env, maxAgeSec: number, cross = false): string {
+  const local = env.ENVIRONMENT === "test" || env.ENVIRONMENT === "dev";
+  const secure = local && !cross ? "" : "; Secure";                     // plain-http localhost development only
+  return `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=${cross ? "None" : "Lax"}; Max-Age=${maxAgeSec}${secure}`;
 }
 
 async function createSession(env: Env, userId: string, req: Request): Promise<{ token: string; cookie: string }> {
@@ -30,7 +36,7 @@ async function createSession(env: Env, userId: string, req: Request): Promise<{ 
   const t = now();
   await env.DB.prepare("INSERT INTO auth_sessions (token_hash, user_id, created_at, expires_at, device) VALUES (?,?,?,?,?)")
     .bind(await sha256hex(token), userId, t, t + SESSION_TTL, (req.headers.get("user-agent") ?? "").slice(0, 120)).run();
-  return { token, cookie: cookieFor(token, env, SESSION_TTL / 1000) };
+  return { token, cookie: cookieFor(token, env, SESSION_TTL / 1000, isCrossOrigin(req)) };
 }
 
 export function readToken(req: Request): string | null {
@@ -49,14 +55,18 @@ export async function authenticate(env: Env, req: Request): Promise<User | null>
   const token = readToken(req);
   if (!token || token.length > 100) return null;
   const row = await env.DB.prepare(
-    "SELECT u.id, u.username, u.display_name, u.avatar, u.created_at, s.expires_at FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?")
-    .bind(await sha256hex(token)).first<User & { expires_at: number }>();
-  if (!row) return null;
+    "SELECT u.id, u.username, u.display_name, u.avatar, u.created_at, s.expires_at, s.last_seen AS sess_seen, u.status FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?")
+    .bind(await sha256hex(token)).first<User & { expires_at: number; sess_seen: number; status: string }>();
+  if (!row || row.status !== "active") return null;                 // a disabled account has no valid session
+  const t = now();
+  if (t - row.sess_seen > 60_000) {                                  // last_seen: at most one write a minute per session
+    await env.DB.batch([env.DB.prepare("UPDATE auth_sessions SET last_seen = ? WHERE token_hash = ?").bind(t, await sha256hex(token)), env.DB.prepare("UPDATE users SET last_seen = ? WHERE id = ?").bind(t, row.id)]);
+  }
   if (row.expires_at < now()) {
     await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").bind(await sha256hex(token)).run();
     return null;
   }
-  const { expires_at: _e, ...user } = row;
+  const { expires_at: _e, sess_seen: _s, status: _st, ...user } = row;
   return user;
 }
 
@@ -151,7 +161,7 @@ async function passkeyRegisterOptions(env: Env, req: Request, existing: User | n
   const userId = existing?.id ?? randomId(12);
   const creds = existing ? (await env.DB.prepare("SELECT id FROM credentials WHERE user_id = ?").bind(existing.id).all<{ id: string }>()).results : [];
   const options = await generateRegistrationOptions({
-    rpName: env.RP_NAME, rpID: env.RP_ID, userName: profile.username, userDisplayName: profile.displayName,
+    rpName: env.RP_NAME, rpID: rpIdFor(env, req), userName: profile.username, userDisplayName: profile.displayName,
     userID: new Uint8Array(new TextEncoder().encode(userId)) as Uint8Array<ArrayBuffer>, attestationType: "none",
     authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
     excludeCredentials: creds.map((c) => ({ id: c.id })),
@@ -166,7 +176,7 @@ async function passkeyRegisterVerify(env: Env, req: Request, existing: User | nu
   if (ch.existing !== !!existing || (existing && existing.id !== ch.userId)) throw new HttpError(400, "challenge_mismatch");
   let v;
   try {
-    v = await verifyRegistrationResponse({ response: body.response as RegistrationResponseJSON, expectedChallenge: ch.challenge, expectedOrigin: origins(env), expectedRPID: env.RP_ID, requireUserVerification: false });
+    v = await verifyRegistrationResponse({ response: body.response as RegistrationResponseJSON, expectedChallenge: ch.challenge, expectedOrigin: origins(env), expectedRPID: rpIdFor(env, req), requireUserVerification: false });
   } catch { throw new HttpError(400, "registration_failed"); }
   if (!v.verified || !v.registrationInfo) throw new HttpError(400, "registration_failed");
   const { credential } = v.registrationInfo;
@@ -186,8 +196,8 @@ async function passkeyRegisterVerify(env: Env, req: Request, existing: User | nu
   return sessionResponse(env, user, await createSession(env, user.id, req), existing ? 200 : 201);
 }
 
-async function passkeyLoginOptions(env: Env): Promise<Response> {
-  const options = await generateAuthenticationOptions({ rpID: env.RP_ID, userVerification: "preferred" });  // discoverable credential: no username needed
+async function passkeyLoginOptions(env: Env, req: Request): Promise<Response> {
+  const options = await generateAuthenticationOptions({ rpID: rpIdFor(env, req), userVerification: "preferred" });  // discoverable credential: no username needed
   const cid = await saveChallenge(env, "auth", { challenge: options.challenge });
   return json({ cid, options });
 }
@@ -201,7 +211,7 @@ async function passkeyLoginVerify(env: Env, req: Request): Promise<Response> {
   let v;
   try {
     v = await verifyAuthenticationResponse({
-      response: resp, expectedChallenge: ch.challenge, expectedOrigin: origins(env), expectedRPID: env.RP_ID, requireUserVerification: false,
+      response: resp, expectedChallenge: ch.challenge, expectedOrigin: origins(env), expectedRPID: rpIdFor(env, req), requireUserVerification: false,
       credential: { id: cred.id, publicKey: unb64url(cred.public_key), counter: cred.counter, transports: cred.transports ? JSON.parse(cred.transports) : undefined },
     });
   } catch { throw new HttpError(401, "authentication_failed"); }
@@ -218,14 +228,14 @@ export async function handleAuth(env: Env, req: Request, path: string, user: Use
   if (m === "POST" && path === "/api/auth/login") return login(env, req);
   if (m === "POST" && path === "/api/auth/passkey/register/options") return passkeyRegisterOptions(env, req, null);
   if (m === "POST" && path === "/api/auth/passkey/register/verify") return passkeyRegisterVerify(env, req, null);
-  if (m === "POST" && path === "/api/auth/passkey/login/options") return passkeyLoginOptions(env);
+  if (m === "POST" && path === "/api/auth/passkey/login/options") return passkeyLoginOptions(env, req);
   if (m === "POST" && path === "/api/auth/passkey/login/verify") return passkeyLoginVerify(env, req);
   if (m === "POST" && path === "/api/auth/passkey/add/options") { if (!user) throw new HttpError(401, "unauthenticated"); return passkeyRegisterOptions(env, req, user); }
   if (m === "POST" && path === "/api/auth/passkey/add/verify") { if (!user) throw new HttpError(401, "unauthenticated"); return passkeyRegisterVerify(env, req, user); }
   if (m === "POST" && path === "/api/auth/logout") {
     const t = readToken(req);
     if (t) await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").bind(await sha256hex(t)).run();
-    return json({ ok: true }, 200, { "set-cookie": cookieFor("", env, 0) });
+    return json({ ok: true }, 200, { "set-cookie": cookieFor("", env, 0, isCrossOrigin(req)) });
   }
   return null;
 }
@@ -233,7 +243,24 @@ export async function handleAuth(env: Env, req: Request, path: string, user: Use
 export async function handleMe(env: Env, req: Request, path: string, user: User): Promise<Response | null> {
   if (path === "/api/me" && req.method === "GET") {
     const creds = await env.DB.prepare("SELECT COUNT(*) AS n FROM credentials WHERE user_id = ?").bind(user.id).first<{ n: number }>();
-    return json({ user: publicUser(user), passkeys: creds?.n ?? 0, avatars: AVATARS });
+    return json({ user: publicUser(user), passkeys: creds?.n ?? 0, avatars: AVATARS, lastSeen: now() });
+  }
+  if (path === "/api/auth/sessions" && req.method === "GET") {         // where am I logged in: one row per device/browser, the current one flagged
+    const cur = (await sha256hex(readToken(req) ?? "")).slice(0, 16);
+    const rows = await env.DB.prepare("SELECT token_hash, device, created_at, last_seen, expires_at FROM auth_sessions WHERE user_id = ? AND expires_at > ? ORDER BY last_seen DESC, created_at DESC").bind(user.id, now()).all<{ token_hash: string; device: string; created_at: number; last_seen: number; expires_at: number }>();
+    return json({ sessions: rows.results.map((r) => ({ id: r.token_hash.slice(0, 16), device: r.device ?? "", createdAt: r.created_at, lastSeen: r.last_seen || r.created_at, expiresAt: r.expires_at, current: r.token_hash.slice(0, 16) === cur })) });
+  }
+  let sm = path.match(/^\/api\/auth\/sessions\/([0-9a-f]{16})$/);
+  if (sm && req.method === "DELETE") {                                // revoke ONE session (a lost phone); only the owner can
+    const r = await env.DB.prepare("DELETE FROM auth_sessions WHERE user_id = ? AND substr(token_hash, 1, 16) = ?").bind(user.id, sm[1]).run();
+    if (!r.meta.changes) throw new HttpError(404, "session_not_found");
+    const was = (await sha256hex(readToken(req) ?? "")).slice(0, 16) === sm[1];
+    return json({ ok: true, current: was }, 200, was ? { "set-cookie": cookieFor("", env, 0, isCrossOrigin(req)) } : {});
+  }
+  if (path === "/api/auth/sessions/revoke-others" && req.method === "POST") {
+    const cur = await sha256hex(readToken(req) ?? "");
+    const r = await env.DB.prepare("DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?").bind(user.id, cur).run();
+    return json({ ok: true, revoked: r.meta.changes ?? 0 });
   }
   if (path === "/api/me" && req.method === "PATCH") {
     const b = await readJson(req);

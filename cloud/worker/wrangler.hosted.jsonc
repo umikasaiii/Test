@@ -1,0 +1,20 @@
+{
+  // DSLink HOSTED (legacy, Cloudflare Containers: emulation in the cloud). NOT used by the Cloud base (wrangler.jsonc): kept for reference only.
+  "name": "dslink-cloud",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./public", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*", "/internal/*", "/signal/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "dslink", "database_id": "REPLACE_WITH_D1_ID", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "STORE", "bucket_name": "dslink-private" }],
+  "durable_objects": { "bindings": [
+    { "name": "PRESENCE", "class_name": "Presence" },
+    { "name": "SESSION", "class_name": "GameSession" },
+    { "name": "SIGNAL", "class_name": "SignalRoom" },
+    { "name": "CONTAINER", "class_name": "DSLinkContainer" }
+  ] },
+  "containers": [{ "class_name": "DSLinkContainer", "image": "../Dockerfile.runtime", "image_build_context": "../..", "max_instances": 20, "instance_type": "standard-3" }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession", "DSLinkContainer"] }, { "tag": "v2", "new_sqlite_classes": ["SignalRoom"] }],
+  "vars": { "RP_NAME": "DSLink", "ORIGINS": "https://dslink.example.workers.dev", "RP_ID": "dslink.example.workers.dev", "ENVIRONMENT": "production" }
+  // secrets (wrangler secret put): INTERNAL_TOKEN, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (presigned uploads), R2_BUCKET_NAME
+}

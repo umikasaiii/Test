@@ -114,7 +114,7 @@ const net = await page.evaluate(() => window.__net);
 const reqsDuring = log.length;
 await sleep(1500);
 check('NO NETWORK EMULATION: no WebSocket, no WebRTC, no fetch/XHR from the page while a game runs, no new HTTP request', net.ws === 0 && net.rtc === 0 && net.xhr === 0 && log.length === reqsDuring, JSON.stringify(net) + ` requests ${log.length}`);
-check('NO NETWORK EMULATION: every request is a static file of the player (no /api, no ws)', log.every((l) => l.startsWith('GET /play/') || l.startsWith('GET /controls/') || l.startsWith('GET /mp/mp.css') || l.startsWith('GET /mp/vendor/qrcode.js') || l.startsWith('GET /favicon')), [...new Set(log.filter((l) => !l.startsWith('GET /play/') && !l.startsWith('GET /controls/')))].join(' '));
+check('NO NETWORK EMULATION: every request is a static file of the player (only the optional account restore GET /api/me at start, no ws)', log.every((l) => l.startsWith('GET /play/') || l.startsWith('GET /controls/') || l === 'GET /api/me' || l.startsWith('GET /mp/mp.css') || l.startsWith('GET /mp/vendor/qrcode.js') || l.startsWith('GET /favicon')), [...new Set(log.filter((l) => !l.startsWith('GET /play/') && !l.startsWith('GET /controls/')))].join(' '));
 
 // ---- SAVE: play, leave through the exit dialog (save on exit), reload the page, play again
 const mem = (await stats(page)).wasmMB;
@@ -163,7 +163,7 @@ const saved3 = await page.evaluate(async (k) => { const b = await window.dslinkP
 check('INDEXEDDB FALLBACK: ROM + save persist across a reload', saved2 > 0 && saved3 === saved2 && (await page.locator('#gameList li.game').count()) === 1, `save ${saved2} -> ${saved3} bytes`);
 // ---- installed PWA: the shell + core are cached, the game starts with the network cut
 await page.evaluate(() => navigator.serviceWorker.ready);
-const cached = await until(() => page.evaluate(async () => { const c = await caches.open('dslink-play-v4'); const k = (await c.keys()).map((r) => new URL(r.url).pathname); return k.includes('/play/core/dslink_wasm.wasm') && k.includes('/controls/controls.js') ? k.length : 0; }), 20000);
+const cached = await until(() => page.evaluate(async () => { const c = await caches.open('dslink-play-v5'); const k = (await c.keys()).map((r) => new URL(r.url).pathname); return k.includes('/play/core/dslink_wasm.wasm') && k.includes('/controls/controls.js') ? k.length : 0; }), 20000);
 check('PWA OFFLINE: service worker caches the shell and the WASM core', !!cached, `${cached} files cached`);
 await page.context().setOffline(true);
 await page.reload(); await page.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });

@@ -42,6 +42,14 @@ export function initFriends(ctx) {
   }
   const hpBlock = (s) => (!isolated() ? "Modalità multiplayer ad alte prestazioni richiesta, non disponibile su questo browser." : s.other.hp === false ? "Il dispositivo dell'amico non supporta la modalità multiplayer ad alte prestazioni." : "");
 
+  // ---- an accepted invite: the room already exists (made by the account API), both tokens say who is who, nothing is typed. The isolation step is the same as for create/join.
+  async function startInvite(o) { if (await prepare({ kind: "invite", ...o })) return; beginInvite(o); }
+  function beginInvite(o) {
+    const lg = ctx.gameByCloudId(o.gameId);
+    session = new Session(sessionOpts(o.role, o.role === "host" && lg ? { id: lg.id, code: lg.code, title: lg.title, dlplay: true } : null));
+    session.attach(o.code, o.token); show("lobby"); render(session);
+  }
+
   // ---- create
   $("btnCreate").onclick = async () => {
     const games = ctx.games(); const sel = $("friendGame"); sel.innerHTML = "";
@@ -140,7 +148,7 @@ export function initFriends(ctx) {
   const jc = new URLSearchParams(location.search).get("join");
   return {
     get session() { return session; },
-    leave, doJoin,
+    leave, doJoin, startInvite,
     /** the game ended or the link dropped while playing: close the room and tell the user */
     async lost(why) { const s = session; session = null; if (s) { s.state === "closed" || (await s.close()); } $("lostNote").textContent = why || ""; show("lost"); },
     async endSession() { const s = session; session = null; if (s) await s.close(); },
@@ -149,6 +157,7 @@ export function initFriends(ctx) {
       const raw = load(INTENT); store(INTENT, null); let it = null; try { it = raw ? JSON.parse(raw) : null; } catch { /* none */ }
       const f = new URLSearchParams(location.search).get("friends");
       if (it && it.kind === "create" && ctx.games().some((x) => x.id === it.gameId)) { $("btnCreate").onclick(); $("friendGame").value = it.gameId; makeRoom(it.gameId); return true; }
+      if (it && it.kind === "invite" && /^\d{6}$/.test(it.code || "") && it.token) { beginInvite(it); return true; }
       if (it && it.kind === "join" && /^\d{6}$/.test(it.code || "")) { $("btnJoin").onclick(); $("joinCode").value = it.code; doJoin(it.code); return true; }
       if (f === "create") $("btnCreate").onclick(); else if (f === "join") $("btnJoin").onclick();
       return false;
