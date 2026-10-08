@@ -20,6 +20,7 @@ export interface Env {
   ORIGINS: string;                    // comma separated allowed origins (WebAuthn + CSRF check)
   ENVIRONMENT: string;
   INTERNAL_TOKEN: string;             // shared secret container <-> Worker
+  QUOTA_MB?: string;                  // per-account Cloud storage quota in MB (default 2048)
   R2_ACCOUNT_ID?: string;             // optional: enables presigned direct-to-R2 uploads
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;

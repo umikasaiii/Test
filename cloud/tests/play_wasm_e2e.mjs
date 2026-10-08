@@ -163,7 +163,7 @@ const saved3 = await page.evaluate(async (k) => { const b = await window.dslinkP
 check('INDEXEDDB FALLBACK: ROM + save persist across a reload', saved2 > 0 && saved3 === saved2 && (await page.locator('#gameList li.game').count()) === 1, `save ${saved2} -> ${saved3} bytes`);
 // ---- installed PWA: the shell + core are cached, the game starts with the network cut
 await page.evaluate(() => navigator.serviceWorker.ready);
-const cached = await until(() => page.evaluate(async () => { const c = await caches.open('dslink-play-v5'); const k = (await c.keys()).map((r) => new URL(r.url).pathname); return k.includes('/play/core/dslink_wasm.wasm') && k.includes('/controls/controls.js') ? k.length : 0; }), 20000);
+const cached = await until(() => page.evaluate(async () => { const c = await caches.open('dslink-play-dev'); const k = (await c.keys()).map((r) => new URL(r.url).pathname); return k.includes('/play/core/dslink_wasm.wasm') && k.includes('/controls/controls.js') ? k.length : 0; }), 20000);
 check('PWA OFFLINE: service worker caches the shell and the WASM core', !!cached, `${cached} files cached`);
 await page.context().setOffline(true);
 await page.reload(); await page.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });

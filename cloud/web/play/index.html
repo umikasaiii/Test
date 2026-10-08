@@ -26,6 +26,12 @@
     <ul class="games" id="gameList"></ul>
     <label class="cta file" id="addGame"><input type="file" id="romFile" accept=".nds,.srl,application/octet-stream" hidden>＋ Aggiungi un gioco (.nds)</label>
     <p class="err" id="libErr"></p>
+    <div id="cloudBar" class="cloudbar" hidden>
+      <label class="chk"><input type="checkbox" id="optAutoCloud"> Salva nel mio Cloud i giochi e i file di sistema che aggiungo</label>
+      <p class="hint" id="usageBox"></p>
+      <div class="row"><button class="mini" id="btnSyncNow">SINCRONIZZA ORA</button><small id="syncNote" class="hint"></small></div>
+      <div class="row"><small class="hint">Questo dispositivo si chiama</small><input id="devName" class="sel" maxlength="24" aria-label="Nome del dispositivo"></div>
+    </div>
 
     <h2>Gioca con amici</h2>
     <p class="hint">Due dispositivi, ognuno con il suo gioco: tra i due passa solo la radio del DS. Serve lo stesso gioco su entrambi.</p>
@@ -137,6 +143,14 @@
 <div id="confirm" class="overlay" hidden><div class="card"><h2>Uscire dal gioco?</h2><p>Il salvataggio viene conservato su questo dispositivo.</p><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ESCI</button></div></div></div>
 <div id="assistStep" class="assist" hidden></div>
 <div id="cloudToast" class="assist" hidden></div>
+<div id="updateBar" class="assist" hidden>Nuova versione di DSLink pronta. <button class="mini primary" id="btnUpdate">AGGIORNA</button></div>
+<div id="xfer" class="overlay" hidden><div class="card"><h2 id="xferTitle">Caricamento…</h2><p id="xferName" class="hint"></p><progress id="xferBar" max="100" value="0"></progress><p id="xferPct" class="hint"></p><p id="xferErr" class="err"></p><div class="row"><button class="cta" id="btnXferClose" hidden>CHIUDI</button></div></div></div>
+<div id="conflictBox" class="overlay" hidden><div class="card"><h2>Ci sono due salvataggi diversi</h2><p id="cfTitle" class="hint"></p>
+  <div class="cfopt"><b id="cfLocalDev"></b><small id="cfLocalTime"></small><button class="cta primary" id="btnCfLocal">USA QUESTO</button></div>
+  <div class="cfopt"><b id="cfCloudDev"></b><small id="cfCloudTime"></small><button class="cta" id="btnCfCloud">USA L'ALTRO</button></div>
+  <p class="hint">Fino alla scelta nessuno dei due viene cancellato. Il salvataggio non scelto resta nella cronologia del Cloud o come copia su questo dispositivo.</p>
+  <div class="row"><button class="cta" id="btnCfLater">DECIDI DOPO</button></div></div></div>
+<div id="histBox" class="overlay" hidden><div class="card"><h2>Versioni del salvataggio</h2><p id="histTitle" class="hint"></p><ul class="games" id="histList"></ul><div class="row"><button class="cta" id="btnHistClose">CHIUDI</button></div></div></div>
 <div id="inviteBox" class="overlay" hidden><div class="card"><h2>Invito a giocare</h2><p id="invWho"></p><div class="row"><button class="cta" id="btnInvRefuse">RIFIUTA</button><button class="cta primary" id="btnInvAccept">ACCETTA</button></div></div></div>
 <div id="pickGame" class="overlay" hidden><div class="card"><h2>Invita <span id="pickWho"></span></h2><p>A quale gioco?</p><ul class="games" id="pickList"></ul><div class="row"><button class="cta" id="btnPickCancel">ANNULLA</button></div></div></div>
 <pre id="devOverlay" hidden></pre>

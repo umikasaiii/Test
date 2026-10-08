@@ -7,6 +7,7 @@ import { handleInvites } from "./invites";
 import { handleLibrary, purgeUserData } from "./library";
 import { HttpError, json, logEvent, now, randomId, readJson, str, timingSafeEqual } from "./util";
 import { handleSignal } from "./signal";
+import { handleFiles } from "./files";
 import { handleSocial } from "./social";
 import { handleCatalog } from "./catalog";
 import { handlePlayInvites } from "./playinvites";
@@ -140,6 +141,8 @@ async function route(env: Env, req: Request): Promise<Response> {
   if (cat) return cat;
   const pinv = await handlePlayInvites(env, req, path, user);
   if (pinv) return pinv;
+  const fl = await handleFiles(env, req, path, user);
+  if (fl) return fl;
   const lib = await handleLibrary(env, req, path, user);
   if (lib) return lib;
   const fr = await handleFriends(env, req, path, user);

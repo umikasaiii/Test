@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Idempotent Cloudflare provisioning for DSLink (run by .github/workflows/deploy.yml; needs CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID).
 
-Creates (only if missing): D1 database `dslink` (and, only if the chosen config binds one, the private R2 bucket `dslink-private`). Writes cloud/worker/wrangler.prod.jsonc
+Creates (only if missing): D1 database `dslink` and the PRIVATE R2 bucket `dslink-private` (verifying it has no public access). Writes cloud/worker/wrangler.prod.jsonc
 (no secrets inside) with the real D1 id and the account's workers.dev origin. Secrets are set with `wrangler secret put` by the workflow.
 Prints `KEY=value` lines for the workflow (never secret values). Stdlib only.
 """
@@ -28,9 +28,18 @@ def call(method, path, body=None, ok404=False):
 found = call("GET", "/d1/database?name=dslink")["result"]
 d1 = next((d for d in found if d["name"] == "dslink"), None) or call("POST", "/d1/database", {"name": "dslink"})["result"]
 CONFIG = os.environ.get("DSLINK_WRANGLER_CONFIG", "cloud/worker/wrangler.jsonc")
-# R2 only for the legacy hosted config (private: no public access, no custom domain is ever attached by this script). The Cloud base has no R2.
-if "r2_buckets" in open(CONFIG).read() and call("GET", "/r2/buckets/dslink-private", ok404=True) is None:
-    call("POST", "/r2/buckets", {"name": "dslink-private"})
+# R2: ONE private bucket for the users' own files and saves (the Worker's STORE binding). Private = no r.dev public URL and no custom domain; this script never enables either, and checks it.
+if "r2_buckets" in open(CONFIG).read():
+    if call("GET", "/r2/buckets/dslink-private", ok404=True) is None:
+        call("POST", "/r2/buckets", {"name": "dslink-private"})
+    for what, path in (("managed r2.dev public access", "/r2/buckets/dslink-private/domains/managed"), ("custom domains", "/r2/buckets/dslink-private/domains/custom")):
+        try:
+            r = call("GET", path, ok404=True)
+        except SystemExit as e:                 # token without that permission: say so, do not fail the deployment
+            print(f"::warning::cannot verify R2 {what}: {str(e)[:120]}", file=sys.stderr); continue
+        res = (r or {}).get("result") or {}
+        if (what.startswith("managed") and res.get("enabled")) or (what.startswith("custom") and res.get("domains")):
+            sys.exit(f"R2 bucket dslink-private has {what}: the bucket must stay private. Disable it in the dashboard (R2 > dslink-private > Settings) and run again.")
 sub = call("GET", "/workers/subdomain")["result"]["subdomain"]
 host = f"{NAME}.{sub}.workers.dev"
 

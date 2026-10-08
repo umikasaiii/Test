@@ -13,7 +13,8 @@ mkdir -p "$OUT/mp/vendor" && cp "$ROOT/cloud/web/mp/vendor/qrcode.js" "$ROOT/clo
 cat > "$OUT/index.html" <<'HTML'
 <!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=play/"><title>DSLink</title><a href="play/">DSLink</a>
 HTML
-# --- where the DSLink Cloud lives (read by the PWA at start; nothing for the user to type). No DSLINK_CLOUD_URL = this page's own origin (the Worker serves the PWA itself).
+# --- where the DSLink Cloud lives (read by the PWA at start; nothing for the user to type). OFFICIAL BUILD: no DSLINK_CLOUD_URL = this page's own origin (the Cloudflare Worker serves /play/, /api/ and /signal itself).
+#     The modes below (a separate static host such as Netlify) are kept only for historical tests: they are not part of the architecture.
 #   DSLINK_CLOUD_URL=https://dslink-cloud.<account>.workers.dev  DSLINK_API_MODE=proxy|direct
 #   proxy  (default for a static host such as Netlify): /api/* is proxied by the host (_redirects) so the session cookie is first-party (Safari blocks third-party cookies);
 #          signaling and the presence socket go straight to the cloud (SSE/WebSocket do not survive a plain proxy).
@@ -34,6 +35,15 @@ cat > "$OUT/_headers" <<'HDR'
   Cross-Origin-Resource-Policy: same-origin
 /mp/*
   Cross-Origin-Resource-Policy: same-origin
+/play/sw.js
+  Cache-Control: no-cache, max-age=0
+/play/build.json
+  Cache-Control: no-store
 HDR
+# --- one build id for the whole shell (JS + CSS + WASM core + controls): the service worker caches and serves them as ONE version (see sw.js)
+BUILD=$(cd "$OUT" && find play controls mp -type f ! -name sw.js ! -name build.json | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-12)
+sed -i "s/^const BUILD = \"dev\";/const BUILD = \"$BUILD\";/" "$OUT/play/sw.js"
+grep -q "const BUILD = \"$BUILD\";" "$OUT/play/sw.js" || { echo "could not stamp the build id" >&2; exit 1; }
+printf '{ "build": "%s" }\n' "$BUILD" > "$OUT/play/build.json"
 touch "$OUT/.nojekyll"
 echo "PWA ready in $OUT ($(du -sh "$OUT" | cut -f1)); serve it over HTTPS (e.g. GitHub Pages) and open /play/"

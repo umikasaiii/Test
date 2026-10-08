@@ -228,7 +228,7 @@ export async function handleLibrary(env: Env, req: Request, path: string, user: 
 
 /** account deletion: every object and row owned by the user */
 export async function purgeUserData(env: Env, uid: string): Promise<{ objects: number }> {
-  const objects = await deleteByPrefix(env, userPrefix(uid));
+  const objects = env.STORE ? await deleteByPrefix(env, userPrefix(uid)) : 0;      // everything of the account in R2 (files, system files, saves, history)
   await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(uid).run();  // ON DELETE CASCADE: credentials, sessions, games, files, saves, friendships, requests, invites
   await env.DB.prepare("DELETE FROM play_sessions WHERE host_user = ?").bind(uid).run();
   await env.DB.prepare("UPDATE play_sessions SET guest_user = 'deleted' WHERE guest_user = ?").bind(uid).run();   // the host's own history keeps the row, without the identity

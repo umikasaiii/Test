@@ -12,5 +12,5 @@
     { "name": "SIGNAL", "class_name": "SignalRoom" }
   ] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession"] }, { "tag": "v2", "new_sqlite_classes": ["SignalRoom"] }],
-  "vars": { "RP_NAME": "DSLink", "ORIGINS": "https://dslink.test,https://pwa.example", "RP_ID": "dslink.test", "ENVIRONMENT": "test" }
+  "vars": { "RP_NAME": "DSLink", "ORIGINS": "https://dslink.test,https://pwa.example", "RP_ID": "dslink.test", "ENVIRONMENT": "test", "QUOTA_MB": "40" }
 }

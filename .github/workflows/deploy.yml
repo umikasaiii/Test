@@ -1,7 +1,8 @@
 name: deploy-cloudflare
 
-# DSLink Cloud base: Worker (API + signaling) + Durable Objects + D1 + the PWA as static assets, all on ONE origin. No Containers, no R2, no TURN.
-# Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (token: Workers Scripts:Edit, D1:Edit, Account Settings:Read). See docs/CLOUD_BASE.md.
+# DSLink Cloud: Worker (API + signaling) + Durable Objects + D1 + a PRIVATE R2 bucket + the PWA as static assets, all on ONE origin (https://<worker>/play/). No Containers, no TURN, no Netlify.
+# Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (token: Workers Scripts:Edit, D1:Edit, Workers R2 Storage:Edit, Account Settings:Read). R2 must be enabled once in the dashboard.
+# Every run replaces the PWA and the Worker at the SAME URL; D1, R2 and Durable Object data are never deleted. See docs/CLOUD_STORAGE.md.
 # Optional repository variable DSLINK_EXTRA_ORIGINS: comma separated exact origins of a static host (e.g. a Netlify test site) allowed to call the API.
 on:
   workflow_dispatch:
@@ -48,7 +49,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3
           scripts/build_wasm.sh
           scripts/package_pwa.sh
-      - name: Provision D1 and write wrangler.prod.jsonc
+      - name: Provision D1 + the private R2 bucket and write wrangler.prod.jsonc
         id: prep
         run: python3 scripts/cf_prepare.py | tee -a "$GITHUB_OUTPUT"
       - name: D1 migrations (remote)
@@ -67,6 +68,14 @@ jobs:
           curl -sf "$url/api/health"; echo
           curl -sf -o /dev/null "$url/play/" && echo "PWA served"
           curl -sf -X POST "$url/signal/create" -H 'content-type: application/json' -d '{}' | head -c 120; echo
+          # authenticated private-storage smoke test: a throw-away account stores a save in R2, reads it back, an anonymous caller is refused, then the account (and its data) is deleted
+          u=smoke$RANDOM$RANDOM; H=(-H "origin: $url")
+          tok=$(curl -sf -X POST "$url/api/auth/register" "${H[@]}" -H 'content-type: application/json' -d "{\"username\":\"$u\",\"password\":\"correct horse battery staple\"}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+          head -c 4096 /dev/urandom > /tmp/s1.bin
+          curl -sf -X PUT "$url/api/saves/nds-smok?base=0&device=smoke-device-1&name=CI" "${H[@]}" -H "authorization: Bearer $tok" --data-binary @/tmp/s1.bin > /dev/null
+          curl -sf "$url/api/saves/nds-smok/data" "${H[@]}" -H "authorization: Bearer $tok" -o /tmp/s2.bin && cmp /tmp/s1.bin /tmp/s2.bin && echo "R2 round trip OK"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/api/saves/nds-smok/data")" = 401 ] && echo "anonymous refused (401)"
+          curl -sf -X DELETE "$url/api/account" "${H[@]}" -H "authorization: Bearer $tok" -H 'content-type: application/json' -d "{\"confirm\":\"$u\"}" > /dev/null && echo "smoke account deleted"
           echo "CLOUD API URL: $url" >> "$GITHUB_STEP_SUMMARY"
           echo "SIGNALING URL: $url/signal" >> "$GITHUB_STEP_SUMMARY"
           echo "PWA URL: $url/play/" >> "$GITHUB_STEP_SUMMARY"
@@ -86,6 +95,26 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi python3
           mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
           cd cloud/tests && npm install && npx playwright install --with-deps chrome
+      - name: Big homebrew ROM for the multipart upload test (own code, no commercial content)
+        run: |
+          python3 - <<'PY'
+          import struct
+          b = bytearray(open("build/rom/dslink_test_1.nds", "rb").read()); b[12:16] = b"BIGG"
+          def crc16(d):
+              c = 0xffff
+              for x in d:
+                  c ^= x
+                  for _ in range(8): c = (c >> 1) ^ 0xa001 if c & 1 else c >> 1
+              return c
+          struct.pack_into("<H", b, 0x15e, crc16(bytes(b[:0x15e])))
+          pad = bytearray(17 * 1024 * 1024 - len(b))
+          for i in range(0, len(pad), 4093): pad[i] = (i // 4093) & 255
+          open("build/rom/dslink_big.nds", "wb").write(bytes(b) + bytes(pad))
+          PY
+      - name: PUBLIC private-library end to end (ROM and BIOS in R2, new device, saves, conflicts, offline, big upload, interrupted download)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_cloud_files_e2e.mjs "${{ needs.deploy.outputs.url }}" "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_big.nds" /tmp/playcloudfiles
       - name: PUBLIC end to end (accounts, friends, presence, invite, create room, code join, WebRTC)
         env:
           CHROME: /opt/google/chrome/chrome

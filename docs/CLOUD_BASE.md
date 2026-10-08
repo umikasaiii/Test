@@ -1,7 +1,9 @@
 # DSLink Cloud base (FASE 5/9): account, social, presence, invites, signaling
 
-The emulation stays on the phones. Cloudflare only holds: accounts, profiles, cloud library **metadata**, friends, presence, invites, rooms and WebRTC signaling.
-It never runs melonDS or ROMs, never carries video/audio or DS radio frames, and never receives ROM/BIOS/firmware/`refs.json`/saves. No Containers, no R2, no TURN.
+> From FASE 6 the Cloud also stores the user's own ROMs, BIOS/firmware and saves in a private R2 bucket and the PWA is hosted only by the Worker (no Netlify): see [CLOUD_STORAGE.md](CLOUD_STORAGE.md). Token permissions and deploy steps there are the current ones.
+
+The emulation stays on the phones. Cloudflare holds: accounts, profiles, cloud library **metadata**, friends, presence, invites, rooms and WebRTC signaling (phase 6 adds the user's own optional files and saves, see CLOUD_STORAGE.md).
+It never runs melonDS or ROMs, never carries video/audio or DS radio frames, and never receives `refs.json`. No Containers, no TURN.
 
 ```
 PWA (phone) ──HTTPS/WSS──> Cloudflare Worker ──> D1 (users, sessions, friends, blocks, catalog, library, invites)
@@ -32,7 +34,7 @@ Migrations: `cloud/worker/migrations/0001_*.sql`, `0002_cloud_base.sql` (version
 * `?cloud=` / `?signal=` remain developer overrides only. Single Player never needs the Cloud (works with it offline).
 
 ## Deploy (needs YOUR Cloudflare credentials — not done from the development sandbox)
-1. Cloudflare dashboard → My Profile → API Tokens → Create Token (custom): **Account / Workers Scripts: Edit**, **Account / D1: Edit**, **Account / Account Settings: Read**.
+1. Cloudflare dashboard → My Profile → API Tokens → Create Token (custom): **Account / Workers Scripts: Edit**, **Account / D1: Edit**, **Account / Workers R2 Storage: Edit**, **Account / Account Settings: Read**.
 2. GitHub repo → Settings → Secrets and variables → Actions: secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`. Optional variable `DSLINK_EXTRA_ORIGINS` (e.g. `https://my-test.netlify.app`).
 3. Make sure a workers.dev subdomain exists (Workers & Pages → Overview).
 4. Actions → **deploy-cloudflare** → Run workflow. It runs the guard, tsc + vitest, builds WASM + PWA, creates D1 `dslink`, applies migrations, deploys, sets `INTERNAL_TOKEN`, smoke-tests, and runs the public browser test.

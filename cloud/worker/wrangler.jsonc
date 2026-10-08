@@ -1,5 +1,5 @@
 {
-  // DSLink Cloud BASE (phase 5): account, profile, library metadata, friends, presence, invites, room + WebRTC signaling. NO emulation, NO ROM/BIOS/firmware/save storage, NO Containers, NO R2.
+  // DSLink Cloud (phases 5-6): account, profile, library, friends, presence, invites, signaling, and the user's own ROMs / BIOS / firmware / saves in a PRIVATE R2 bucket (binding STORE). NO emulation here, NO Containers, NO TURN.
   // The PWA (build/pwa, produced by scripts/package_pwa.sh) is served by this same Worker, so https://<worker>/play/ needs no configuration at all.
   // `wrangler deploy` needs credentials: see docs/CLOUD_BASE.md (scripts/cf_prepare.py fills in the D1 id and the origin).
   "name": "dslink-cloud",
@@ -8,12 +8,13 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": { "directory": "../../build/pwa", "binding": "ASSETS", "not_found_handling": "404-page", "run_worker_first": ["/api/*", "/internal/*", "/signal/*"] },
   "d1_databases": [{ "binding": "DB", "database_name": "dslink", "database_id": "REPLACE_WITH_D1_ID", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "STORE", "bucket_name": "dslink-private" }],   // PRIVATE: no public access, no custom domain; reachable only through the authenticated Worker routes
   "durable_objects": { "bindings": [
     { "name": "PRESENCE", "class_name": "Presence" },
     { "name": "SESSION", "class_name": "GameSession" },
     { "name": "SIGNAL", "class_name": "SignalRoom" }
   ] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession"] }, { "tag": "v2", "new_sqlite_classes": ["SignalRoom"] }],
-  "vars": { "RP_NAME": "DSLink", "ORIGINS": "https://dslink.example.workers.dev", "RP_ID": "dslink.example.workers.dev", "ENVIRONMENT": "production" }
+  "vars": { "RP_NAME": "DSLink", "ORIGINS": "https://dslink.example.workers.dev", "RP_ID": "dslink.example.workers.dev", "ENVIRONMENT": "production", "QUOTA_MB": "2048" }
   // secrets (wrangler secret put): INTERNAL_TOKEN (only if the legacy /internal routes are ever used)
 }

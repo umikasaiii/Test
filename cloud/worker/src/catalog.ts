@@ -7,9 +7,10 @@ const ID_RE = /^[a-z0-9][a-z0-9_-]{2,39}$/;
 const PLATFORM_RE = /^[a-z0-9]{2,12}$/;
 export const MP_MODES = ["none", "distributed", "download_play", "both"];
 
-interface Row { game_id: string; platform: string; title: string; product_code: string; core_id: string; multiplayer_mode: string; download_play_supported: number; metadata_version: number; favorite: number; last_played: number; added_at: number }
+interface Row { game_id: string; platform: string; title: string; product_code: string; core_id: string; multiplayer_mode: string; download_play_supported: number; metadata_version: number; favorite: number; last_played: number; added_at: number; file_size?: number | null; file_sha?: string | null; save_rev?: number | null }
 const toEntry = (r: Row) => ({ gameId: r.game_id, platform: r.platform, title: r.title, productCode: r.product_code, coreId: r.core_id, multiplayerMode: r.multiplayer_mode, downloadPlaySupported: !!r.download_play_supported,
-  metadataVersion: r.metadata_version, favorite: !!r.favorite, lastPlayed: r.last_played || null, addedAt: r.added_at });
+  metadataVersion: r.metadata_version, favorite: !!r.favorite, lastPlayed: r.last_played || null, addedAt: r.added_at,
+  cloudFile: r.file_size ? { size: r.file_size, sha256: r.file_sha } : null, cloudSaveRevision: r.save_rev ?? null });
 
 /** the catalog is shared by all accounts, so the descriptive fields are validated and only ever grow more precise: a client can add a game, not rewrite someone else's title with junk */
 function validEntry(b: Record<string, unknown>) {
@@ -30,7 +31,10 @@ export async function handleCatalog(env: Env, req: Request, path: string, user: 
   const m = req.method;
   if (m === "GET" && path === "/api/cloud/library") {
     const rows = await env.DB.prepare(
-      `SELECT g.game_id, g.platform, g.title, g.product_code, g.core_id, g.multiplayer_mode, g.download_play_supported, g.metadata_version, e.favorite, e.last_played, e.added_at
+      `SELECT g.game_id, g.platform, g.title, g.product_code, g.core_id, g.multiplayer_mode, g.download_play_supported, g.metadata_version, e.favorite, e.last_played, e.added_at,
+       (SELECT size FROM cloud_files c WHERE c.user_id = e.user_id AND c.kind = 'game' AND c.name = e.game_id) AS file_size,
+       (SELECT sha256 FROM cloud_files c WHERE c.user_id = e.user_id AND c.kind = 'game' AND c.name = e.game_id) AS file_sha,
+       (SELECT revision FROM cloud_saves s WHERE s.user_id = e.user_id AND s.game_id = e.game_id ORDER BY revision DESC LIMIT 1) AS save_rev
        FROM library_entries e JOIN game_metadata g ON g.game_id = e.game_id WHERE e.user_id = ? ORDER BY e.favorite DESC, g.title COLLATE NOCASE`).bind(user.id).all<Row>();
     return json({ entries: rows.results.map(toEntry) });
   }
@@ -82,5 +86,14 @@ async function upsert(env: Env, userId: string, e: ReturnType<typeof validEntry>
         multiplayer_mode = CASE WHEN game_metadata.multiplayer_mode = 'none' THEN excluded.multiplayer_mode ELSE game_metadata.multiplayer_mode END,
         core_id = CASE WHEN game_metadata.core_id = '' THEN excluded.core_id ELSE game_metadata.core_id END, updated_at = ?8`).bind(e.gameId, e.platform, e.title, e.productCode, e.coreId, e.mode, e.dl, t),
     env.DB.prepare("INSERT INTO library_entries (user_id, game_id, favorite, last_played, added_at) VALUES (?1,?2,?3,0,?4) ON CONFLICT(user_id, game_id) DO UPDATE SET favorite = excluded.favorite").bind(userId, e.gameId, e.favorite, t),
+  ]);
+}
+
+/** a game whose file just reached the account's Cloud also exists in the account's library metadata (nothing is overwritten: a title or favourite set before stays) */
+export async function upsertCatalog(env: Env, userId: string, gameId: string, title: string) {
+  const t = now(), code = gameId.replace(/^[a-z0-9]+-/, "").toUpperCase(), platform = gameId.split("-")[0];
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO game_metadata (game_id, platform, title, product_code, core_id, multiplayer_mode, download_play_supported, metadata_version, updated_at) VALUES (?1,?2,?3,?4,'melonds-ds','distributed',0,1,?5) ON CONFLICT(game_id) DO NOTHING").bind(gameId, platform, (title || code).slice(0, 80), code, t),
+    env.DB.prepare("INSERT INTO library_entries (user_id, game_id, favorite, last_played, added_at) VALUES (?1,?2,0,0,?3) ON CONFLICT(user_id, game_id) DO NOTHING").bind(userId, gameId, t),
   ]);
 }

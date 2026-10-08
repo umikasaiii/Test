@@ -74,6 +74,25 @@ jobs:
           node signal_contract.mjs http://localhost:8787
           node play_cloud_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playcloud
           node play_cloud_static.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
+          python3 - <<'PY'
+          import struct
+          b = bytearray(open("../../build/rom/dslink_test_1.nds", "rb").read()); b[12:16] = b"BIGG"
+          def crc16(d):
+              c = 0xffff
+              for x in d:
+                  c ^= x
+                  for _ in range(8): c = (c >> 1) ^ 0xa001 if c & 1 else c >> 1
+              return c
+          struct.pack_into("<H", b, 0x15e, crc16(bytes(b[:0x15e])))
+          pad = bytearray(17 * 1024 * 1024 - len(b))
+          for i in range(0, len(pad), 4093): pad[i] = (i // 4093) & 255
+          open("../../build/rom/dslink_big.nds", "wb").write(bytes(b) + bytes(pad))
+          PY
+          node play_cloud_files_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_big.nds" /tmp/playcloudfiles
+      - name: PWA UPDATE safety (service worker versions JS + WASM together, incomplete update refused, running game never swapped, AGGIORNA from the menu, offline start)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_sw_update.mjs ../../build/pwa "$PWD/../../build/rom/dslink_test_1.nds"
       - name: The PWA package carries the code and no private content
         run: |
           python3 - <<'PY'
