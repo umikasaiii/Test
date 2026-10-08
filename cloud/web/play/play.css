@@ -49,3 +49,9 @@
 .games li.game .acts { margin-top: 6px; } .games li.game { flex-wrap: wrap; }
 #xferBar { width: 100%; height: 14px; } .cfopt { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; padding: 10px; border: 1px solid #2a3a5c; border-radius: 12px; }
 #updateBar { z-index: 40; pointer-events: auto; display: flex; gap: 10px; align-items: center; white-space: nowrap; } #updateBar[hidden] { display: none; }
+
+/* ---- phase 7: Party Voice (functional) */
+.pbar { position: fixed; top: calc(env(safe-area-inset-top) + 6px); right: 8px; z-index: 35; display: flex; gap: 4px; align-items: center; background: rgba(6,11,23,.82); border: 1px solid #2a3a5c; border-radius: 999px; padding: 2px 4px; }
+.pbar[hidden] { display: none; } .pbar button { appearance: none; border: 0; background: none; color: #eaf1ff; min-width: 36px; min-height: 36px; font-size: 16px; } .pbar[data-speaking="1"] { border-color: #3ddc84; box-shadow: 0 0 0 2px rgba(61,220,132,.35); } .pbar[data-muted="1"] #btnBarMic { opacity: .7; }
+li.pm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; } li.pm.speaking { border-color: #3ddc84; box-shadow: 0 0 0 2px rgba(61,220,132,.3); } li.pm .vol { flex: 1 1 100%; } li.pm .cn { color: #9db4e0; }
+.chip[hidden] { display: none; }

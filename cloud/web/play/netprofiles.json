@@ -1,0 +1,10 @@
+{
+  "_": "Network profile of games for multiplayer over the Internet. DATA, not code: one source for the PWA (lobby quality gate) and the Cloud catalog. LOW_LATENCY_REQUIRED = the game's own radio protocol waits for replies inside very tight windows (measured on the DS: ~0-8 ms one-way works, ~10 borderline, beyond probably fails), NORMAL = tolerant, UNKNOWN = not measured (a prudent middle).",
+  "version": 1,
+  "default": "UNKNOWN",
+  "rules": [
+    { "productCodePrefix": "AMP", "profile": "LOW_LATENCY_REQUIRED", "note": "Mario Party DS: Download Play and the lobby handshake are timing sensitive" },
+    { "productCode": "DLTT", "profile": "NORMAL", "note": "DSLink homebrew radio test ROM (own code)" }
+  ],
+  "downloadPlayProfile": "LOW_LATENCY_REQUIRED"
+}

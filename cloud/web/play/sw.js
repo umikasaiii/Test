@@ -8,7 +8,7 @@
 const BUILD = "dev";
 const CACHE = "dslink-play-" + BUILD, FLAGS = "dslink-flags", PACKAGED = BUILD !== "dev";
 const BASE = new URL("./", self.location).href, UP = new URL("../", self.location).href;
-const SHELL = ["", "index.html", "play.js", "play.css", "player.js", "video.js", "storage.js", "sha256.js", "emulator.worker.js", "audio-worklet.js", "render-worker.js", "options.js", "radio-ring.js", "radio-peer.js", "session.js", "friends.js", "dlassist.js", "cloud.js", "cloudui.js", "cloudfiles.js", "cloud-config.json", "core/dslink_wasm.js", "core/dslink_wasm.wasm", "manifest.webmanifest",
+const SHELL = ["", "index.html", "play.js", "play.css", "player.js", "video.js", "storage.js", "sha256.js", "emulator.worker.js", "audio-worklet.js", "render-worker.js", "options.js", "radio-ring.js", "radio-peer.js", "session.js", "friends.js", "dlassist.js", "cloud.js", "cloudui.js", "cloudfiles.js", "net.js", "netquality.js", "voice.js", "partyui.js", "netprofiles.json", "cloud-config.json", "core/dslink_wasm.js", "core/dslink_wasm.wasm", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"].map((p) => BASE + p).concat(["controls/controls.css", "controls/controls.js", "controls/layouts.js", "controls/components.js", "controls/input.js", "controls/menu.js", "mp/mp.css", "mp/vendor/qrcode.js"].map((p) => UP + p));
 self.addEventListener("install", (e) => {
   e.waitUntil((async () => {

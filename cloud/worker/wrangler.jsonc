@@ -12,9 +12,10 @@
   "durable_objects": { "bindings": [
     { "name": "PRESENCE", "class_name": "Presence" },
     { "name": "SESSION", "class_name": "GameSession" },
-    { "name": "SIGNAL", "class_name": "SignalRoom" }
+    { "name": "SIGNAL", "class_name": "SignalRoom" },
+    { "name": "PARTY", "class_name": "PartyRoom" }
   ] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession"] }, { "tag": "v2", "new_sqlite_classes": ["SignalRoom"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Presence", "GameSession"] }, { "tag": "v2", "new_sqlite_classes": ["SignalRoom"] }, { "tag": "v3", "new_sqlite_classes": ["PartyRoom"] }],
   "vars": { "RP_NAME": "DSLink", "ORIGINS": "https://dslink.example.workers.dev", "RP_ID": "dslink.example.workers.dev", "ENVIRONMENT": "production", "QUOTA_MB": "2048" }
   // secrets (wrangler secret put): INTERNAL_TOKEN (only if the legacy /internal routes are ever used)
 }

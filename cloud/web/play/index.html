@@ -19,7 +19,7 @@
 <body>
 <main id="app" aria-live="polite">
   <section class="screen on" data-screen="library">
-    <header class="brand"><span class="logo">DS<b>Link</b></span><span class="sub">Nintendo DS nel browser</span><button class="chip" id="btnAccount" data-mode="anon">ACCEDI</button></header>
+    <header class="brand"><span class="logo">DS<b>Link</b></span><span class="sub">Nintendo DS nel browser</span><button class="chip" id="btnParty" hidden>🎙 PARTY</button><button class="chip" id="btnAccount" data-mode="anon">ACCEDI</button></header>
     <p class="notice" id="unsupported" hidden></p>
 
     <h2>Giochi</h2>
@@ -94,6 +94,20 @@
     <div class="actions"><button class="cta" id="btnCloudLibBack">INDIETRO</button></div>
   </section>
 
+  <section class="screen" data-screen="party">
+    <h1>Party</h1>
+    <div id="partyEmpty"><p class="hint">Parla con gli amici mentre giochi o sei nei menu. Il microfono viene richiesto solo quando crei o entri in un party.</p><div class="actions"><button class="cta primary" id="btnPartyCreate">CREA PARTY</button></div></div>
+    <div id="partyBody" hidden>
+      <ul class="games" id="partyList"></ul>
+      <p class="hint" id="partyNote"></p><p class="hint" id="partyOwnerNote" hidden>Sei il proprietario: puoi rimuovere i membri.</p>
+      <div class="actions"><button class="cta primary" id="btnPartyMute">MUTE</button><button class="cta" id="btnPartyDeaf">DISATTIVA AUDIO PARTY</button></div>
+      <label class="chk"><input type="checkbox" id="optDuck"> Riduci l'audio del gioco durante la voce</label>
+      <div class="actions"><button class="cta" id="btnPartyInvite">INVITA</button><button class="cta danger" id="btnPartyLeave">ESCI</button></div>
+      <div id="partyPick" hidden><h2>Invita un amico</h2><ul class="games" id="partyPickList"></ul></div>
+    </div>
+    <div class="actions"><button class="cta" id="btnPartyBack">INDIETRO</button></div>
+  </section>
+
   <section class="screen" data-screen="friends-create">
     <h1>Crea partita</h1><p class="hint">Scegli il gioco, poi fai inserire il codice all'amico.</p>
     <select id="friendGame" class="sel"></select>
@@ -118,6 +132,7 @@
       <li data-slot="guest"><b>PLAYER 2</b> <span class="st" id="stGuest">—</span></li>
     </ul>
     <p class="quality" id="lobbyQuality"></p>
+    <p class="hint" id="lobbyNet"></p>
     <p class="hint" id="lobbyNote"></p>
     <label class="cta file" id="lobbyRefsWrap" hidden><input type="file" id="lobbyRefs" hidden>IMPORTA refs.json</label>
     <div class="actions"><button class="cta primary" id="btnReady" hidden>PRONTO</button><button class="cta primary" id="btnStart" hidden disabled>AVVIA</button><button class="cta" id="btnLobbyLeave">ESCI</button></div>
@@ -143,6 +158,10 @@
 <div id="confirm" class="overlay" hidden><div class="card"><h2>Uscire dal gioco?</h2><p>Il salvataggio viene conservato su questo dispositivo.</p><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ESCI</button></div></div></div>
 <div id="assistStep" class="assist" hidden></div>
 <div id="cloudToast" class="assist" hidden></div>
+<div id="partyBar" class="pbar" hidden><button id="btnBarOpen" aria-label="Party">🎙<span id="barCount"></span></button><span id="barSpeaker" hidden>🗣</span><button id="btnBarMic" aria-label="Muta">🎙</button></div>
+<div id="partyInviteBox" class="overlay" hidden><div class="card"><h2>Invito al Party</h2><p id="pInvWho"></p><div class="row"><button class="cta" id="btnPInvRefuse">RIFIUTA</button><button class="cta primary" id="btnPInvAccept">ACCETTA</button></div></div></div>
+<div id="netBanner" class="assist" hidden>Riconnessione in corso…</div>
+<div id="netWarn" class="overlay" hidden><div class="card"><h2>Connessione lenta</h2><p id="netWarnText"></p><div class="row"><button class="cta primary" id="btnNetRetry">RIPROVA</button><button class="cta" id="btnNetGo">CONTINUA COMUNQUE</button></div><div class="row"><button class="cta" id="btnNetHosted" hidden>USA MODALITÀ HOSTED</button></div></div></div>
 <div id="updateBar" class="assist" hidden>Nuova versione di DSLink pronta. <button class="mini primary" id="btnUpdate">AGGIORNA</button></div>
 <div id="xfer" class="overlay" hidden><div class="card"><h2 id="xferTitle">Caricamento…</h2><p id="xferName" class="hint"></p><progress id="xferBar" max="100" value="0"></progress><p id="xferPct" class="hint"></p><p id="xferErr" class="err"></p><div class="row"><button class="cta" id="btnXferClose" hidden>CHIUDI</button></div></div></div>
 <div id="conflictBox" class="overlay" hidden><div class="card"><h2>Ci sono due salvataggi diversi</h2><p id="cfTitle" class="hint"></p>

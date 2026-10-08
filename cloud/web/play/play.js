@@ -9,6 +9,10 @@ import { initFriends } from "./friends.js";
 import { loadConfig, Cloud, passkeysSupported } from "./cloud.js";
 import { initCloudUI } from "./cloudui.js";
 import { CloudFiles, errMsg } from "./cloudfiles.js";
+import { loadIce } from "./net.js";
+import { profileFor } from "./netquality.js";
+import { PartyVoice } from "./voice.js";
+import { initPartyUI } from "./partyui.js";
 import { DlAssist, validateRefs, HOST_REFS } from "./dlassist.js";
 
 const $ = (id) => document.getElementById(id);
@@ -18,7 +22,7 @@ const SYS = [
   { key: "bios9", file: "bios9.bin", title: "BIOS ARM9", sizes: [4096] },
   { key: "firmware", file: "firmware.bin", title: "Firmware", sizes: [131072, 262144, 524288] },
 ];
-let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0, friends = null, cloud = null, cloudUi = null, cfiles = null, refsText = null, assist = null;
+let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0, friends = null, cloud = null, cloudUi = null, cfiles = null, partyVoice = null, partyUi = null, netTable = null, refsText = null, assist = null;
 
 const show = (name) => { document.body.dataset.screen = name; document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("on", s.dataset.screen === name)); };
 const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB");
@@ -41,13 +45,18 @@ async function boot() {
   show("library");
   $("devOverlay").hidden = !DEV; setInterval(() => { if (DEV) devTick(); }, 500);
   if ("serviceWorker" in navigator && self.isSecureContext && !new URLSearchParams(location.search).has("nosw")) navigator.serviceWorker.register("./sw.js", { scope: "./" }).then(watchUpdate).catch(() => {});
-  friends = initFriends({ $, show, games: () => games, gameByCloudId: (gid) => localByGameId().get(gid), importRefsFile, hasSystem: () => SYS.every((x) => sysInfo[x.key] && sysInfo[x.key].ok), hasRefs: () => !!refsText && validateRefs(refsText).ok,
+  friends = initFriends({ $, show, games: () => games, gameByCloudId: (gid) => localByGameId().get(gid), ice: () => loadIce(cloud, opt), profileOf: (g) => profileFor(netTable, g && { ...g, networkProfile: (cloud && cloud.library.find((e) => e.gameId === gameIdOf(g)) || {}).networkProfile }),
+    hostedAvailable: () => !!(window.DSLINK_HOSTED && (opt("hosted", "") === "1" || window.DSLINK_HOSTED.available)), startHosted: (s) => !!(window.DSLINK_HOSTED && window.DSLINK_HOSTED.start && window.DSLINK_HOSTED.start({ code: s.code, game: s.o.game })), importRefsFile, hasSystem: () => SYS.every((x) => sysInfo[x.key] && sysInfo[x.key].ok), hasRefs: () => !!refsText && validateRefs(refsText).ok,
     hostDlBlock: () => { if (!SYS.every((x) => sysInfo[x.key] && sysInfo[x.key].ok)) return "Servono BIOS e firmware su questo dispositivo."; if (!refsText) return "Manca refs.json: importalo prima di avviare."; const v = validateRefs(refsText, HOST_REFS); return v.ok ? "" : v.error; }, startGame: (id, session) => playGame(id, session), onLost: (why) => onSessionLost(why) });
   // DSLink Cloud: OPTIONAL (account, friends, invites, library metadata). Where it lives comes from cloud-config.json - no setup. Nothing below blocks or breaks playing locally.
   const cfg = await loadConfig(opt).catch(() => ({ api: "", signal: "", ws: "" }));
   cloud = new Cloud(cfg);
-  cloudUi = initCloudUI({ $, show, cloud, passkeys: passkeysSupported, syncLibrary, localByGameId, playLocal: (id) => playGame(id), startInvite: (o) => friends.startInvite(o) });
+  cloudUi = initCloudUI({ $, show, cloud, passkeys: passkeysSupported, syncLibrary, localByGameId, playLocal: (id) => playGame(id), startInvite: (o) => friends.startInvite(o), partyInvite: (f) => partyUi && partyUi.invite(f) });
   cfiles = new CloudFiles({ cloud, store, opt });
+  try { const r = await fetch(new URL("./netprofiles.json", import.meta.url)); if (r.ok) netTable = await r.json(); } catch { /* offline: profiles fall back to UNKNOWN (a prudent middle) */ }
+  // Party Voice: independent of the Player and of any game session. The game's audio can be ducked while somebody speaks (opt-in).
+  partyVoice = new PartyVoice({ cloud, opt, duck: (f) => { duckLevel = f; if (player) player.duck(f); } });
+  partyUi = initPartyUI({ $, show, cloud, party: partyVoice, toast: (m) => cloudUi && cloudUi.toast(m) });
   cloud.on((ev) => { if (ev === "login") { cloud.setActivity("menu"); syncLibrary(); cloudStart(); } if (ev === "logout" || ev === "anon" || ev === "offline") { cfiles.refresh().then(renderLibrary); } });
   cfiles.on((ev) => { if (ev === "conflict" && !current && document.body.dataset.screen === "library") { const c = [...cfiles.conflicts.values()][0]; if (c) askConflict(c); } if (ev !== "sync") renderLibrary(); updateUsage(); });
   bindCloudUi();
@@ -252,6 +261,7 @@ async function playGame(id, session) {
     buildGame();
     await player.start({ id, rom, system, sram, radio: session ? { role: session.role === "host" ? 1 : 2, peer: session.peer } : undefined });
     if (session) session.playing();
+    if (duckLevel < 1) player.duck(duckLevel);                                  // a party member is speaking right now
     if (cloud) { cloud.setActivity("game", gameIdOf(g)); if (!dlGuest) cloud.markPlayed(gameIdOf(g)).catch(() => {}); }
     if (session && session.dlplay) startAssist(session);
     show("game"); $("game").hidden = false; $("app").style.display = "none";
@@ -313,7 +323,7 @@ async function onSessionLost(why) {
 
 // ---------------------------------------------------------------- DSLink Cloud storage: ROMs, BIOS/firmware and saves of THIS account, synchronised with the local store
 // The emulator only uses local files. Everything below moves copies between the device and the account's private Cloud space, with progress, hash checks and no loss of local data on any error.
-let lastPushed = 0;
+let lastPushed = 0, duckLevel = 1;
 const autoCloud = () => { try { return localStorage.getItem("dslink.autocloud") === "1"; } catch { return false; } };
 const toast = (m) => { if (cloudUi) cloudUi.toast(m); };
 const pctText = (p) => ({ hash: "Preparo il file…", upload: "Caricamento…", verify: "Verifico l'integrità…", download: "Scaricamento…", done: "Completato" }[p.phase] || "") + (p.phase === "upload" || p.phase === "download" ? " " + p.pct + "%" : "");
@@ -461,7 +471,7 @@ function showUpdateBar() { $("updateBar").hidden = !(waitingSW && !current); }  
 
 // ---------------------------------------------------------------- development overlay (this device only, never sent anywhere)
 function devTick() {
-  if (!player) { $("devOverlay").textContent = `DSLink dev · ${store ? store.kind : "-"} · ${Object.entries(caps || {}).filter(([, v]) => v === true).map(([k]) => k).join(" ")}`; return; }
+  if (!player) { $("devOverlay").textContent = [`DSLink dev · ${store ? store.kind : "-"} · ${Object.entries(caps || {}).filter(([, v]) => v === true).map(([k]) => k).join(" ")}`, ...voiceLines()].join("\n"); return; }
   const s = player.stats, a = s.audio, f = (n, d = 1) => (n || 0).toFixed(d);
   $("devOverlay").textContent = [
     `EMU    ${f(s.emuFps)} fps  frame ${f(s.frameMsAvg, 2)}/${f(s.frameMsMax)} ms  late ${f(s.tickLateAvgMs, 2)}/${f(s.tickLateMaxMs)} ms`,
@@ -469,10 +479,21 @@ function devTick() {
     `RENDER ${f(s.renderFps)} fps (${s.video})  upload ${f(s.uploadMsAvg, 2)}/${f(s.uploadMsMax)} ms  draw ${f(s.drawMsAvg, 2)}/${f(s.drawMsMax)} ms  main ${f(s.mainFrameMsAvg, 2)}/${f(s.mainFrameMsMax)} ms`,
     `AUDIO  ${a.backend}  buf ${f(a.fillMs, 0)}/${f(a.targetMs, 0)} ms  queue ${a.queueFrames || 0} fr  rate ${Math.round(a.srcRate || 0)}>${Math.round(a.ctxRate || 0)} Hz  lat ${f(a.baseLatencyMs, 0)}+${f(a.outputLatencyMs, 0)} ms`,
     `       underruns ${a.underEvents || 0} ev / ${a.underSamples || 0} smp  last10s ${a.under10s || 0}  overrun ${a.overruns || 0}  health ${a.state || "-"}/${a.ctxState}  late ${a.lateQuanta || 0}  gap ${f(a.msgGapMaxMs, 0)} ms`,
-    ...radioLines(s),
+    ...radioLines(s), ...netLines(s), ...voiceLines(),
     `WASM   ${f(s.wasmMB, 0)} MB   main stalls ${s.stalls} (long ${s.longTasks})   ${s.lifecycle.paused ? "PAUSED " + s.lifecycle.reason : "running"}   store ${store.kind}`].join("\n");
 }
 
+function netLines(s) {
+  const r = s.radio; if (!r) return [];
+  const p = r.peer, pa = p.path || {}, f = (n, d = 1) => (n || 0).toFixed(d);
+  return [`GAME NET  ice ${pa.local || "-"}/${pa.remote || "-"} ${pa.protocol || ""} -> ${pa.path || "-"}  rtt ${f(p.rtt.avg)} ms  jitter ${f(p.jitter)}  loss ${p.lost}  buffered ${p.bufferedAmount}/${p.bufferedMax}  reorder ${p.pongReordered || 0}  reconnects ${p.reconnects || 0} (ice restarts ${p.restartsTotal || 0}, net changes ${p.netChanges || 0}, last outage ${f(p.lastOutageMs, 0)} ms)`];
+}
+let voiceStats = null; setInterval(() => { if (DEV && partyVoice && partyVoice.inParty) partyVoice.stats().then((v) => { voiceStats = v; }).catch(() => {}); else voiceStats = null; }, 1000);
+function voiceLines() {
+  const v = voiceStats; if (!v) return [];
+  const f = (n, d = 1) => (n || 0).toFixed(d);
+  return [`VOICE  peers ${v.connected}/${v.peers}  ${v.codec || "-"}  ${f(v.bitrateKbps, 0)} kbit/s  rtt ${f(v.rttMs, 0)} ms  jitter ${f(v.jitterMs)} ms  lost ${v.lost}  level ${f(v.level, 2)}  reconnects ${v.reconnects} (ice restarts ${v.restarts}, signal ${v.signalReconnects})  mic ${v.mic}${v.muted ? " muted" : ""}  paths ${Object.values(v.paths || {}).join(",")}`];
+}
 function radioLines(s) {
   const r = s.radio; if (!r) return [];
   const p = r.peer, f = (n, d = 1) => (n || 0).toFixed(d), c = r.core || {};
@@ -485,7 +506,7 @@ function radioLines(s) {
 
 // ---------------------------------------------------------------- test/diagnostic surface (read-only state of THIS page)
 function api() {
-  return { get player() { return player; }, get friends() { return friends; }, get cloud() { return cloud; }, get cfiles() { return cfiles; }, get games() { return games; }, askConflict, syncEverything, get cloudUi() { return cloudUi; }, get assist() { return assist; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
+  return { get player() { return player; }, get friends() { return friends; }, get cloud() { return cloud; }, get cfiles() { return cfiles; }, get party() { return partyVoice; }, get partyUi() { return partyUi; }, get games() { return games; }, askConflict, syncEverything, get cloudUi() { return cloudUi; }, get assist() { return assist; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
     stats: () => (player ? player.stats : null), grab: () => player && player.grab(), isPlaying: () => !!current && !!player && player.running, whenSaved: () => saveChain };
 }
 boot();

@@ -14,8 +14,10 @@ export function initFriends(ctx) {
   };
   // the same game on both devices: same ROM (same id) or the same cartridge code (another dump of the same game)
   const localGame = (g) => g && (ctx.games().find((x) => x.id === g.id) || ctx.games().find((x) => g.code && x.code === g.code));
-  const sessionOpts = (role, game) => ({
-    role, base: signalBase(opt), game, iceServers: [{ urls: "stun:stun.l.google.com:19302" }].filter(() => opt("stun", "1") !== "0"),
+  // ICE servers come from the Cloud (short-lived TURN credentials, never in the app); anonymous play gets public STUN only
+  const sessionOpts = (role, game, ice = {}) => ({
+    role, base: signalBase(opt), game, iceServers: ice.iceServers || [], iceTransportPolicy: ice.iceTransportPolicy, relayAvailable: ice.relayAvailable,
+    profileOf: (g) => ctx.profileOf(g), hostedAvailable: () => ctx.hostedAvailable(), startHosted: (s) => ctx.startHosted(s),
     radioMode: opt("radiomode", "") === "ordered" ? { ordered: true } : opt("radiomode", "") === "reliable" ? { ordered: true } : undefined,
     impair: { delayMs: +opt("delay", 0) || 0, jitterMs: +opt("jitter", 0) || 0, lossPct: +opt("loss", 0) || 0 },
     hasGame: (g) => !!localGame(g),
@@ -44,9 +46,9 @@ export function initFriends(ctx) {
 
   // ---- an accepted invite: the room already exists (made by the account API), both tokens say who is who, nothing is typed. The isolation step is the same as for create/join.
   async function startInvite(o) { if (await prepare({ kind: "invite", ...o })) return; beginInvite(o); }
-  function beginInvite(o) {
-    const lg = ctx.gameByCloudId(o.gameId);
-    session = new Session(sessionOpts(o.role, o.role === "host" && lg ? { id: lg.id, code: lg.code, title: lg.title, dlplay: true } : null));
+  async function beginInvite(o) {
+    const lg = ctx.gameByCloudId(o.gameId), ice = await ctx.ice();
+    session = new Session(sessionOpts(o.role, o.role === "host" && lg ? { id: lg.id, code: lg.code, title: lg.title, dlplay: true } : null, ice));
     session.attach(o.code, o.token); show("lobby"); render(session);
   }
 
@@ -64,7 +66,7 @@ export function initFriends(ctx) {
     $("btnMakeRoom").disabled = true; $("createErr").textContent = "";
     if (await prepare({ kind: "create", gameId })) return;
     try {
-      session = new Session(sessionOpts("host", { id: g.id, code: g.code, title: g.title, dlplay: true }));
+      session = new Session(sessionOpts("host", { id: g.id, code: g.code, title: g.title, dlplay: true }, await ctx.ice()));
       await session.create(); show("lobby"); render(session);
     } catch (e) { session = null; show("friends-create"); $("createErr").textContent = errText(e); }
     $("btnMakeRoom").disabled = false;
@@ -80,7 +82,7 @@ export function initFriends(ctx) {
     $("joinErr").textContent = ""; $("btnDoJoin").disabled = true;
     if (await prepare({ kind: "join", code })) return;
     try {
-      session = new Session(sessionOpts("guest", null));
+      session = new Session(sessionOpts("guest", null, await ctx.ice()));
       await session.join(code); show("lobby"); render(session);
     } catch (e) { session = null; $("joinErr").textContent = errText(e); show("friends-join"); }
     $("btnDoJoin").disabled = false;
@@ -115,7 +117,11 @@ export function initFriends(ctx) {
     if (host && s.code && $("codeQr").dataset.code !== s.code) drawQr(s.code);
     const mine = s.me.ready ? ["Pronto", "ok"] : ["Connesso", "ok"], theirs = !both ? (s.state === "connecting" ? ["Connessione…", "wait"] : ["In attesa…", "wait"]) : s.other.ready ? ["Pronto", "ok"] : ["Connesso", "ok"];
     slot("stHost", host ? mine[0] : theirs[0], host ? mine[1] : theirs[1]); slot("stGuest", host ? theirs[0] : mine[0], host ? theirs[1] : mine[1]);
-    const q = s.quality; $("lobbyQuality").className = "quality " + (q ? q.level : ""); $("lobbyQuality").textContent = s.qualityBusy ? "Controllo la connessione…" : q ? "Connessione: " + q.label : "";
+    const q = s.quality, d = s.decision; $("lobbyQuality").className = "quality " + (q ? q.level : ""); $("lobbyQuality").textContent = s.qualityBusy ? "Controllo la connessione…" : q ? "Connessione: " + q.label : "";
+    $("lobbyNet").textContent = both && q && q.path && q.path !== "unknown" ? (q.path === "relay" ? "Tramite relay" : "Diretta") + (s.o.relayAvailable === false && q.path !== "relay" ? " · relay non disponibile" : "") : "";
+    const ask = host && !!d && d.block && !s.forced && !s.qualityBusy && both;
+    $("netWarn").hidden = !ask; if (ask) { $("netWarnText").textContent = d.message; $("btnNetHosted").hidden = !s.hostedAvailable(); }
+    $("netBanner").hidden = !(s.peer && s.peer.state === "degraded" && (s.state === "lobby" || s.state === "starting" || s.state === "playing"));
     let note = "";
     if (!both) note = host ? "Fai inserire il codice all'amico." : "Mi collego alla partita…";
     else if (!host && s.hostGame && !s.gameOk && s.dlplay) note = `Non hai «${s.hostGame.title}»: lo scarichi dal DS dell'amico con Download Play (servono BIOS e firmware, nessun gioco).`;
@@ -123,6 +129,9 @@ export function initFriends(ctx) {
     else if (host && s.dlplay && s.hostBlock()) note = s.hostBlock();
     else if (!host && s.dlplay && !isolated()) note = hpBlock(s);
     else if (host && s.dlplay) note = "Il tuo amico scarica il gioco dal tuo DS (Download Play).";
+    else if (d && d.block && !host) note = d.message + " Attendi la scelta dell'amico.";
+    else if (host && s.netBlock() && s.qualityBusy) note = "Controllo la connessione prima di iniziare…";
+    else if (d && d.warn) note = d.message;
     else if (q && q.level === "RED") note = "La connessione non è adatta: avvicinatevi al router Wi-Fi o usate la stessa rete. Puoi provare comunque.";
     else if (s.other.hidden) note = "L'amico ha messo l'app in secondo piano…";
     $("lobbyNote").textContent = note;
@@ -140,8 +149,12 @@ export function initFriends(ctx) {
   $("lobbyRefs").onchange = async (e) => { const f = e.target.files[0]; e.target.value = ""; if (f && await ctx.importRefsFile(f) && session) render(session); };   // the room stays: refs.json can be imported while it is open
   $("btnReady").onclick = () => { if (session) session.setReady(!session.me.ready); };
   $("btnStart").onclick = () => { if (session) session.start(); };
+  $("btnNetRetry").onclick = () => { if (session) session.retryMeasure(); };
+  $("btnNetGo").onclick = () => { if (session) session.continueAnyway(); };
+  $("btnNetHosted").onclick = () => { if (session && session.useHosted()) leave(); };
   $("btnLobbyLeave").onclick = () => leave();
-  async function leave() { const s = session; session = null; if (s) await s.close(); show("library"); }
+  const clearNet = () => { $("netWarn").hidden = true; $("netBanner").hidden = true; };      // overlays of the lobby never outlive it
+  async function leave() { const s = session; session = null; clearNet(); if (s) await s.close(); show("library"); }
   $("btnLostBack").onclick = () => show("library");
 
   // ?join=CODE (QR scanned with the camera app): open the join screen and connect
@@ -150,8 +163,8 @@ export function initFriends(ctx) {
     get session() { return session; },
     leave, doJoin, startInvite,
     /** the game ended or the link dropped while playing: close the room and tell the user */
-    async lost(why) { const s = session; session = null; if (s) { s.state === "closed" || (await s.close()); } $("lostNote").textContent = why || ""; show("lost"); },
-    async endSession() { const s = session; session = null; if (s) await s.close(); },
+    async lost(why) { const s = session; session = null; clearNet(); if (s) { s.state === "closed" || (await s.close()); } $("lostNote").textContent = why || ""; show("lost"); },
+    async endSession() { const s = session; session = null; clearNet(); if (s) await s.close(); },
     /** after the isolation reload: carry on with what the user was doing (no new questions) */
     resume() {
       const raw = load(INTENT); store(INTENT, null); let it = null; try { it = raw ? JSON.parse(raw) : null; } catch { /* none */ }

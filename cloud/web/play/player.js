@@ -284,6 +284,13 @@ export class Player {
   }
   audioBlocked() { return !!(this.ctx && this.ctx.state !== "running") || this.pauseReason === "audio"; }
   async unlockAudio() { try { if (this.ctx) await this.ctx.resume(); } catch { /* still blocked */ } if (this.paused && this.pauseReason === "audio") this.resumeAll("tap"); }
+  /** Party Voice ducking: lower the GAME audio while someone speaks (the game's own volume setting is never changed; 1 = untouched). The gain node is only inserted the first time it is needed. */
+  duck(f) {
+    const src = this.node || this.sp, ctx = this.ctx; if (!ctx || !src) return;
+    if (!this.gainNode || this.gainCtx !== ctx) { this.gainNode = ctx.createGain(); this.gainCtx = ctx; this.gainFor = null; }
+    if (this.gainFor !== src) { if (f >= 1) return; try { src.disconnect(); } catch { /* not connected */ } src.connect(this.gainNode); this.gainNode.connect(ctx.destination); this.gainFor = src; }
+    this.gainNode.gain.setTargetAtTime(Math.max(0, Math.min(1, f)), ctx.currentTime, 0.08);
+  }
   async resume() { if (this.paused) await this.resumeAll("manual"); }
   async acquireWake() { try { if (navigator.wakeLock && !this.wake && !document.hidden) { this.wake = await navigator.wakeLock.request("screen"); this.wake.addEventListener("release", () => { this.wake = null; }); } } catch { this.wake = null; } }
   releaseWake() { try { if (this.wake) this.wake.release(); } catch { /* gone */ } this.wake = null; }

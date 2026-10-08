@@ -2,7 +2,7 @@
 const AVATARS = ["🎮", "🕹️", "👾", "🐱", "🐶", "🦊", "🐼", "🐸", "🚀", "⭐", "🍄", "🔥"];
 export const avatarOf = (a) => AVATARS[Math.max(0, Math.min(AVATARS.length - 1, parseInt(String(a || "a0").slice(1), 10) || 0))];
 const STATUS = { OFFLINE: "Offline", ONLINE: "Online", MENU: "Nel menu", IN_GAME: "In gioco" };
-export const statusText = (f) => (f.status === "IN_GAME" && f.game && f.game.title ? "In gioco · " + f.game.title : STATUS[f.status] || "Offline");
+export const statusText = (f) => (f.status === "IN_GAME" && f.game && f.game.title ? "In gioco · " + f.game.title : f.party && f.status !== "OFFLINE" ? "Nel party" : STATUS[f.status] || "Offline");
 const ERR = { username_taken: "Questo nome utente esiste già.", invalid_username: "Nome utente: 3-20 caratteri a-z 0-9 _", invalid_password: "La password deve avere almeno 10 caratteri.", invalid_credentials: "Nome utente o password errati.",
   too_many_attempts: "Troppi tentativi. Riprova tra qualche minuto.", cancelled: "Operazione annullata.", passkey_failed: "La passkey non ha funzionato su questo dispositivo.", passkeys_unsupported: "Le passkey non sono disponibili qui: usa la password.",
   network: "Cloud non raggiungibile. Il gioco in locale funziona comunque.", user_not_found: "Utente non trovato.", already_friends: "Siete già amici.", request_already_pending: "Richiesta già inviata.", user_blocked: "Hai bloccato questo utente.",
@@ -81,7 +81,7 @@ export function initCloudUI(ctx) {
     if (!cloud.friends.length) L.append(h("li", { class: "hint", text: "Nessun amico ancora. Cerca un nome utente qui sopra." }));
     for (const f of cloud.friends) L.append(h("li", {}, who(f, badge(f)),
       h("div", { class: "acts" }, h("button", { class: "mini primary", text: "INVITA A GIOCARE", disabled: f.status === "OFFLINE" || f.status === "IN_GAME", onclick: () => pickGame(f) }),
-        h("button", { class: "mini", text: "RIMUOVI", onclick: () => act(() => cloud.removeFriend(f.userId)) }), h("button", { class: "mini danger", text: "BLOCCA", onclick: () => act(() => cloud.block(f.username)) }))));
+        h("button", { class: "mini", text: "INVITA AL PARTY", disabled: f.status === "OFFLINE" || !!f.party, onclick: () => ctx.partyInvite && ctx.partyInvite(f) }), h("button", { class: "mini", text: "RIMUOVI", onclick: () => act(() => cloud.removeFriend(f.userId)) }), h("button", { class: "mini danger", text: "BLOCCA", onclick: () => act(() => cloud.block(f.username)) }))));
     const R = $("reqList"); R.innerHTML = "";
     for (const q of cloud.requests.incoming) R.append(h("li", {}, who(q.user), h("div", { class: "acts" }, h("button", { class: "mini primary", text: "ACCETTA", onclick: () => act(() => cloud.acceptRequest(q.id)) }), h("button", { class: "mini", text: "RIFIUTA", onclick: () => act(() => cloud.refuseRequest(q.id)) }))));
     for (const q of cloud.requests.outgoing) R.append(h("li", {}, who(q.user, h("small", { text: "in attesa" })), h("div", { class: "acts" }, h("button", { class: "mini", text: "ANNULLA", onclick: () => act(() => cloud.cancelRequest(q.id)) }))));

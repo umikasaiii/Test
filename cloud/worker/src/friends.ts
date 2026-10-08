@@ -2,6 +2,7 @@ import type { Env, User } from "./env";
 import { publicUser } from "./auth";
 import { HttpError, json, now, randomId, readJson, str } from "./util";
 import { cancelInvitesBetween } from "./playinvites";
+import { cancelPartyInvitesBetween } from "./party";
 
 export const presenceOf = (env: Env, userId: string) => env.PRESENCE.get(env.PRESENCE.idFromName(userId));
 export const notify = (env: Env, userId: string, msg: Record<string, unknown>) => presenceOf(env, userId).event(msg).catch(() => 0);
@@ -24,9 +25,9 @@ async function listFriends(env: Env, user: User) {
      JOIN users u ON u.id = CASE WHEN f.user_a = ?1 THEN f.user_b ELSE f.user_a END
      WHERE f.user_a = ?1 OR f.user_b = ?1 ORDER BY u.display_name COLLATE NOCASE`).bind(user.id).all<User>();
   return Promise.all(rows.results.map(async (u) => {
-    let status = "OFFLINE", game: { id: string; title: string } | null = null;
-    try { const p = await presenceOf(env, u.id).status(); status = p.status; game = p.game; } catch { /* presence unreachable: treat as offline, never as online */ }
-    return { ...publicUser(u), status, game };
+    let status = "OFFLINE", game: { id: string; title: string } | null = null, party = false;
+    try { const p = await presenceOf(env, u.id).status(); status = p.status; game = p.game; party = p.party; } catch { /* presence unreachable: treat as offline, never as online */ }
+    return { ...publicUser(u), status, game, party };
   }));
 }
 
@@ -101,6 +102,7 @@ export async function handleFriends(env: Env, req: Request, path: string, user: 
     // pending invites between the two are void
     await env.DB.prepare("UPDATE invites SET status = 'cancelled' WHERE status = 'pending' AND ((from_user = ?1 AND to_user = ?2) OR (from_user = ?2 AND to_user = ?1))").bind(user.id, mm[1]).run();
     await cancelInvitesBetween(env, user.id, mm[1]);
+    await cancelPartyInvitesBetween(env, user.id, mm[1]);
     await notify(env, mm[1], { t: "friend_update", kind: "removed", user: publicUser(user) });
     return json({ ok: true });
   }

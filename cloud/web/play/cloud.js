@@ -27,8 +27,10 @@ export class Cloud {
     this.cfg = config; this.user = null; this.state = "unknown";          // unknown | anon | user | offline
     this.listeners = new Set(); this.ws = null; this.wsTimer = 0; this.pingTimer = 0; this.wantPresence = false; this.myState = { state: "online", gameId: "" };
     this.friends = []; this.requests = { incoming: [], outgoing: [] }; this.invites = { incoming: [], outgoing: [] }; this.library = []; this.blocked = [];
-    this.presence = "OFFLINE";
+    this.presence = "OFFLINE"; this.rt = new Set();
   }
+  /** raw realtime events (party invites, kicks, ...): the party layer listens here */
+  onRealtime(fn) { this.rt.add(fn); return () => this.rt.delete(fn); }
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit(ev) { for (const f of this.listeners) { try { f(ev, this); } catch { /* a listener never breaks the client */ } } }
 
@@ -143,9 +145,10 @@ export class Cloud {
   setActivity(state, gameId = "") { this.myState = { state, gameId }; this.sendState(); }
   sendState() { if (this.ws && this.ws.readyState === 1) { try { this.ws.send(JSON.stringify({ t: "state", state: this.myState.state, ...(this.myState.gameId ? { gameId: this.myState.gameId } : {}) })); } catch { /* gone */ } } }
   onEvent(m) {
+    for (const f of this.rt) { try { f(m); } catch { /* a listener never breaks the socket */ } }
     switch (m.t) {
-      case "hello": case "self_presence": this.presence = m.status; this.emit("self"); break;
-      case "presence": { const f = this.friends.find((x) => x.userId === m.userId); if (f) { f.status = m.status; f.game = m.game || null; } this.emit("presence"); break; }
+      case "hello": case "self_presence": this.presence = m.status; this.inParty = !!m.party; this.emit("self"); break;
+      case "presence": { const f = this.friends.find((x) => x.userId === m.userId); if (f) { f.status = m.status; f.game = m.game || null; f.party = !!m.party; } this.emit("presence"); break; }
       case "friend_request": case "friend_update": this.loadFriends().then(() => this.loadRequests()).then(() => this.emit("data")); this.emit("notice", m); break;
       case "invite": this.loadInvites().then(() => this.emit("data")); this.emit("invite", m); break;
       case "invite_update": this.loadInvites().then(() => this.emit("data")); this.emit("invite_update", m); break;

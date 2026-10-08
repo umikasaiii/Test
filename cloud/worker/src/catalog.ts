@@ -2,14 +2,16 @@
 // ROMs, BIOS, firmware and saves stay on the devices. The same account on two phones sees the same list; each phone shows "GIOCA" only if it holds the file.
 import type { Env, User } from "./env";
 import { HttpError, json, now, readJson, str } from "./util";
+import { profileOf } from "./netprofile";
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{2,39}$/;
 const PLATFORM_RE = /^[a-z0-9]{2,12}$/;
 export const MP_MODES = ["none", "distributed", "download_play", "both"];
 
-interface Row { game_id: string; platform: string; title: string; product_code: string; core_id: string; multiplayer_mode: string; download_play_supported: number; metadata_version: number; favorite: number; last_played: number; added_at: number; file_size?: number | null; file_sha?: string | null; save_rev?: number | null }
+interface Row { game_id: string; platform: string; title: string; product_code: string; core_id: string; multiplayer_mode: string; download_play_supported: number; metadata_version: number; favorite: number; last_played: number; added_at: number; net_override?: string | null; file_size?: number | null; file_sha?: string | null; save_rev?: number | null }
 const toEntry = (r: Row) => ({ gameId: r.game_id, platform: r.platform, title: r.title, productCode: r.product_code, coreId: r.core_id, multiplayerMode: r.multiplayer_mode, downloadPlaySupported: !!r.download_play_supported,
   metadataVersion: r.metadata_version, favorite: !!r.favorite, lastPlayed: r.last_played || null, addedAt: r.added_at,
+  networkProfile: profileOf({ productCode: r.product_code, downloadPlaySupported: !!r.download_play_supported, override: r.net_override ?? "" }),
   cloudFile: r.file_size ? { size: r.file_size, sha256: r.file_sha } : null, cloudSaveRevision: r.save_rev ?? null });
 
 /** the catalog is shared by all accounts, so the descriptive fields are validated and only ever grow more precise: a client can add a game, not rewrite someone else's title with junk */
@@ -31,7 +33,7 @@ export async function handleCatalog(env: Env, req: Request, path: string, user: 
   const m = req.method;
   if (m === "GET" && path === "/api/cloud/library") {
     const rows = await env.DB.prepare(
-      `SELECT g.game_id, g.platform, g.title, g.product_code, g.core_id, g.multiplayer_mode, g.download_play_supported, g.metadata_version, e.favorite, e.last_played, e.added_at,
+      `SELECT g.game_id, g.platform, g.title, g.product_code, g.core_id, g.multiplayer_mode, g.download_play_supported, g.metadata_version, e.favorite, e.last_played, e.added_at, g.network_profile AS net_override,
        (SELECT size FROM cloud_files c WHERE c.user_id = e.user_id AND c.kind = 'game' AND c.name = e.game_id) AS file_size,
        (SELECT sha256 FROM cloud_files c WHERE c.user_id = e.user_id AND c.kind = 'game' AND c.name = e.game_id) AS file_sha,
        (SELECT revision FROM cloud_saves s WHERE s.user_id = e.user_id AND s.game_id = e.game_id ORDER BY revision DESC LIMIT 1) AS save_rev
@@ -71,7 +73,7 @@ export async function handleCatalog(env: Env, req: Request, path: string, user: 
     }
   }
   if (m === "GET" && path === "/api/catalog") {                   // read-only view of the shared catalog (no per-user data)
-    const rows = await env.DB.prepare("SELECT game_id, platform, title, product_code, core_id, multiplayer_mode, download_play_supported, metadata_version, 0 AS favorite, 0 AS last_played, updated_at AS added_at FROM game_metadata ORDER BY title COLLATE NOCASE LIMIT 500").all<Row>();
+    const rows = await env.DB.prepare("SELECT game_id, platform, title, product_code, core_id, multiplayer_mode, download_play_supported, metadata_version, network_profile AS net_override, 0 AS favorite, 0 AS last_played, updated_at AS added_at FROM game_metadata ORDER BY title COLLATE NOCASE LIMIT 500").all<Row>();
     return json({ games: rows.results.map(toEntry) });
   }
   return null;

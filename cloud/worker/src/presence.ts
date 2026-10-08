@@ -9,7 +9,7 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env";
 
 export type PresenceStatus = "ONLINE" | "MENU" | "IN_GAME" | "OFFLINE";
-export interface PresenceInfo { status: PresenceStatus; devices: number; game: { id: string; title: string } | null }
+export interface PresenceInfo { status: PresenceStatus; devices: number; game: { id: string; title: string } | null; party: boolean }   // party: in a Party Voice ("NEL PARTY"); the id is never shown to friends
 export const STALE_MS = 65_000;        // 3 missed pings
 export const SWEEP_MS = 20_000;
 export const GAME_LEASE_MS = 90_000;   // the session renews it every 30 s
@@ -23,11 +23,11 @@ export class Presence extends DurableObject<Env> {
 
   private async computeInfo(): Promise<PresenceInfo> {
     const live = this.liveSockets(), att = live.map((w) => (w.deserializeAttachment() as Attach | null) ?? { lastSeen: 0, device: "" });
-    const until = (await this.ctx.storage.get<number>("gameUntil")) ?? 0;
+    const until = (await this.ctx.storage.get<number>("gameUntil")) ?? 0, party = !!(await this.ctx.storage.get<string>("party"));
     const playing = att.find((a) => a.state === "game");
-    if (until > Date.now() || playing) return { status: "IN_GAME", devices: live.length, game: playing?.gameId ? await this.gameInfo(playing.gameId) : null };
-    if (live.length === 0) return { status: "OFFLINE", devices: 0, game: null };
-    return { status: att.some((a) => a.state === "menu") ? "MENU" : "ONLINE", devices: live.length, game: null };
+    if (until > Date.now() || playing) return { status: "IN_GAME", devices: live.length, game: playing?.gameId ? await this.gameInfo(playing.gameId) : null, party };
+    if (live.length === 0) return { status: "OFFLINE", devices: 0, game: null, party };
+    return { status: att.some((a) => a.state === "menu") ? "MENU" : "ONLINE", devices: live.length, game: null, party };
   }
   private async gameInfo(id: string): Promise<{ id: string; title: string } | null> {
     const r = await this.env.DB.prepare("SELECT game_id, title FROM game_metadata WHERE game_id = ?").bind(id).first<{ game_id: string; title: string }>();
@@ -46,6 +46,12 @@ export class Presence extends DurableObject<Env> {
     let n = 0;
     for (const w of this.liveSockets()) { try { w.send(data); n++; } catch { /* closing */ } }
     return n;
+  }
+
+  /** the Worker tells this user's presence that they joined / left a party (only the fact is shown to friends) */
+  async setParty(partyId: string | null): Promise<void> {
+    if (partyId) await this.ctx.storage.put("party", partyId); else await this.ctx.storage.delete("party");
+    await this.refresh();
   }
 
   async setGame(sessionId: string | null): Promise<void> {
@@ -127,7 +133,7 @@ export class Presence extends DurableObject<Env> {
 
   /** recompute the status and, on a change, tell the user's friends */
   private async refresh(): Promise<void> {
-    const info = await this.computeInfo(), status = info.status, key = status + "|" + (info.game?.id ?? "");
+    const info = await this.computeInfo(), status = info.status, key = status + "|" + (info.game?.id ?? "") + "|" + (info.party ? "p" : "");
     const last = await this.ctx.storage.get<string>("last");
     if (key === last) return;
     await this.ctx.storage.put("last", key);
@@ -135,8 +141,8 @@ export class Presence extends DurableObject<Env> {
     if (!uid) return;
     const friends = await this.env.DB.prepare(
       "SELECT CASE WHEN user_a = ?1 THEN user_b ELSE user_a END AS fid FROM friendships WHERE user_a = ?1 OR user_b = ?1").bind(uid).all<{ fid: string }>();
-    await Promise.all(friends.results.map((f) => this.env.PRESENCE.get(this.env.PRESENCE.idFromName(f.fid)).event({ t: "presence", userId: uid, status, game: info.game }).catch(() => 0)));
+    await Promise.all(friends.results.map((f) => this.env.PRESENCE.get(this.env.PRESENCE.idFromName(f.fid)).event({ t: "presence", userId: uid, status, game: info.game, party: info.party }).catch(() => 0)));
     // own devices learn the new status too (e.g. IN_GAME)
-    await this.event({ t: "self_presence", status, game: info.game });
+    await this.event({ t: "self_presence", status, game: info.game, party: info.party });
   }
 }

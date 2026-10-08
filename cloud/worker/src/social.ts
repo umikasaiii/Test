@@ -1,5 +1,6 @@
 // Blocks, user search and the friendship relation seen from one user: NONE | OUTGOING | INCOMING | FRIEND | BLOCKED (BLOCKED = *I* blocked them).
 // Someone who blocked me is invisible to me: search never returns them, requests to them look like "user not found".
+import { partyOnBlock } from "./party";
 import type { Env, User } from "./env";
 import { publicUser } from "./auth";
 import { areFriends, notify } from "./friends";
@@ -61,6 +62,7 @@ export async function handleSocial(env: Env, req: Request, path: string, user: U
       env.DB.prepare("UPDATE friend_requests SET status = 'cancelled', updated_at = ?3 WHERE status = 'pending' AND ((from_user = ?1 AND to_user = ?2) OR (from_user = ?2 AND to_user = ?1))").bind(user.id, target.id, t),
     ]);
     await cancelInvitesBetween(env, user.id, target.id);
+    await partyOnBlock(env, user.id, target.id);                      // a blocked user leaves a shared party and pending party invites end
     await notify(env, target.id, { t: "friend_update", kind: "removed", user: publicUser(user) });   // they just see the friendship end: not that they were blocked
     return json({ ok: true, relation: "BLOCKED" }, 201);
   }

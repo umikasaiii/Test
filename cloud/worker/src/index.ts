@@ -8,6 +8,8 @@ import { handleLibrary, purgeUserData } from "./library";
 import { HttpError, json, logEvent, now, randomId, readJson, str, timingSafeEqual } from "./util";
 import { handleSignal } from "./signal";
 import { handleFiles } from "./files";
+import { handleRealtime } from "./realtime";
+import { handleParty, partySocket } from "./party";
 import { handleSocial } from "./social";
 import { handleCatalog } from "./catalog";
 import { handlePlayInvites } from "./playinvites";
@@ -16,6 +18,7 @@ export { Presence } from "./presence";
 export { GameSession } from "./session";
 export { DSLinkContainer } from "./container";
 export { SignalRoom } from "./signal";
+export { PartyRoom } from "./partyroom";
 
 const sessionStub = (env: Env, id: string) => {
   let did: DurableObjectId;
@@ -87,7 +90,7 @@ async function route(env: Env, req: Request): Promise<Response> {
     return json({ iceServers: await browserIce(env), ...(env.ICE_POLICY === "relay" ? { iceTransportPolicy: "relay" } : {}) }, 200, { "cache-control": "no-store" });
   }
 
-  if (path === "/api/ws" && req.headers.get("upgrade") === "websocket") {
+  if ((path === "/api/ws" || path === "/api/party/ws") && req.headers.get("upgrade") === "websocket") {
     // browsers cannot add headers to a WebSocket, and a page on another origin has no cookie: it opens the socket with a one-shot ticket (30 s) minted by POST /api/ws-ticket
     const o = req.headers.get("origin");
     if (o && !allowedOrigins(env).includes(o) && o !== new URL(req.url).origin) throw new HttpError(403, "bad_origin");   // cross-site WebSocket hijacking guard
@@ -98,6 +101,7 @@ async function route(env: Env, req: Request): Promise<Response> {
       if (row && row.expires_at > now()) u = await env.DB.prepare("SELECT id, username, display_name, avatar, created_at FROM users WHERE id = ? AND status = 'active'").bind(row.data).first<User>();
     } else u = await authenticate(env, req);
     if (!u) throw new HttpError(401, "unauthenticated");
+    if (path === "/api/party/ws") return await partySocket(env, req, u);          // membership checked, then the party's Durable Object
     const h = new Headers(req.headers);
     h.set("x-dslink-user", u.id);
     h.set("x-dslink-device", (req.headers.get("user-agent") ?? "").slice(0, 60));
@@ -141,6 +145,10 @@ async function route(env: Env, req: Request): Promise<Response> {
   if (cat) return cat;
   const pinv = await handlePlayInvites(env, req, path, user);
   if (pinv) return pinv;
+  const rt = await handleRealtime(env, req, path, user);
+  if (rt) return rt;
+  const pt = await handleParty(env, req, path, user);
+  if (pt) return pt;
   const fl = await handleFiles(env, req, path, user);
   if (fl) return fl;
   const lib = await handleLibrary(env, req, path, user);

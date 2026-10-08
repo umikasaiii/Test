@@ -8,6 +8,7 @@
 //   "ctl"    reliable JSON for the lobby (ready, start, background, bye). Never carries radio frames, ROMs, saves, BIOS or anything private.
 // Radio message = 1 byte [version<<4 | type] + payload:  DATA: seq u16, dest u16, src u16, frame...   PING/PONG: seq u16.   (7 bytes of header per frame; DTLS already authenticates/encrypts.)
 // The logical frame (dest, src, payload) is the one the native bridge uses over the Unix socket and DRP/UDP: no second incompatible protocol.
+import { selectedPath } from "./net.js";
 export const VER = 1, T_DATA = 0, T_PING = 1, T_PONG = 2;
 const HDR_DATA = 7, MAX_FRAME = 16384;
 const now = () => performance.now();
@@ -30,12 +31,13 @@ export class RadioPeer {
    *  backpressure?:{soft:number,hard:number,queue:number}, reorderMs?:number, peerTimeoutMs?:number, onState?:(s:string,why?:string)=>void, onCtl?:(m:object)=>void,
    *  onFrame?:(dest:number,src:number,payload:Uint8Array,atMs:number)=>void}} o */
   constructor(o) {
-    this.o = { radioMode: { ordered: false, maxRetransmits: 0 }, impair: { delayMs: 0, jitterMs: 0, lossPct: 0 }, backpressure: { soft: 8192, hard: 32768, queue: 4 }, reorderMs: 8, peerTimeoutMs: 4000, iceServers: [], ...Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) };
+    this.o = { radioMode: { ordered: false, maxRetransmits: 0 }, impair: { delayMs: 0, jitterMs: 0, lossPct: 0 }, backpressure: { soft: 8192, hard: 32768, queue: 4 }, reorderMs: 8, peerTimeoutMs: 4000, iceServers: [], iceTransportPolicy: "all", graceMs: 2500, restartTimeoutMs: 9000, maxRestarts: 6, netGraceMs: 14000, ...Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) };
     this.role = o.role; this.state = "new"; this.pc = null; this.radio = null; this.ctl = null; this.pendingIce = []; this.haveRemote = false;
     this.txSeq = 0; this.rxExpected = null; this.held = new Map(); this.deadline = 0; this.softQ = [];
     this.scratch = new Uint8Array(HDR_DATA + MAX_FRAME); this.pingSeq = 0; this.pings = new Map(); this.lastPong = now(); this.peerHidden = false; this.hiddenSince = 0;
     this.m = { sent: 0, recv: 0, bytesOut: 0, bytesIn: 0, droppedSoft: 0, droppedHard: 0, droppedClosed: 0, droppedImpair: 0, tooBig: 0, stringOnRadio: 0, bufferedAmount: 0, bufferedMax: 0, queueDepth: 0, queueMax: 0,
-      reordered: 0, lost: 0, lateDropped: 0, rxHoldMsMax: 0, rtt: { last: 0, avg: 0, min: 1e9, max: 0, n: 0 }, jitter: 0, pingSent: 0, pingRecv: 0, ringLagAvg: 0, ringLagMax: 0, ringLagN: 0, ctlSent: 0, ctlRecv: 0, restarts: 0 };
+      reordered: 0, lost: 0, lateDropped: 0, rxHoldMsMax: 0, rtt: { last: 0, avg: 0, min: 1e9, max: 0, n: 0 }, jitter: 0, pingSent: 0, pingRecv: 0, ringLagAvg: 0, ringLagMax: 0, ringLagN: 0, ctlSent: 0, ctlRecv: 0, restarts: 0, restartsTotal: 0, netChanges: 0, reconnects: 0, pongReordered: 0, lastOutageMs: 0 };
+    this.lastPongSeq = -1; this.pathInfo = { path: "unknown", local: "", remote: "", protocol: "", rtt: 0 }; this.pathAt = 0; this.graceT = 0; this.restartT = 0; this.netT = 0; this.downSince = 0; this.restartStreak = 0;
     this.blackoutUntil = 0; this.timers = [];
     this.watch = setInterval(() => this.tick(), 500); this.timers.push(this.watch);
   }
@@ -43,7 +45,7 @@ export class RadioPeer {
   // ------------------------------------------------------------------ connection
   setState(s, why) { if (this.state === s) return; this.state = s; if (this.o.onState) this.o.onState(s, why); }
   makePc() {
-    const pc = this.pc = new RTCPeerConnection({ iceServers: this.o.iceServers });
+    const pc = this.pc = new RTCPeerConnection({ iceServers: this.o.iceServers, iceTransportPolicy: this.o.iceTransportPolicy === "relay" ? "relay" : "all" });
     pc.onicecandidate = (e) => { if (e.candidate) this.o.signal.send({ k: "ice", c: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate }); };
     pc.onconnectionstatechange = () => this.onConn();
     pc.oniceconnectionstatechange = () => this.onConn();
@@ -74,6 +76,8 @@ export class RadioPeer {
       } else if (msg.k === "answer") {
         await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp }); this.haveRemote = true;
         for (const c of this.pendingIce.splice(0)) await this.pc.addIceCandidate(c).catch(() => {});
+      } else if (msg.k === "restart") {
+        if (this.role === "host") this.requestRestart("peer");                                // the guest saw the path die: the host (the offerer) restarts ICE
       } else if (msg.k === "ice") {
         if (this.haveRemote) await this.pc.addIceCandidate(msg.c).catch(() => {}); else this.pendingIce.push(msg.c);
       }
@@ -99,9 +103,48 @@ export class RadioPeer {
   onChClose(which) { if (this.state !== "closed") this.setState("lost", which + " channel closed"); }
   onConn() {
     const c = this.pc.connectionState, i = this.pc.iceConnectionState;
-    if (c === "failed" || i === "failed") { if (this.role === "host" && this.m.restarts < 3) { this.m.restarts++; this.pc.restartIce(); this.offer(true).catch(() => {}); } else this.setState("lost", "ICE failed (nessun percorso diretto)"); }
-    else if (c === "disconnected" || i === "disconnected") { if (this.state === "open") this.setState("degraded"); }
-    else if ((c === "connected" || i === "connected") && this.state === "degraded") { this.lastPong = now(); this.setState("open"); }
+    if (c === "failed" || i === "failed") { this.markDown(); this.requestRestart("failed"); }
+    else if (c === "disconnected" || i === "disconnected") { this.markDown(); if (this.state === "open") this.setState("degraded"); this.armGrace(); }
+    else if (c === "connected" || i === "connected" || i === "completed") this.recovered();
+  }
+  markDown() { if (!this.downSince) this.downSince = now(); }
+  /** the path is back (or was never lost): forget the grace/restart timers, resume, tell the session how long the radio was silent */
+  recovered() {
+    if (this.graceT) { clearTimeout(this.graceT); this.graceT = 0; }
+    if (this.restartT) { clearTimeout(this.restartT); this.restartT = 0; }
+    if (this.netT) { clearTimeout(this.netT); this.netT = 0; }
+    const outage = this.downSince ? now() - this.downSince : 0, wasDown = !!this.downSince; this.downSince = 0; this.restartStreak = 0; this.pausedWatch = false;
+    if (this.state === "degraded") { this.lastPong = now(); this.setState("open"); }
+    if (wasDown && outage > 0) { this.m.reconnects++; this.m.lastOutageMs = outage; this.rxExpected = null; if (this.o.onRecovered) this.o.onRecovered(outage); }
+  }
+  /** a short loss is not a failure: wait a grace window, then restart ICE (only the host offers; the guest asks it through signaling) */
+  armGrace() { if (this.graceT || this.state === "closed") return; this.graceT = setTimeout(() => { this.graceT = 0; const c = this.pc && this.pc.connectionState, i = this.pc && this.pc.iceConnectionState; if (c !== "connected" || i === "disconnected") this.requestRestart("disconnected"); }, this.o.graceMs); }
+  requestRestart(why) {
+    if (!this.pc || this.state === "closed") return;
+    if (this.restartStreak >= this.o.maxRestarts) { this.setState("lost", "ICE failed (nessun percorso disponibile)"); return; }
+    this.restartStreak++; this.m.restarts++; this.m.restartsTotal++; this.flushBacklog();
+    if (this.restartT) clearTimeout(this.restartT);
+    this.restartT = setTimeout(() => { this.restartT = 0; if (this.state !== "closed" && this.pc && this.pc.connectionState !== "connected") this.requestRestart("timeout"); }, this.o.restartTimeoutMs);
+    if (this.role === "host") { try { this.pc.restartIce(); } catch { /* old browsers: the iceRestart offer below does it */ } this.offer(true).catch(() => {}); }
+    else this.o.signal.send({ k: "restart", why });
+  }
+  /** no radio backlog while the link is down: whatever is queued or held is obsolete (a late DS frame is worse than a lost one) */
+  flushBacklog() {
+    this.softQ.length = 0; this.m.queueDepth = 0; this.held.clear(); if (this.deadline) { clearTimeout(this.deadline); this.deadline = 0; } this.rxExpected = null;
+  }
+  /** Wi-Fi <-> mobile, NAT rebinding, resume from sleep: pause the liveness watch, drop the backlog, restart ICE; the session verifies the quality once it is back */
+  networkChanged(reason) {
+    if (!this.pc || this.state === "closed") return; this.m.netChanges++; this.pausedWatch = true; this.markDown(); this.flushBacklog();
+    if (this.netT) clearTimeout(this.netT);
+    this.netT = setTimeout(() => { this.netT = 0; if (this.downSince) this.setState("lost", "la connessione è cambiata e non è tornata in tempo"); }, this.o.netGraceMs);
+    this.restartStreak = 0; this.requestRestart("network:" + (reason || "change"));
+  }
+  /** which path the connection really uses (direct / srflx / relay) - refreshed on demand and every few seconds while open */
+  async getPath() { this.pathInfo = await selectedPath(this.pc); this.pathAt = now(); return this.pathInfo; }
+  /** pre-start link check: the SAME channel and settings the game will use, plus the ICE path and the DataChannel state */
+  async preflight(ms = 3000) {
+    const p = await this.probe(ms, 50), path = await this.getPath();
+    return { ...p, path: path.path, localType: path.local, remoteType: path.remote, protocol: path.protocol, relayProtocol: path.relayProtocol || "", bufferedMax: this.m.bufferedMax, reordered: this.m.pongReordered, dcOneWayMs: p.rttAvg / 2, stability: Math.max(0, p.rttP95 - p.rttMin) };
   }
 
   // ------------------------------------------------------------------ control channel
@@ -204,6 +247,7 @@ export class RadioPeer {
   onPong(seq) {
     const t0 = this.pings.get(seq); if (t0 === undefined) return; this.pings.delete(seq);
     const rtt = now() - t0, r = this.m.rtt; this.lastPong = now();
+    if (this.lastPongSeq >= 0 && ((seq - this.lastPongSeq) & 0xFFFF) > 0x8000) this.m.pongReordered++; this.lastPongSeq = seq;
     const prev = r.last; r.last = rtt; r.n++; r.avg += (rtt - r.avg) / Math.min(r.n, 20); if (rtt < r.min) r.min = rtt; if (rtt > r.max) r.max = rtt;
     if (r.n > 1) this.m.jitter += (Math.abs(rtt - prev) - this.m.jitter) / 16;                           // RFC 3550 style smoothed inter-sample variation
     if (this.probeCb) this.probeCb(rtt);
@@ -227,6 +271,7 @@ export class RadioPeer {
     if (this.state === "closed") return;
     const t = now();
     if (this.radio && this.radio.readyState === "open") { this.m.bufferedAmount = this.radio.bufferedAmount; if (this.state === "open" || this.state === "degraded") { if (!this.probeCb) this.ping(); } }
+    if (this.state === "open" && t - this.pathAt > 2000 && this.pc) { this.pathAt = t; this.getPath().catch(() => {}); }
     const silent = t - this.lastPong;
     if ((this.state === "open" || this.state === "degraded") && !this.pausedWatch) {
       const limit = this.peerHidden ? 30000 : this.o.peerTimeoutMs;                                      // a peer that told us it went to the background is allowed a long silence
@@ -236,7 +281,7 @@ export class RadioPeer {
   /** test hook: an outage of the link (everything sent or received is dropped) for `ms` */
   debugBlackout(ms) { this.blackoutUntil = now() + ms; }
   setImpair(i) { this.o.impair = { delayMs: 0, jitterMs: 0, lossPct: 0, ...i }; }
-  metrics() { return { ...this.m, state: this.state, role: this.role, radio: this.radio ? { ordered: this.radio.ordered, maxRetransmits: this.radio.maxRetransmits, maxPacketLifeTime: this.radio.maxPacketLifeTime, readyState: this.radio.readyState, binaryType: this.radio.binaryType, bufferedAmount: this.radio.bufferedAmount } : null }; }
+  metrics() { return { ...this.m, path: this.pathInfo, state: this.state, role: this.role, radio: this.radio ? { ordered: this.radio.ordered, maxRetransmits: this.radio.maxRetransmits, maxPacketLifeTime: this.radio.maxPacketLifeTime, readyState: this.radio.readyState, binaryType: this.radio.binaryType, bufferedAmount: this.radio.bufferedAmount } : null }; }
   close() {
     if (this.state === "closed") return; this.setState("closed");
     for (const t of this.timers) { clearTimeout(t); clearInterval(t); } this.timers = []; if (this.deadline) clearTimeout(this.deadline);
