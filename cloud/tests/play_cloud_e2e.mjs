@@ -122,7 +122,8 @@ check('BLOCK: B blocks A -> the friendship is gone on both sides, A cannot find 
 const uc = uname('carol');
 const C1 = await device('C1', { rom: rom1, passkey: false }); const C2 = await device('C2', { passkey: false });
 check('ACCOUNT (password fallback): create an account with a password where passkeys are not used', await signup(C1, uc, 'password'));
-check('MULTI-DEVICE: the same account on a second device (no ROM there) sees the same profile and the same library metadata', await pwLogin(C2, uc) && await until(async () => (await C2.evaluate(() => window.dslinkPlay.cloud.library.length)) === 1, 10000) && (await C2.evaluate(() => document.getElementById('profUser').textContent)) === '@' + uc);
+await until(async () => (await C1.evaluate(async () => { await window.dslinkPlay.cloud.loadLibrary(); return window.dslinkPlay.cloud.library.length; })) === 1, 20000);   // (the library push is debounced: wait until the Cloud has it)
+check('MULTI-DEVICE: the same account on a second device (no ROM there) sees the same profile and the same library metadata', await pwLogin(C2, uc) && await until(async () => (await C2.evaluate(() => window.dslinkPlay.cloud.library.length)) === 1, 20000) && (await C2.evaluate(() => document.getElementById('profUser').textContent)) === '@' + uc);
 await C2.click('#btnProfLibrary'); await C2.waitForSelector('[data-screen=cloudlib].on');
 check('LIBRARY: on the device without the file the game is listed as "File di gioco non presente" (no GIOCA)', /File di gioco non presente/.test(await C2.innerText('#cloudLibList')) && (await C2.locator('#cloudLibList button', { hasText: 'GIOCA' }).count()) === 0);
 await C1.click('#btnAccount').catch(() => {});
