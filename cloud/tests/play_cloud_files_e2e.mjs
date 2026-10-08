@@ -151,6 +151,7 @@ check('SAVE REVISION: only the last 5 revisions are kept per game', hist.length 
 
 // ============================================================================================ 5. history + restore
 await H.locator('#gameList li.game button', { hasText: 'SALVATAGGI' }).click(); await H.waitForSelector('#histBox:not([hidden])');
+await until(async () => (await H.locator('#histList li[data-rev]').count()) >= 3, 10000);          // the list fills in after the box opens
 const histRows = await H.locator('#histList li[data-rev]').count();
 const oldest = await H.locator('#histList li[data-rev]').last(); const oldRev = Number(await oldest.getAttribute('data-rev'));
 const oldSha = (await (await H.request.get(`${BASE}/api/saves/${GID}/data?rev=${oldRev}`)).body()).length;      // (authenticated by the page's cookie jar)
