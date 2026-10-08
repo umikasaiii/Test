@@ -159,6 +159,7 @@ const restored = await until(async () => (await heads(H))[0].note === `restore:$
 await H.screenshot({ path: path.join(shots, 'history.png') });
 await H.click('#btnHistClose');
 const hd = (await heads(H))[0];
+await until(async () => (await saveSha(H, id1)) === hd.sha256, 10000);        // the device takes the restored revision right after the Cloud made it
 check('SAVE RESTORE: an older revision is restored as a NEW revision (history stays linear) and this device receives it', !!restored && hd.revision >= 8 && histRows >= 3 && oldSha > 0 && (await saveSha(H, id1)) === hd.sha256, `restored v${oldRev} -> v${hd.revision}`);
 
 // ============================================================================================ 6. remove from device / remove from cloud
