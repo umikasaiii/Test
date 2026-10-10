@@ -51,17 +51,17 @@ check('PWA LOAD: the page loads, no script errors, service-worker-free static ho
 const caps = await page.evaluate(() => window.dslinkPlay.caps);
 check('capabilities: WebAssembly, WebGL, module worker, IndexedDB are present', caps.wasm && caps.webgl && caps.moduleWorker && caps.indexedDB, JSON.stringify(caps));
 check('OPFS: the storage probe (write + read back) works and is the backend', (await page.evaluate(() => window.dslinkPlay.store.kind)) === 'opfs');
-check('before a ROM is added the library is empty and shows no GIOCA', (await page.locator('#gameList li.game').count()) === 0);
+check('before a ROM is added the library is empty and shows no GIOCA', (await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game').count()) === 0);
 
-await page.setInputFiles('#romFile', rom1);
-await until(() => page.locator('#gameList li.game').count());
-check('library: the imported ROM is listed with a [ GIOCA ] button', (await page.locator('#gameList li.game .play').count()) === 1 && (await page.locator('#gameList li.game .play').innerText()) === 'GIOCA');
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).setInputFiles('#romFile', rom1);
+await until(async () => (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game').count());
+check('library: the imported ROM is listed with a [ GIOCA ] button', (await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game .play').count()) === 1 && (await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game .play').innerText()) === 'GIOCA');
 const gameId = await page.evaluate(() => window.dslinkPlay.games[0].id);
 check('library: the game id is a stable 24-hex key', /^[0-9a-f]{24}$/.test(gameId), gameId);
 await page.screenshot({ path: `${shots}/library.png` });
 
 const t0 = Date.now();
-await page.click('#gameList li.game .play');
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).click('#gameList li.game .play');
 const started = await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000);
 check('CORE INIT + REAL DS BOOT: WASM core initialised and a DS cartridge is running', started, `${Date.now() - t0} ms from tap to running`);
 await until(async () => (await stats(page)).frames > 120, 20000);
@@ -126,14 +126,14 @@ check('SAVE: the game\'s save was written to the browser storage on exit', saved
 // put a recognisable mark in the save, reload the whole page, play again, leave: the mark survives (loaded back and written again)
 await page.evaluate(async (k) => { const b = new Uint8Array(await window.dslinkPlay.store.get(k)); b.set(new TextEncoder().encode('DSLINKWA'), 0); await window.dslinkPlay.store.put(k, b.buffer); }, saveKey);
 await page.reload(); await page.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });
-check('SAVE RELOAD: after reloading the PWA the library and the save are still there', (await page.locator('#gameList li.game').count()) === 1 && (await page.evaluate(async (k) => (await window.dslinkPlay.store.get(k)).byteLength, saveKey)) === saved);
-await page.click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await until(async () => (await stats(page)).frames > 60, 15000);
+check('SAVE RELOAD: after reloading the PWA the library and the save are still there', (await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game').count()) === 1 && (await page.evaluate(async (k) => (await window.dslinkPlay.store.get(k)).byteLength, saveKey)) === saved);
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await until(async () => (await stats(page)).frames > 60, 15000);
 await page.evaluate(() => { document.getElementById('confirm').hidden = false; }); await page.click('#confirmYes'); await until(async () => (await page.evaluate(() => document.body.dataset.screen)) === 'library', 15000);
 const mark = await page.evaluate(async (k) => new TextDecoder().decode(new Uint8Array(await window.dslinkPlay.store.get(k)).slice(0, 8)), saveKey);
 check('SAVE RELOAD: the game started from its save (the mark was loaded and saved again)', mark === 'DSLINKWA', mark);
 
 // ---- second ROM: its own save
-await page.setInputFiles('#romFile', rom2); await until(async () => (await page.locator('#gameList li.game').count()) === 2);
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).setInputFiles('#romFile', rom2); await until(async () => (await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game').count()) === 2);
 const ids = await page.evaluate(() => window.dslinkPlay.games.map((g) => g.id));
 check('SAVE: another game has another key (saves are never shared)', ids.length === 2 && ids[0] !== ids[1]);
 
@@ -153,36 +153,36 @@ await page.context().close();
 // ======================================================================== IndexedDB fallback run
 page = await newPage('?store=idb');
 check('INDEXEDDB FALLBACK: forced IndexedDB backend works', (await page.evaluate(() => window.dslinkPlay.store.kind)) === 'idb');
-await page.setInputFiles('#romFile', rom1); await until(() => page.locator('#gameList li.game').count());
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).setInputFiles('#romFile', rom1); await until(async () => (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game').count());
 const id2 = await page.evaluate(() => window.dslinkPlay.games[0].id);
-await page.click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await until(async () => (await stats(page)).frames > 90, 20000);
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await until(async () => (await stats(page)).frames > 90, 20000);
 await page.evaluate(() => { document.getElementById('confirm').hidden = false; }); await page.click('#confirmYes'); await until(async () => (await page.evaluate(() => document.body.dataset.screen)) === 'library', 15000);
 const saved2 = await page.evaluate(async (k) => { const b = await window.dslinkPlay.store.get(k); return b ? b.byteLength : 0; }, `library/${id2}/save`);
 await page.reload(); await page.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });
 const saved3 = await page.evaluate(async (k) => { const b = await window.dslinkPlay.store.get(k); return b ? b.byteLength : 0; }, `library/${id2}/save`);
-check('INDEXEDDB FALLBACK: ROM + save persist across a reload', saved2 > 0 && saved3 === saved2 && (await page.locator('#gameList li.game').count()) === 1, `save ${saved2} -> ${saved3} bytes`);
+check('INDEXEDDB FALLBACK: ROM + save persist across a reload', saved2 > 0 && saved3 === saved2 && (await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game').count()) === 1, `save ${saved2} -> ${saved3} bytes`);
 // ---- installed PWA: the shell + core are cached, the game starts with the network cut
 await page.evaluate(() => navigator.serviceWorker.ready);
 const cached = await until(() => page.evaluate(async () => { const c = await caches.open('dslink-play-dev'); const k = (await c.keys()).map((r) => new URL(r.url).pathname); return k.includes('/play/core/dslink_wasm.wasm') && k.includes('/controls/controls.js') ? k.length : 0; }), 20000);
 check('PWA OFFLINE: service worker caches the shell and the WASM core', !!cached, `${cached} files cached`);
 await page.context().setOffline(true);
 await page.reload(); await page.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });
-await page.click('#gameList li.game .play');
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).click('#gameList li.game .play');
 check('PWA OFFLINE: with the network cut the page reloads and the game still boots', await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000) && await until(async () => (await stats(page)).frames > 60, 15000));
 await page.context().setOffline(false);
 // auto: Chrome has OPFS, the auto choice picks it
 await page.context().close();
 // ---- audio fallback (pages without AudioWorklet: plain http, old browsers): ScriptProcessor
 page = await newPage('?audio=sp&store=idb');
-await page.setInputFiles('#romFile', rom1); await until(() => page.locator('#gameList li.game').count());
-await page.click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await sleep(3000);
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).setInputFiles('#romFile', rom1); await until(async () => (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game').count());
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await sleep(3000);
 const spStats = await stats(page);
 check('AUDIO FALLBACK: without AudioWorklet a ScriptProcessor plays the same stream (buffer fills, few underruns)', spStats.audio.backend === 'scriptprocessor' && spStats.audio.fillMs > 20 && spStats.audio.underEvents < 3, `${spStats.audio.backend} buffer ${spStats.audio.fillMs.toFixed(0)} ms underruns ${spStats.audio.underEvents}`);
 await page.context().close();
 // ---- development overlay (?dev=1)
 page = await newPage('?dev=1&store=idb');
-await page.setInputFiles('#romFile', rom1); await until(() => page.locator('#gameList li.game').count());
-await page.click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await sleep(2500);
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).setInputFiles('#romFile', rom1); await until(async () => (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game').count());
+await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000); await sleep(2500);
 const ov = await page.evaluate(() => document.getElementById('devOverlay').textContent);
 check('DEV OVERLAY: emulator fps, submitted/rendered/dropped frames, upload and draw time, audio backend/buffer/underruns/overrun/queue/rate/health, WASM memory, main-thread stalls', /EMU\s+[\d.]+ fps/.test(ov) && /submit \d+\s+recv \d+\s+drawn \d+\s+drop\(src \d+ \/ render \d+\)/.test(ov) && /upload [\d.]+\/[\d.]+ ms\s+draw [\d.]+\/[\d.]+ ms/.test(ov) && /AUDIO\s+worklet-msg\s+buf \d+\/\d+ ms\s+queue \d+ fr\s+rate \d+>\d+ Hz/.test(ov) && /underruns \d+ ev \/ \d+ smp\s+last10s \d+\s+overrun \d+\s+health \w+\/\w+/.test(ov) && /WASM\s+\d+ MB\s+main stalls \d+/.test(ov), ov.replace(/\n/g, ' | '));
 await page.context().close();

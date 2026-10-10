@@ -6,6 +6,7 @@ import { publicUser } from "./auth";
 import { areFriends, notify, presenceOf } from "./friends";
 import { HttpError, json, logEvent, now, randomId, readJson, str } from "./util";
 import { newCode } from "../../signal/room.mjs";
+import { limit } from "./ratelimit";
 
 export const INVITE_TTL = 2 * 60_000;
 const roomStub = (env: Env, code: string) => env.SIGNAL.get(env.SIGNAL.idFromName("room:" + code));
@@ -41,6 +42,7 @@ export async function handlePlayInvites(env: Env, req: Request, path: string, us
   }
 
   if (m === "POST" && path === "/api/play/invites") {
+    limit(user.id, "invite", 20);                                            // every invite opens a room and rings a phone: 20 / 10 min / account
     const b = await readJson(req);
     const friendId = str(b.friendId, "friendId", 1, 40), gameId = str(b.gameId, "gameId", 3, 40);
     if (friendId === user.id) throw new HttpError(400, "cannot_invite_self");

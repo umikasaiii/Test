@@ -9,8 +9,8 @@ if (!BASE) { console.error('usage: play_ps1_cloud_e2e.mjs <worker-url>'); proces
 const R = reporter(), { check } = R;
 const dir = buildDiscs(), browser = await launch();
 const GID = 'ps1-psph00001';
-async function importPs1(p) { const n = await p.evaluate(() => window.dslinkPlay.games.length); await p.setInputFiles('#romFile', files(dir, 'Test Game.cue', 'Test Game.bin')); return until(async () => (await p.evaluate(() => window.dslinkPlay.games.length)) > n, 60000); }
-async function play(p) { await p.click('li.game[data-platform=PS1] .play'); await p.waitForSelector('#hleBox:not([hidden])', { timeout: 20000 }); await p.click('#btnHleGo'); return until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 60000); }
+async function importPs1(p) { const n = await p.evaluate(() => window.dslinkPlay.games.length); await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', files(dir, 'Test Game.cue', 'Test Game.bin')); return until(async () => (await p.evaluate(() => window.dslinkPlay.games.length)) > n, 60000); }
+async function play(p) { await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).click('li.game[data-platform=PS1] .play'); await p.waitForSelector('#hleBox:not([hidden])', { timeout: 20000 }); await p.click('#btnHleGo'); return until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 60000); }
 async function leave(p) {
   const b = await p.locator('.ctl-c[data-id=menu] .ctl-pillbtn').boundingBox(); await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await p.mouse.down(); await p.mouse.up(); await p.waitForSelector('.ctl-menu .sheet');
   await p.evaluate(() => document.querySelector('.ctl-menu [data-act=leave]').click()); await p.waitForSelector('#confirmYes', { state: 'visible' }); await p.evaluate(() => document.querySelector('#confirmYes').click());
@@ -79,7 +79,7 @@ check('CLOUD SAVE CONFLICT: a different save from another device is detected, ne
 
 // ---------------------------------------------------------------- BIOS in the private Cloud
 const bios = Buffer.alloc(524288); bios.write('System ROM Version 2.0 05/07/95 A', 4000); fs.writeFileSync(`${dir}/fake-bios-na.bin`, bios);
-await A2.setInputFiles('#ps1BiosFile', `${dir}/fake-bios-na.bin`);
+await (await A2.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), A2).setInputFiles('#ps1BiosFile', `${dir}/fake-bios-na.bin`);
 check('BIOS: a valid BIOS file (recognised by content) is stored under its region on the device', await until(async () => (await A2.evaluate(() => window.dslinkPlay.store.get('system/ps1-bios-na.bin'))) !== null, 8000));
 const upBios = await A2.evaluate(async () => { await window.dslinkPlay.cfiles.refresh(); const b = [...document.querySelectorAll('#ps1SysList button')].find((x) => /SALVA NEL MIO CLOUD/.test(x.textContent)); if (b) b.click(); return !!b; });
 const inCloud = await until(async () => (await api(A2, 'GET', '/api/files')).body.system.some((s) => s.name === 'ps1-bios-na.bin' && s.size === 524288), 15000);

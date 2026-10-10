@@ -7,7 +7,8 @@ import { Player, detectCaps } from "./player.js";
 import { opt, setOpt } from "./options.js";
 import { initFriends } from "./friends.js";
 import { loadConfig, Cloud, passkeysSupported } from "./cloud.js";
-import { initCloudUI } from "./cloudui.js";
+import { initCloudUI, avatarOf, statusText } from "./cloudui.js";
+import { initShell } from "./shell.js";
 import { CloudFiles, errMsg } from "./cloudfiles.js";
 import { loadIce } from "./net.js";
 import { profileFor } from "./netquality.js";
@@ -26,6 +27,7 @@ import { BIOS_SLOTS, BIOS_SIZE, inspectBios, BIOS_ERR, biosForGame } from "./ps1
 import { mountPs1Extras } from "./ps1ui.js";
 
 const $ = (id) => document.getElementById(id);
+const HOOKS = () => DEV || navigator.webdriver === true || opt("hooks", "") === "1";
 let DEV = opt("dev", "") === "1" || (() => { try { return localStorage.getItem("dslink.dev") === "1"; } catch { return false; } })();
 const SYS = [
   { key: "bios7", file: "bios7.bin", title: "BIOS ARM7", sizes: [16384] },
@@ -35,10 +37,10 @@ const SYS = [
 // PlayStation BIOS files (any of the three regions): same Cloud rules as the DS system files, own list in the page
 const PS1_SYS = BIOS_SLOTS.map((b) => ({ key: b.key, file: b.file, title: b.title, sizes: [BIOS_SIZE], ps1: true }));
 const SYS_ALL = [...SYS, ...PS1_SYS];
-let libFilter = "all", currentProfile = null, gamepad = null, ps1x = null;
+let libFilter = "all", currentProfile = null, gamepad = null, ps1x = null, shell = null, updateDeferred = false;
 let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0, friends = null, cloud = null, cloudUi = null, cfiles = null, partyVoice = null, partyUi = null, netTable = null, refsText = null, assist = null;
 
-const show = (name) => { document.body.dataset.screen = name; document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("on", s.dataset.screen === name)); };
+const show = (name) => { document.body.dataset.screen = name; document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("on", s.dataset.screen === name)); if (shell) shell.onScreen(name); };
 const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB");
 
 // ---------------------------------------------------------------- start up
@@ -54,9 +56,11 @@ async function boot() {
     store = await openStore(prefer);
   } catch (e) { $("libErr").textContent = "Archivio del browser non disponibile: " + (e && e.message || e); }
   if (store) { requestPersistence(); $("storageNote").textContent = "Archivio: " + (store.kind === "opfs" ? "OPFS" : "IndexedDB") + (store.why ? " (" + store.why + ")" : ""); }
+  shell = initShell(shellCtx()); document.body.classList.toggle("dev", DEV);
   renderDiag(); bindOptions();
+  shell.skeletons(4);
   await refresh();
-  show("library");
+  shell.start();
   $("devOverlay").hidden = !DEV; setInterval(() => { if (DEV) devTick(); }, 500);
   if ("serviceWorker" in navigator && self.isSecureContext && !new URLSearchParams(location.search).has("nosw")) navigator.serviceWorker.register("./sw.js", { scope: "./" }).then(watchUpdate).catch(() => {});
   friends = initFriends({ $, show, games: () => games, gameByCloudId: (gid) => localByGameId().get(gid), ice: () => loadIce(cloud, opt), profileOf: (g) => profileFor(netTable, g && { ...g, networkProfile: (cloud && cloud.library.find((e) => e.gameId === gameIdOf(g)) || {}).networkProfile }),
@@ -65,29 +69,32 @@ async function boot() {
   // DSLink Cloud: OPTIONAL (account, friends, invites, library metadata). Where it lives comes from cloud-config.json - no setup. Nothing below blocks or breaks playing locally.
   const cfg = await loadConfig(opt).catch(() => ({ api: "", signal: "", ws: "" }));
   cloud = new Cloud(cfg);
-  cloudUi = initCloudUI({ $, show, cloud, passkeys: passkeysSupported, syncLibrary, localByGameId, playLocal: (id) => playGame(id), startInvite: (o) => friends.startInvite(o), partyInvite: (f) => partyUi && partyUi.invite(f) });
+  cloudUi = initCloudUI({ $, show, cloud, toast: (m, k) => shell.toast(m, k), passkeys: passkeysSupported, syncLibrary, localByGameId, playLocal: (id) => playGame(id), startInvite: (o) => friends.startInvite(o), partyInvite: (f) => partyUi && partyUi.invite(f) });
   cfiles = new CloudFiles({ cloud, store, opt });
   try { const r = await fetch(new URL("./netprofiles.json", import.meta.url)); if (r.ok) netTable = await r.json(); } catch { /* offline: profiles fall back to UNKNOWN (a prudent middle) */ }
   // Party Voice: independent of the Player and of any game session. The game's audio can be ducked while somebody speaks (opt-in).
   partyVoice = new PartyVoice({ cloud, opt, duck: (f) => { duckLevel = f; if (player) player.duck(f); } });
-  partyUi = initPartyUI({ $, show, cloud, party: partyVoice, toast: (m) => cloudUi && cloudUi.toast(m) });
-  cloud.on((ev) => { if (ev === "login") { cloud.setActivity("menu"); syncLibrary(); cloudStart(); } if (ev === "logout" || ev === "anon" || ev === "offline") { cfiles.refresh().then(renderLibrary); } });
-  cfiles.on((ev) => { if (ev === "conflict" && !current && document.body.dataset.screen === "library") { const c = [...cfiles.conflicts.values()][0]; if (c) askConflict(c); } if (ev !== "sync") renderLibrary(); updateUsage(); });
+  partyUi = initPartyUI({ $, show, cloud, avatarOf, party: partyVoice, toast: (m) => cloudUi && cloudUi.toast(m) });
+  partyVoice.on(() => { if (shell) shell.refresh(); });
+  cloud.on((ev) => { if (shell && ["data", "presence", "self", "login", "logout", "anon", "offline", "profile"].includes(ev)) shell.refresh(); if (ev === "login") { cloud.setActivity("menu"); syncLibrary(); cloudStart(); } if (ev === "logout" || ev === "anon" || ev === "offline") { cfiles.refresh().then(renderLibrary); } });
+  cfiles.on((ev) => { if (shell) shell.refresh(); if (ev === "conflict" && !current && document.body.dataset.screen === "library") { const c = [...cfiles.conflicts.values()][0]; if (c) askConflict(c); } if (ev !== "sync") renderLibrary(); updateUsage(); });
   bindCloudUi();
   addEventListener("online", () => { if (cfiles.ready) syncEverything(false); });
   setInterval(() => { if (current && cfiles.ready && savesWritten !== lastPushed) pushCurrent(); }, 120000);
   cloud.restore().catch(() => {});
   addEventListener("pagehide", (e) => { const s = friends && friends.session; if (s && !e.persisted && s.peer) s.peer.sendCtl({ t: "bye" }); });
-  window.dslinkPlay = api();
+  if (HOOKS()) window.dslinkPlay = api();          // the diagnostic surface exists only in development, in automated browsers (navigator.webdriver) or with ?hooks=1: a release build for people does not expose it
   if (!friends.resume()) friends.autoJoin();
+  addEventListener("gamepadconnected", (e) => { if (shell && document.body.dataset.screen === "game") shell.toast("Controller collegato", "ok"); });
   document.addEventListener("visibilitychange", () => { if (cloud && cloud.state === "user" && !document.hidden) { cloud.sendState(); cloud.refreshAll().catch(() => {}); } });
 }
 
 function bindOptions() {
   const sel = (id, name, def) => { const e = $(id); e.value = opt(name, def); e.onchange = () => setOpt(name, e.value); };
   sel("optRadioRing", "radioring", "auto"); sel("optRender", "render", "auto"); sel("optAudio", "audio", "auto"); sel("optLatency", "latency", "");
-  $("optDev").checked = DEV; $("optDev").onchange = () => { DEV = $("optDev").checked; setOpt("dev", DEV ? "1" : ""); $("devOverlay").hidden = !DEV; };
+  $("optDev").checked = DEV; $("optDev").onchange = () => setDev($("optDev").checked);
 }
+function setDev(on) { DEV = !!on; setOpt("dev", DEV ? "1" : ""); $("devOverlay").hidden = !DEV; $("optDev").checked = DEV; document.body.classList.toggle("dev", DEV); }
 function renderDiag() {
   const yn = (v) => (v ? "sì" : "NO");
   const lines = [`WebAssembly: ${yn(caps.wasm)}`, `Web Worker (module): ${yn(caps.moduleWorker)}`, `WebGL2: ${yn(caps.webgl2)}  WebGL: ${yn(caps.webgl)}`, `AudioWorklet: ${yn(caps.audioWorklet)}  AudioContext: ${yn(caps.audioContext)}`,
@@ -127,54 +134,88 @@ function renderFilter() {
   const present = availablePlatforms().filter((p) => games.some((g) => (g.platform || PLATFORMS.NDS) === p));
   box.hidden = present.length < 2; if (libFilter !== "all" && !present.includes(libFilter)) libFilter = "all";
   if (box.hidden) return;
-  for (const [id, txt] of [["all", "TUTTI"], ...present.map((p) => [p, p === PLATFORMS.NDS ? "NINTENDO DS" : "PLAYSTATION"])]) {
-    const b = document.createElement("button"); b.className = "chip" + (libFilter === id ? " on" : ""); b.dataset.filter = id; b.textContent = txt; b.onclick = () => { libFilter = id; renderLibrary(); }; box.append(b);
+  for (const [id, txt] of [["all", "Tutti"], ...present.map((p) => [p, p === PLATFORMS.NDS ? "Nintendo DS" : "PlayStation"])]) {
+    const b = document.createElement("button"); b.className = "chip" + (libFilter === id ? " on" : ""); b.type = "button"; b.setAttribute("aria-pressed", String(libFilter === id)); b.dataset.filter = id; b.textContent = txt; b.onclick = () => { libFilter = id; renderLibrary(); }; box.append(b);
   }
 }
+// What can be done with a game's files, in one place: used by the card, and by the Game detail sheet ("Gestisci file").
+function fileActionsFor(g, ps1, inCloud, gid) {
+  const out = [], cl = cfiles && cfiles.ready; if (!cl) return out;
+  if (ps1) { if (!inCloud) out.push({ label: "SALVA NEL MIO CLOUD", fn: () => pushPs1Save(g) }); }                            // PlayStation: the Cloud keeps the memory card (saves); the disc image stays on the device
+  else if (!inCloud) out.push({ label: "SALVA NEL MIO CLOUD", fn: () => uploadGameUi(g) });
+  else { out.push({ label: "RIMUOVI DAL DISPOSITIVO", fn: () => removeGame(g) }); out.push({ label: "RIMUOVI DAL CLOUD", fn: () => removeFromCloud(gid, g.title), cls: "mini danger" }); }
+  if (inCloud || cfiles.heads.has(gid)) out.push({ label: "SALVATAGGI", fn: () => openHistory(g, gid) });
+  return out;
+}
+/** the data the Game detail sheet shows for a local game (no technical details: never the core, never WebAssembly) */
+function detailOf(g) {
+  if (!g) return null;
+  const ps1 = g.platform === PLATFORMS.PS1, gid = gameIdOf(g), cl = cfiles && cfiles.ready, inCloud = !!(cl && gid && (ps1 ? cfiles.heads.has(gid) : cfiles.inCloud(gid)));
+  const prof = profileOfMeta(g), fr = cloud && cloud.friends ? cloud.friends.filter((f) => f.status === "IN_GAME" && f.game && (f.game.gameId === gid || f.game.title === g.title)).map((f) => f.displayName) : [];
+  const fileActions = fileActionsFor(g, ps1, inCloud, gid).filter((a) => a.label !== "SALVATAGGI");
+  fileActions.push(...(inCloud ? [] : [{ label: "RIMUOVI DAL DISPOSITIVO", fn: () => removeGame(g), cls: "mini danger" }]));
+  return { game: g, title: g.title || g.id, platform: g.platform || PLATFORMS.NDS, sub: ps1 ? g.serial || "PlayStation" : g.code || "", size: g.size, discs: (g.discs || []).length,
+    state: inCloud ? "both" : "local", saveText: inCloud || (cl && cfiles.heads.has(gid)) ? "Sul dispositivo e nel Cloud" : "Su questo dispositivo", canMp: !!(prof.multiplayerCapabilities && prof.multiplayerCapabilities.mode !== "none"),
+    onPlay: () => playGame(g.id), fileActions, onHistory: cl && (inCloud || cfiles.heads.has(gid)) ? () => openHistory(g, gid) : null, friendsPlaying: fr };
+}
+/** everything the app shell (shell.js) needs from this module, as getters so the order of start-up does not matter */
+function shellCtx() {
+  return { $, show, get cloud() { return cloud; }, get cfiles() { return cfiles; }, get party() { return partyVoice; }, games: () => games, session: () => friends && friends.session, play: (id) => playGame(id), playing: () => !!current,
+    renderLibrary: () => renderLibrary(), cloudEntry: (g) => (cloud && cloud.library ? cloud.library.find((e) => e.gameId === gameIdOf(g)) : null), cloudReady: () => !!(cfiles && cfiles.ready),
+    loggedIn: () => !!(cloud && cloud.state === "user" && cloud.user), openFriends: () => cloudUi && cloudUi.openFriends(), openProfile: () => cloudUi && cloudUi.openProfile(), openAccount: (m) => cloudUi && cloudUi.openAccount(m),
+    invite: (f) => cloudUi && cloudUi.invite(f), avatarOf, statusText, fmtSize, syncing: () => syncing, ps1BiosMissing: () => !BIOS_SLOTS.some((b) => sysInfo[b.key] && sysInfo[b.key].ok), detailOf,
+    updateUsage: () => updateUsage(), dev: () => DEV, setDev, updateLater: () => { updateDeferred = true; } };
+}
+
 function renderLibrary() {
-  renderFilter();
+  renderFilter(); shell.renderLocFilter();
   const ul = $("gameList"); ul.innerHTML = "";
-  if (!games.length && !(cfiles && cfiles.ready && cfiles.games.size)) { const li = document.createElement("li"); li.textContent = "Nessun gioco. Aggiungine uno."; ul.append(li); }
   const cl = cfiles && cfiles.ready;
+  const act = (acts, txt, fn, cls = "mini") => { const b = document.createElement("button"); b.className = cls; b.type = "button"; b.textContent = txt; b.onclick = (e) => { e.stopPropagation(); fn(); }; acts.append(b); return b; };
   for (const g of games) {
     const ps1 = g.platform === PLATFORMS.PS1; if (libFilter !== "all" && libFilter !== (g.platform || PLATFORMS.NDS)) continue;
     const gid = gameIdOf(g), inCloud = cl && gid && (ps1 ? cfiles.heads.has(gid) : cfiles.inCloud(gid));
+    if (!shell.visible(g, { inCloud: !!inCloud })) continue;
     const li = document.createElement("li"); li.className = "game"; li.dataset.id = g.id; li.dataset.platform = g.platform || PLATFORMS.NDS; if (cl) li.dataset.state = inCloud ? "both" : "local";
-    const t = document.createElement("span"); t.className = "t"; t.textContent = g.title || g.id; const sm = document.createElement("small");
-    sm.textContent = ps1 ? (g.serial || "PlayStation") + ((g.discs || []).length > 1 ? " · " + g.discs.length + " dischi" : "") + " · " + fmtSize(g.size) : (g.code || "") + " · " + fmtSize(g.size); t.append(sm);
-    const plat = document.createElement("span"); plat.className = "plat"; plat.textContent = ps1 ? "PS1" : "DS"; t.append(plat);
-    if (cl) { const tag = document.createElement("span"); tag.className = "tag " + (inCloud ? "both" : ""); tag.textContent = ps1 ? (inCloud ? "SALVATAGGI NEL CLOUD" : "SOLO LOCALE") : (inCloud ? "LOCALE + CLOUD" : "SOLO LOCALE"); t.append(tag); }
-    if (cl && cfiles.conflicts.has(g.id)) { const w = document.createElement("span"); w.className = "tag warn"; w.textContent = "⚠ DUE SALVATAGGI"; t.append(w); }
-    const play = document.createElement("button"); play.className = "cta primary play"; play.textContent = "GIOCA"; play.onclick = () => playGame(g.id);
-    const del = document.createElement("button"); del.className = "del"; del.setAttribute("aria-label", "Rimuovi dal dispositivo"); del.textContent = "✕"; del.onclick = () => removeGame(g);
-    li.append(t, play, del);
+    const t = document.createElement("span"); t.className = "t"; const ttl = document.createElement("span"); ttl.className = "ttl"; ttl.textContent = g.title || g.id; const sm = document.createElement("small");
+    sm.textContent = ps1 ? (g.serial || "PlayStation") + ((g.discs || []).length > 1 ? " · " + g.discs.length + " dischi" : "") + " · " + fmtSize(g.size) : (g.code || "") + " · " + fmtSize(g.size);
+    const meta = document.createElement("span"); meta.className = "meta";
+    if (cl) { const tag = document.createElement("span"); tag.className = "tag " + (inCloud ? "both" : ""); tag.textContent = ps1 ? (inCloud ? "SALVATAGGI NEL CLOUD" : "SOLO LOCALE") : (inCloud ? "LOCALE + CLOUD" : "SOLO LOCALE"); meta.append(tag); }
+    if (cl && cfiles.conflicts.has(g.id)) { const w = document.createElement("span"); w.className = "tag warn"; w.textContent = "⚠ DUE SALVATAGGI"; meta.append(w); }
+    { const mp = profileOfMeta(g).multiplayerCapabilities; if (mp && mp.mode !== "none") { const m = document.createElement("span"); m.className = "tag mp"; m.textContent = "MULTIPLAYER"; meta.append(m); } }
+    t.append(ttl, sm, meta);
+    const play = document.createElement("button"); play.className = "cta primary play"; play.type = "button"; play.textContent = "GIOCA"; play.onclick = (e) => { e.stopPropagation(); shell.haptic(12); playGame(g.id); };
+    const del = document.createElement("button"); del.className = "del"; del.type = "button"; del.setAttribute("aria-label", "Rimuovi dal dispositivo"); del.textContent = "✕"; del.onclick = (e) => { e.stopPropagation(); removeGame(g); };
+    li.append(shell.cover(g.title, g.platform || PLATFORMS.NDS), t, play, del);
     if (cl) {
       const acts = document.createElement("div"); acts.className = "acts";
-      const mk = (txt, fn, cls = "mini") => { const b = document.createElement("button"); b.className = cls; b.textContent = txt; b.onclick = fn; acts.append(b); return b; };
-      if (ps1) { if (!inCloud) mk("SALVA NEL MIO CLOUD", () => pushPs1Save(g)); }                            // PlayStation: the Cloud keeps the memory card (saves); the disc image stays on the device
-      else if (!inCloud) mk("SALVA NEL MIO CLOUD", () => uploadGameUi(g));
-      else { mk("RIMUOVI DAL DISPOSITIVO", () => removeGame(g)); mk("RIMUOVI DAL CLOUD", () => removeFromCloud(gid, g.title), "mini danger"); }
-      if (inCloud || cfiles.heads.has(gid)) mk("SALVATAGGI", () => openHistory(g, gid));
-      if (cfiles.conflicts.has(g.id)) mk("RISOLVI", () => askConflict(cfiles.conflicts.get(g.id)), "mini primary");
-      li.append(acts);
+      for (const a of fileActionsFor(g, ps1, inCloud, gid)) act(acts, a.label, a.fn, a.cls);
+      if (cfiles.conflicts.has(g.id)) act(acts, "RISOLVI", () => askConflict(cfiles.conflicts.get(g.id)), "mini primary");
+      if (acts.children.length) li.append(acts);
     }
+    li.append(shell.favButton(g));
+    li.tabIndex = 0; li.setAttribute("aria-label", g.title || g.id);
+    li.onclick = (e) => { if (e.target.closest("button, a, label, input")) return; shell.openDetail(g); };
+    li.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === li) { e.preventDefault(); shell.openDetail(g); } };
     ul.append(li);
   }
   if (cl) {                                    // games that are in the account's Cloud but not on this device: CLOUD ONLY
     const local = localByGameId();
     for (const [gid, f] of cfiles.games) {
       if (local.has(gid)) continue;
+      const e = cloud.library.find((x) => x.gameId === gid), title = (e && e.title) || f.title || gid;
+      if (!shell.visibleCloudOnly(title)) continue;
       const li = document.createElement("li"); li.className = "game cloudonly"; li.dataset.gameid = gid; li.dataset.state = "cloud";
-      const e = cloud.library.find((x) => x.gameId === gid);
-      const t = document.createElement("span"); t.className = "t"; t.textContent = (e && e.title) || f.title || gid; const sm = document.createElement("small"); sm.textContent = gid.slice(4).toUpperCase() + " · " + fmtSize(f.size); t.append(sm);
-      const tag = document.createElement("span"); tag.className = "tag cloud"; tag.textContent = "SOLO CLOUD"; t.append(tag);
-      const play = document.createElement("button"); play.className = "cta primary play"; play.textContent = "GIOCA"; play.onclick = () => playCloudOnly(gid);
+      const t = document.createElement("span"); t.className = "t"; const ttl = document.createElement("span"); ttl.className = "ttl"; ttl.textContent = title; const sm = document.createElement("small"); sm.textContent = gid.slice(4).toUpperCase() + " · " + fmtSize(f.size);
+      const meta = document.createElement("span"); meta.className = "meta"; const tag = document.createElement("span"); tag.className = "tag cloud"; tag.textContent = "SOLO CLOUD"; meta.append(tag); t.append(ttl, sm, meta);
+      const play = document.createElement("button"); play.className = "cta primary play"; play.type = "button"; play.textContent = "GIOCA"; play.onclick = (ev) => { ev.stopPropagation(); playCloudOnly(gid); };
       const acts = document.createElement("div"); acts.className = "acts";
-      const dl = document.createElement("button"); dl.className = "mini"; dl.textContent = "SCARICA"; dl.onclick = () => downloadInstall(gid);
-      const rm = document.createElement("button"); rm.className = "mini danger"; rm.textContent = "RIMUOVI DAL CLOUD"; rm.onclick = () => removeFromCloud(gid, (e && e.title) || f.title);
-      acts.append(dl, rm); li.append(t, play, acts); ul.append(li);
+      act(acts, "SCARICA", () => downloadInstall(gid)); act(acts, "RIMUOVI DAL CLOUD", () => removeFromCloud(gid, title), "mini danger");
+      li.append(shell.cover(title, (e && String(e.platform).toUpperCase() === "PS1") ? "PS1" : "NDS"), t, play, acts); ul.append(li);
     }
   }
+  shell.libraryEmpty();
+  shell.refresh();
   const sl = $("sysList"); sl.innerHTML = "";
   for (const s of SYS) {
     const li = document.createElement("li"); li.dataset.key = s.key;
@@ -245,18 +286,31 @@ $("romFile").onchange = async (e) => {
   for (const f of ds) await importNds(f);
   if (rest.length) await importPs1(rest);
 };
+const quotaErr = (e) => !!(e && (e.name === "QuotaExceededError" || /quota/i.test(String(e.message || ""))));
+// A save that cannot be written is never silent: the user is told once, the data stays in memory and is retried with the next save and when the game closes.
+const pendingSave = new Map(); let saveWarned = false;
+function flushSave(gid) {
+  saveChain = saveChain.then(async () => {
+    const data = pendingSave.get(gid); if (!data) return;
+    try { await store.put(`library/${gid}/save`, data); if (pendingSave.get(gid) === data) pendingSave.delete(gid); savesWritten++; saveWarned = false; if (cfiles) cfiles.markLocalSave(gid); }
+    catch (e) { if (!saveWarned) { saveWarned = true; toast(quotaErr(e) ? "Salvataggio non riuscito: spazio esaurito. Libera spazio, riprovo al prossimo salvataggio." : "Salvataggio non riuscito: riprovo al prossimo salvataggio.", "err"); } }
+  });
+}
 async function importNds(f) {
-  $("libErr").textContent = "Aggiungo il gioco…";
+  $("libErr").textContent = "Aggiungo il gioco…"; let id = null;
   try {
     const buf = await f.arrayBuffer(); const info = romInfo(buf);
     if (!info) { $("libErr").textContent = "Questo non sembra un file .nds valido."; return; }
-    const id = await romId(buf);
+    id = await romId(buf);
     await store.put(`library/${id}/rom.nds`, buf);
     const nameTitle = (f.name || "").replace(/\.(nds|srl)$/i, "");
     await store.put(`library/${id}/meta.json`, new TextEncoder().encode(JSON.stringify({ id, title: nameTitle || info.title, code: info.code, size: buf.byteLength, added: Date.now() })).buffer);
     $("libErr").textContent = ""; await refresh();
     if (autoCloud() && cfiles && cfiles.ready) { const lg = games.find((x) => x.id === id); if (lg) await uploadGameUi(lg); }
-  } catch (err) { $("libErr").textContent = "Non riesco a salvare il gioco: " + (err && err.message || err); }
+  } catch (err) {
+    if (id) for (const n of ["rom.nds", "meta.json"]) await store.del(`library/${id}/${n}`).catch(() => {});     // no half-imported game left behind (it would be invisible and still take the space)
+    $("libErr").textContent = quotaErr(err) ? "Spazio del browser esaurito su questo dispositivo. Libera spazio e riprova." : "Non riesco a salvare il gioco: il file non è stato aggiunto. Riprova.";
+  }
 }
 
 // ---- PlayStation: group the picked files into games, let the core identify every disc, stream the files into the device storage (never a whole disc image in memory)
@@ -353,14 +407,14 @@ async function playGame(id, session) {
   player = createGameSession(sel, {
     onRumble: (strong, weak) => { if (gamepad) gamepad.rumble(strong, weak); },
     canvas: document.createElement("canvas"),
-    onSram: (gid, data) => { saveChain = saveChain.then(() => store.put(`library/${gid}/save`, data)).then(() => { savesWritten++; if (cfiles) cfiles.markLocalSave(gid); }).catch(() => { $("libErr").textContent = "Salvataggio non riuscito"; }); },
+    onSram: (gid, data) => { pendingSave.set(gid, data); flushSave(gid); },
     onError: (msg) => fail(msg),
-    onShutdown: () => { window.__lastShutdown = player && player.shutdownInfo; leave(true); },
+    onShutdown: () => { if (HOOKS()) window.__lastShutdown = player && player.shutdownInfo; leave(true); },
     onNeedGesture: () => { $("resumeHint").hidden = false; },       // the browser wants a tap before the audio (and the game) may continue
     onResumed: () => { $("resumeHint").hidden = true; },
   });
   player.prepare();                       // the tap's gesture creates the AudioContext
-  $("loadingNote").textContent = "Carico " + (g.title || "il gioco") + "…"; show("loading");
+  shell.loading(g.title || "Avvio", "Preparo il gioco…", "files"); show("loading");
   try {
     const isPs1 = g.platform === PLATFORMS.PS1; let rom = null, system = {}, extra;
     if (isPs1) {
@@ -379,11 +433,12 @@ async function playGame(id, session) {
       }
     }
     const sram = dlGuest ? null : await store.get(`library/${id}/save`);
-    buildGame();
+    buildGame(); shell.loading(g.title || "Avvio", "Avvio il sistema…", "core");
     await player.start({ id, rom, system, sram, extra, radio: session ? { role: session.role === "host" ? 1 : 2, peer: session.peer } : undefined });
     if (gamepad) gamepad.start();
     if (session) session.playing();
     if (duckLevel < 1) player.duck(duckLevel);                                  // a party member is speaking right now
+    if (!dlGuest) shell.played(g.id);
     if (cloud) { cloud.setActivity("game", gameIdOf(g)); if (!dlGuest) cloud.markPlayed(gameIdOf(g)).catch(() => {}); }
     if (session && session.dlplay) startAssist(session);
     show("game"); $("game").hidden = false; $("app").style.display = "none";
@@ -403,7 +458,7 @@ async function preparePs1(g) {
   if (bios.status === "none") { if (!(await askHle())) return null; mode = "hle"; }
   else if (bios.status === "other") toast("Non c'è un BIOS per la regione di questo gioco: uso un altro BIOS PlayStation");
   const region = prof.region === "PAL" ? "PAL" : prof.region === "NTSC-U" || prof.region === "NTSC-J" ? "NTSC" : "auto";
-  window.__ps1Start = { bios: mode, region, biosStatus: bios.status };                                              // read-only diagnostics for the tests
+  if (HOOKS()) window.__ps1Start = { bios: mode, region, biosStatus: bios.status };                                              // read-only diagnostics for the tests
   return { system: bios.files, extra: { files, discs: (g.discs || []).map((d) => d.file), options: { bios: mode, region, analog: !!g.analog } } };
 }
 function askHle() {
@@ -433,6 +488,14 @@ function buildGame() {
   // physical controllers (Gamepad API): one internal mapping for every core; a second pad is player 2 where the system has one (PlayStation)
   gamepad = new GamepadInput({ btn: (n, d, port) => { if (port === 0 || ps1) player.btn(n, d, port); }, analog: ps1 ? (lx, ly, rx, ry, port) => player.analog(lx, ly, rx, ry, port) : undefined }, () => !!(player && player.analogOn));
 }
+// Watchdog: a core that silently stops (the browser killed its worker, an endless loop) is not left as a frozen picture. Frames are counted by the worker's own statistics; ten seconds without a
+// single new frame while the game is not paused and the page is visible = the session is closed in a safe way (save kept) and the user is told.
+let wdLast = -1, wdStale = 0;
+setInterval(() => {
+  if (!current || !player || !player.running || player.paused || document.hidden) { wdLast = -1; wdStale = 0; return; }
+  const sub = (player.stats || {}).submitted || 0;
+  if (sub === wdLast) { if (++wdStale >= 4) { wdLast = -1; wdStale = 0; fail("Il gioco non risponde: il sistema si è fermato."); } } else { wdLast = sub; wdStale = 0; }
+}, 2500);
 function askLeave() { $("confirm").hidden = false; }
 $("confirmNo").onclick = () => { $("confirm").hidden = true; };
 $("confirmYes").onclick = async () => { $("confirm").hidden = true; await leave(false); };
@@ -444,6 +507,7 @@ async function leave(fromCore) {
   if (!fromCore && player) { await player.save(true); }
   const p = player; player = null; if (p) await p.stop();
   await saveChain;                                         // the last save is on disk before the library shows again
+  for (const gid of [...pendingSave.keys()]) flushSave(gid); await saveChain;           // one more try for a save that failed earlier
   const leftId = current;
   if (gamepad) { gamepad.stop(); gamepad = null; } if (ps1x) { ps1x.destroy(); ps1x = null; }
   if (controls) { controls.destroy(); controls = null; }
@@ -459,7 +523,7 @@ function fail(msg) {
   if (gamepad) { gamepad.stop(); gamepad = null; } if (ps1x) { ps1x.destroy(); ps1x = null; }
   if (controls) { controls.destroy(); controls = null; }
   $("game").hidden = true; $("game").innerHTML = ""; $("app").style.display = ""; current = null; currentProfile = null;
-  $("errorNote").textContent = msg; show("error"); if (cloud) cloud.setActivity("menu");
+  shell.showError(msg); if (cloud) cloud.setActivity("menu");
 }
 $("btnErrBack").onclick = () => show("library");
 $("btnResume").onclick = async () => { if (player) { await player.unlockAudio(); await player.resume(); } $("resumeHint").hidden = true; };
@@ -474,7 +538,7 @@ async function onSessionLost(why) {
 // The emulator only uses local files. Everything below moves copies between the device and the account's private Cloud space, with progress, hash checks and no loss of local data on any error.
 let lastPushed = 0, duckLevel = 1;
 const autoCloud = () => { try { return localStorage.getItem("dslink.autocloud") === "1"; } catch { return false; } };
-const toast = (m) => { if (cloudUi) cloudUi.toast(m); };
+const toast = (m, kind) => { if (shell) shell.toast(m, kind); else if (cloudUi) cloudUi.toast(m); };
 const pctText = (p) => ({ hash: "Preparo il file…", upload: "Caricamento…", verify: "Verifico l'integrità…", download: "Scaricamento…", done: "Completato" }[p.phase] || "") + (p.phase === "upload" || p.phase === "download" ? " " + p.pct + "%" : "");
 async function withXfer(title, name, fn) {
   $("xferTitle").textContent = title; $("xferName").textContent = name || ""; $("xferBar").value = 0; $("xferPct").textContent = ""; $("xferErr").textContent = ""; $("btnXferClose").hidden = true; $("xfer").hidden = false;
@@ -489,7 +553,7 @@ async function uploadGameUi(g) {
   const gid = gameIdOf(g); if (!gid || !cfiles.ready) return { ok: false };
   const buf = await store.get(`library/${g.id}/rom.nds`); if (!buf) return { ok: false };
   const r = await withXfer("Caricamento nel tuo Cloud", g.title, (cb) => cfiles.upload("game", gid, buf, { title: g.title, onProgress: cb }));
-  if (r.ok) { syncLibrary(); await cloud.loadLibrary(); cfiles.syncSave(g.id, gid).catch(() => {}); } renderLibrary(); updateUsage(); return r;
+  if (r.ok) { syncLibrary(); await cloud.loadLibrary(); cfiles.syncSave(g.id, gid).catch(() => {}); toast("Caricato nel tuo Cloud", "ok"); } renderLibrary(); updateUsage(); return r;
 }
 async function uploadSystemUi(s) {
   const buf = await store.get("system/" + s.file); if (!buf || !s.sizes.includes(buf.byteLength)) return { ok: false };
@@ -548,7 +612,7 @@ async function syncEverything(manual) {
     const bad = out.find((x) => x.action === "offline" || x.action === "error");
     $("syncNote").textContent = bad ? "Sincronizzazione non riuscita: riprovo appena possibile." : "Sincronizzato " + new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
     const c = [...cfiles.conflicts.values()][0]; if (c && !current) askConflict(c);
-    if (manual && !bad && !c) toast("Tutto sincronizzato");
+    if (manual && !bad && !c) toast("Tutto sincronizzato", "ok");
   } finally { syncing = false; renderLibrary(); updateUsage(); }
 }
 function afterGame(localId) {                                // leaving a game: the save is on disk, now the Cloud copy
@@ -616,7 +680,7 @@ function watchUpdate(reg) {
   navigator.serviceWorker.addEventListener("controllerchange", () => { if (userUpdate) location.reload(); });
   $("btnUpdate").onclick = () => { userUpdate = true; if (waitingSW) waitingSW.postMessage({ t: "skip" }); };
 }
-function showUpdateBar() { $("updateBar").hidden = !(waitingSW && !current); }     // only from the menus: never while a game runs
+function showUpdateBar() { $("updateBar").hidden = !(waitingSW && !current && !updateDeferred); }     // only from the menus: never while a game runs
 
 // ---------------------------------------------------------------- development overlay (this device only, never sent anywhere)
 function devTick() {
@@ -657,7 +721,7 @@ function radioLines(s) {
 
 // ---------------------------------------------------------------- test/diagnostic surface (read-only state of THIS page)
 function api() {
-  return { get profile() { return currentProfile; }, get gamepad() { return gamepad; }, get ps1x() { return ps1x; }, resolve: (platform) => resolveRuntime({ platform }, deviceCapabilities(caps)), importPs1, get store() { return store; }, get player() { return player; }, get friends() { return friends; }, get cloud() { return cloud; }, get cfiles() { return cfiles; }, get party() { return partyVoice; }, get partyUi() { return partyUi; }, get games() { return games; }, askConflict, syncEverything, get cloudUi() { return cloudUi; }, get assist() { return assist; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
+  return { go: (t) => shell && shell.go(t), get shell() { return shell; }, get profile() { return currentProfile; }, get gamepad() { return gamepad; }, get ps1x() { return ps1x; }, resolve: (platform) => resolveRuntime({ platform }, deviceCapabilities(caps)), importPs1, get store() { return store; }, get player() { return player; }, get friends() { return friends; }, get cloud() { return cloud; }, get cfiles() { return cfiles; }, get party() { return partyVoice; }, get partyUi() { return partyUi; }, get games() { return games; }, askConflict, syncEverything, get cloudUi() { return cloudUi; }, get assist() { return assist; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
     stats: () => (player ? player.stats : null), grab: () => player && player.grab(), isPlaying: () => !!current && !!player && player.running, whenSaved: () => saveChain };
 }
 boot();

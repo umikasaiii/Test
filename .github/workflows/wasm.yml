@@ -10,7 +10,7 @@ on:
 jobs:
   wasm:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - name: Private file guard (no ROM / BIOS / firmware / refs in the repository)
@@ -41,6 +41,25 @@ jobs:
           cd cloud/tests
           node play_ps1_e2e.mjs
           node play_multicore_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds"
+      - name: PLAYSPHERE UI (app shell and design system in real Chrome under the production CSP - first run, navigation, Home, Library, Game detail, themes + WCAG AA contrast, accessibility, responsive layouts, offline / install / haptics / lite mode, friendly errors and loading states, no core names in the normal UI, no PC Remote)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_ui_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds" /tmp/playui
+      - name: PLAYSPHERE hardening (IndexedDB fallback, quota exceeded, partial write, corrupt entries and saves, save write failure and retry, core error, worker killed, Cloud that never answers)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_hardening_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds"
+      - name: PLAYSPHERE multicore stress (NDS->PS1->NDS and PS1->NDS->PS1 repeatedly in one page - no zombie worker / audio / canvas, bounded memory, saves isolated)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_multicore_stress.mjs "$PWD/../../build/rom/dslink_test_1.nds" 2
+      - name: NDS TOUCH GEOMETRY unchanged (DS and PlayStation layouts, portrait / landscape / tablet, against the approved baseline) and the frozen controls directory is byte-identical to 75c6b3e
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: |
+          git fetch --no-tags --depth=1 origin 75c6b3e 2>/dev/null || git fetch --no-tags --unshallow 2>/dev/null || true
+          if git cat-file -e 75c6b3e 2>/dev/null; then git diff --exit-code 75c6b3e -- cloud/worker/public/controls; else echo "75c6b3e not fetchable here: geometry baseline check only"; fi
+          cd cloud/tests && node controls_geometry_probe.mjs "$PWD/../../build/rom/dslink_test_1.nds" --check
       - name: AUDIO RING unit test (adaptive buffer, drift controller, underrun events, overrun guard)
         run: node cloud/tests/audio_ring_unit.mjs
       - name: PWA end to end in Chrome (load, core init, homebrew boot, video, audio pipeline, input, touch, save, save reload, OPFS + IndexedDB, offline, no network emulation)
@@ -85,6 +104,7 @@ jobs:
           node signal_contract.mjs http://localhost:8787
           node play_cloud_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playcloud
           node play_ps1_cloud_e2e.mjs http://localhost:8787
+          node play_csp_worker.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
           node play_cloud_static.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
           python3 - <<'PY'
           import struct
@@ -143,4 +163,5 @@ jobs:
             /tmp/playhard/*.png
             /tmp/playdist/*.png
             /tmp/playdist/matrix.json
+            /tmp/playui/*.png
           if-no-files-found: ignore

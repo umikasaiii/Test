@@ -17,11 +17,11 @@ const uname = (p) => (p + Math.random().toString(36).slice(2, 8)).slice(0, 18);
 const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined, headless: true, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-features=WebRtcHideLocalIpsWithMdns'] });
 
 async function device(name, { rom, passkey = true, base = BASE, query = '' } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const ctx = await browser.newContext({ bypassCSP: true, viewport: { width: 390, height: 844 }, hasTouch: true });
   const p = await ctx.newPage(); p.devName = name; p.errors = []; p.on('pageerror', (e) => p.errors.push(String(e)));
   if (passkey) { const cdp = await ctx.newCDPSession(p); await cdp.send('WebAuthn.enable'); await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } }); }
   await p.goto(`${base}/play/?stun=0&nosw${query}`); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 25000 });
-  if (rom) { await p.setInputFiles('#romFile', rom); await until(() => p.locator('#gameList li.game').count()); }
+  if (rom) { await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', rom); await until(async () => (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game').count()); }
   return p;
 }
 const chip = (p) => p.evaluate(() => document.getElementById('btnAccount').textContent);
@@ -96,18 +96,18 @@ check('PRESENCE: back to the menu after the game (no "in game forever")', await 
 // ============================================================================================ 4. CREATE a room on the public Cloud (the original bug), join by code, join by QR
 await B.click('#btnLostBack'); await B.waitForSelector('[data-screen=library].on');
 await A.waitForSelector('[data-screen=library].on', { timeout: 20000 }).catch(() => {});
-await A.click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom');
+await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), A).click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom');
 const gotLobby = await until(async () => (await screen(A)) === 'lobby' && /^\d{6}$/.test(await A.evaluate(() => document.getElementById('codeText').textContent)), 20000);
 check('PWA CREATE PARTITA over the Cloud: the room is created for real (code 6 digits), NOT "Non riesco a collegarmi"', gotLobby && !/Non riesco a collegarmi/.test(await A.evaluate(() => document.body.innerText)));
 check('PWA CREATE PARTITA: the QR is drawn', await A.evaluate(() => !!document.getElementById('codeQr').dataset.code));
 const code = await A.evaluate(() => document.getElementById('codeText').textContent);
 const G = await device('G', { rom: rom2, passkey: false });                       // an anonymous guest: no account needed for code/QR rooms
-await G.click('#btnJoin'); await G.fill('#joinCode', code); await G.click('#btnDoJoin');
+await (await G.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), G).click('#btnJoin'); await G.fill('#joinCode', code); await G.click('#btnDoJoin');
 check('CODE JOIN: a second browser joins with the code and the WebRTC connection comes up', await until(async () => (await sess(A))?.peer === 'open' && (await sess(G))?.peer === 'open', 25000), JSON.stringify([await sess(A), await sess(G)]));
 await A.click('#btnLobbyLeave'); await G.context().close();
-await A.click('#btnCreate'); await A.click('#btnMakeRoom'); await A.waitForSelector('[data-screen=lobby].on');
+await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), A).click('#btnCreate'); await A.click('#btnMakeRoom'); await A.waitForSelector('[data-screen=lobby].on');
 const code2 = await until(() => A.evaluate(() => document.getElementById('codeText').textContent), 8000);
-const Q = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true }); const qp = await Q.newPage(); qp.errors = []; qp.on('pageerror', (e) => qp.errors.push(String(e)));
+const Q = await browser.newContext({ bypassCSP: true, viewport: { width: 390, height: 844 }, hasTouch: true }); const qp = await Q.newPage(); qp.errors = []; qp.on('pageerror', (e) => qp.errors.push(String(e)));
 await qp.goto(`${BASE}/play/?stun=0&nosw&join=${code2}`);                              // what the camera app opens after scanning the QR
 check('QR JOIN: the QR link opens the PWA, lands in the right room and connects (no code typed)', await until(async () => (await sess(A))?.peer === 'open' && (await qp.evaluate(() => window.dslinkPlay && window.dslinkPlay.session && window.dslinkPlay.session.peer && window.dslinkPlay.session.peer.state)) === 'open', 30000));
 await A.click('#btnLobbyLeave'); await Q.close();
@@ -147,8 +147,8 @@ const dead = http.createServer((req, res) => {
 });
 await new Promise((r) => dead.listen(0, '127.0.0.1', r));
 const S = await device('S', { rom: rom1, passkey: false, base: `http://127.0.0.1:${dead.address().port}` });
-check('SINGLE PLAYER OFFLINE: with the Cloud unreachable the library works and the chip says so', await until(async () => /non raggiungibile|ACCEDI/.test(await chip(S)), 8000));
-await S.click('#gameList li.game .play');
+check('SINGLE PLAYER OFFLINE: with the Cloud unreachable the library works and the chip says so', await until(async () => /Offline|non raggiungibile|ACCEDI/.test(await chip(S)), 8000));
+await (await S.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), S).click('#gameList li.game .play');
 check('SINGLE PLAYER OFFLINE: GIOCA boots the game at 60 fps with no account and no cloud', await until(async () => (await S.evaluate(() => window.dslinkPlay.isPlaying())) && (await S.evaluate(() => window.dslinkPlay.stats().emuFps)) > 45, 30000));
 dead.close();
 check('NO SCRIPT ERRORS on the main devices', A.errors.length + B.errors.length + C1.errors.length + S.errors.length === 0, [...A.errors, ...B.errors, ...C1.errors, ...S.errors].join(' | '));

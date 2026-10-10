@@ -34,7 +34,7 @@ async function dev(url, withRom = false) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true }); const p = await ctx.newPage(); p.errors = []; p.on('pageerror', (e) => p.errors.push(String(e)));
   const cdp = await ctx.newCDPSession(p); await cdp.send('WebAuthn.enable'); await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
   await p.goto(url); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 25000 });
-  if (withRom) { await p.setInputFiles('#romFile', rom); await until(() => p.locator('#gameList li.game').count()); }
+  if (withRom) { await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', rom); await until(async () => (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game').count()); }
   return p;
 }
 const sess = (p) => p.evaluate(() => { const s = window.dslinkPlay.session; return s ? { peer: s.peer ? s.peer.state : null, code: s.code } : null; });
@@ -49,10 +49,10 @@ for (const mode of ['proxy', 'direct']) {
   await A.reload(); await A.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library');
   check(`[${mode}] SESSION RESTORE after reload (${mode === 'proxy' ? 'first-party cookie through the host\'s /api proxy' : 'SameSite=None cookie, CORS allow-list with credentials'})`, !!(await until(async () => /@/.test(await A.evaluate(() => document.getElementById('btnAccount').textContent)), 8000)));
   check(`[${mode}] PRESENCE over the ticketed WebSocket straight to the Cloud (no cookie on the socket)`, !!(await until(async () => (await A.evaluate(() => window.dslinkPlay.cloud.presence)) === 'MENU', 10000)), await A.evaluate(() => window.dslinkPlay.cloud.presence));
-  await A.click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom');
+  await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), A).click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom');
   const code = await until(async () => (await A.evaluate(() => document.body.dataset.screen)) === 'lobby' && /^\d{6}$/.test(await A.evaluate(() => document.getElementById('codeText').textContent)) && await A.evaluate(() => document.getElementById('codeText').textContent), 25000);
   check(`[${mode}] NETLIFY/PUBLIC PWA -> CREATE ROOM: code + QR from the Cloud, not "Non riesco a collegarmi"`, !!code, String(code));
-  const G = await dev(url, true); await G.click('#btnJoin'); await G.fill('#joinCode', String(code)); await G.click('#btnDoJoin');
+  const G = await dev(url, true); await (await G.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), G).click('#btnJoin'); await G.fill('#joinCode', String(code)); await G.click('#btnDoJoin');
   check(`[${mode}] JOIN by code from a second browser -> offer/answer/ICE -> WebRTC connected`, !!(await until(async () => (await sess(A))?.peer === 'open' && (await sess(G))?.peer === 'open', 25000)));
   const bad = await A.evaluate(async (b) => { const r = await fetch(b + '/api/me', { credentials: 'include', headers: { origin: 'https://evil.example' } }).then((x) => x.status).catch(() => -1); return r; }, BASE);
   void bad;

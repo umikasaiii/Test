@@ -56,7 +56,7 @@ async function device(host, name, query = '', { sw = false, importRom = true } =
     const gum = navigator.mediaDevices && navigator.mediaDevices.getUserMedia; if (gum) navigator.mediaDevices.getUserMedia = function (...a) { window.__media++; return gum.apply(this, a); };
   });
   await p.goto(`${host.base}/play/?stun=0${sw ? '' : '&nosw'}${query}`); if (!sw || !query.includes('join=')) { await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen !== undefined, null, { timeout: 20000 }); }
-  if (importRom) { await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 }); await p.setInputFiles('#romFile', romFile); await until(() => p.locator('#gameList li.game').count()); }
+  if (importRom) { await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 }); await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', romFile); await until(async () => (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game').count()); }
   return p;
 }
 const stats = (p) => p.evaluate(() => window.dslinkPlay.stats());
@@ -70,9 +70,9 @@ const rxLen = async (p) => { const b = await grab(p); let n = 0; while (n < 60 &
 /** create + join + ready + start through the real UI. Returns the two pages already playing. */
 async function pair(host, qa = '', qb = '') {
   const A = await device(host, 'A', qa), B = await device(host, 'B', qb);
-  await A.click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom');
+  await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), A).click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom');
   await A.waitForSelector('[data-screen=lobby].on'); const code = await until(() => A.evaluate(() => document.getElementById('codeText').textContent), 8000);
-  await B.click('#btnJoin'); await B.waitForSelector('[data-screen=friends-join].on'); await B.fill('#joinCode', code); await B.click('#btnDoJoin');
+  await (await B.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), B).click('#btnJoin'); await B.waitForSelector('[data-screen=friends-join].on'); await B.fill('#joinCode', code); await B.click('#btnDoJoin');
   await B.waitForSelector('[data-screen=lobby].on');
   return { A, B, code };
 }
@@ -95,7 +95,7 @@ const A = await device(host, 'A', '', { sw: true });
 await A.evaluate(() => navigator.serviceWorker.ready); await sleep(500);
 check('precondition: static host without COOP/COEP, page not isolated, service worker active', !(await iso(A)).coi && (await A.evaluate(() => !!navigator.serviceWorker.controller)));
 let navs = 0; A.on('framenavigated', (f) => { if (f === A.mainFrame()) navs++; });
-await A.click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on');
+await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), A).click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on');
 const chosen = await A.evaluate(() => document.getElementById('friendGame').value);
 await A.click('#btnMakeRoom');
 const lobbyA = await until(async () => { try { return await A.evaluate(() => document.body.dataset.screen === 'lobby' && /^\d{6}$/.test(document.getElementById('codeText').textContent)); } catch { return false; } }, 25000);
@@ -118,7 +118,7 @@ check('both devices connected in the same room; radio receive path is the Shared
 const B2 = await device(host, 'B', '', { sw: true });
 await B2.evaluate(() => navigator.serviceWorker.ready); await sleep(500);
 await A.click('#btnLobbyLeave'); await sleep(1000);
-await A.click('#btnCreate'); await A.click('#btnMakeRoom'); await A.waitForSelector('[data-screen=lobby].on'); const code2 = await until(() => A.evaluate(() => document.getElementById('codeText').textContent), 8000);
+await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), A).click('#btnCreate'); await A.click('#btnMakeRoom'); await A.waitForSelector('[data-screen=lobby].on'); const code2 = await until(() => A.evaluate(() => document.getElementById('codeText').textContent), 8000);
 await B2.goto(`${host.base}/play/?stun=0&join=${code2}`);
 const ok2 = await until(async () => { try { const s = await sess(B2); return s && s.peer === 'open'; } catch { return false; } }, 40000);
 check('QR on an installed (not yet isolated) PWA: reload + join the right room automatically', ok2 && (await iso(B2)).coi, JSON.stringify(await sess(B2)));

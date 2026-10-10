@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<meta name="theme-color" content="#060b17">
+<meta name="theme-color" id="metaTheme" content="#060b17">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -11,44 +11,139 @@
 <meta name="format-detection" content="telephone=no">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<title>PlaySphere · Gioca</title>
+<link rel="icon" type="image/svg+xml" href="icons/logo.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<meta name="color-scheme" content="dark light">
+<title>PlaySphere</title>
+<script src="theme-init.js"></script>
 <link rel="stylesheet" href="../controls/controls.css">
 <link rel="stylesheet" href="../mp/mp.css">
 <link rel="stylesheet" href="play.css">
+<link rel="stylesheet" href="playsphere.css">
 </head>
 <body>
-<main id="app" aria-live="polite">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9.5h13V10"/><path d="M10 19.5v-5h4v5"/></symbol>
+<symbol id="i-games" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.2c2.7 0 4.5 1.8 4.5 4.3"/></symbol>
+<symbol id="i-friends" viewBox="0 0 24 24"><circle cx="10" cy="8" r="3.4"/><path d="M3.5 19.5c0-3.4 2.9-5.7 6.5-5.7s6.5 2.3 6.5 5.7"/><path d="M19 7v6M16 10h6"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.7"/><path d="M4.5 20c0-4 3.4-6.3 7.5-6.3s7.5 2.3 7.5 6.3"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.6a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h0a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v0a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+<symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5s-8-4.9-8-11A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 2.5c0 6.1-8 11-8 11z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18.5a4.5 4.5 0 0 1-.6-8.9 6 6 0 0 1 11.6 1.4 3.8 3.8 0 0 1-.6 7.5z"/></symbol>
+<symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.5-3.5L4 9"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.5 3.5L20 15"/><path d="M20 20v-5h-5"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 11 12 15.5 16.5 11M5 19.5h14"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
+<symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M3 3l18 18M5 10.5a11 11 0 0 1 4-2.3M19 10.5a11 11 0 0 0-4.5-2.5M8.5 14a6 6 0 0 1 2.2-1.2M15.5 14a6 6 0 0 0-1.5-1.2M12 18.5v.01"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3z"/></symbol>
+<symbol id="i-phones" viewBox="0 0 24 24"><rect x="3" y="5" width="8" height="14" rx="2"/><rect x="13" y="5" width="8" height="14" rx="2"/></symbol>
+<symbol id="i-gamepad" viewBox="0 0 24 24"><path d="M7 8h10a4 4 0 0 1 3.9 4.9l-.8 3.3a2.4 2.4 0 0 1-4 1.2L14.5 16h-5l-1.6 1.4a2.4 2.4 0 0 1-4-1.2l-.8-3.3A4 4 0 0 1 7 8z"/><path d="M8 10.5v3M6.5 12h3M15.5 11.2v.01M17.4 12.8v.01"/></symbol>
+<symbol id="i-share" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="m8.2 10.8 7.6-3.6M8.2 13.2l7.6 3.6"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></symbol>
+</defs></svg>
+<a class="skip" href="#app">Vai ai contenuti</a>
+<div id="psBg" aria-hidden="true"><i></i><i></i><i></i></div>
+<nav id="psNav" aria-label="Navigazione principale">
+  <div class="ps-brand" aria-hidden="true"><img src="icons/logo.svg" alt="" width="40" height="40"><span class="ps-wordmark">Play<b>Sphere</b></span></div>
+  <button type="button" data-nav="home"><svg aria-hidden="true"><use href="#i-home"/></svg><span>Home</span></button>
+  <button type="button" data-nav="games"><svg aria-hidden="true"><use href="#i-games"/></svg><span>Libreria</span></button>
+  <button type="button" data-nav="multiplayer"><svg aria-hidden="true"><use href="#i-users"/></svg><span>Multiplayer</span></button>
+  <button type="button" data-nav="friends"><svg aria-hidden="true"><use href="#i-friends"/></svg><span>Amici</span></button>
+  <button type="button" data-nav="profile"><svg aria-hidden="true"><use href="#i-user"/></svg><span>Profilo</span></button>
+</nav>
+<main id="app">
   <section class="screen on" data-screen="library">
-    <header class="brand"><span class="logo">Play<b>Sphere</b></span><span class="sub">I tuoi giochi nel browser</span><button class="chip" id="btnParty" hidden>🎙 PARTY</button><button class="chip" id="btnAccount" data-mode="anon">ACCEDI</button></header>
+    <header class="ps-top">
+      <div class="ps-logo"><img src="icons/logo.svg" alt="" width="40" height="40"><div><span class="ps-wordmark">Play<b>Sphere</b></span><span class="ps-sub">Portable worlds</span></div></div>
+      <span class="ps-offline" id="psOffline" hidden role="status"><svg width="14" height="14" aria-hidden="true" style="stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round"><use href="#i-wifi-off"/></svg>Offline</span>
+      <button class="chip" id="btnParty" hidden aria-label="Party">🎙 Party</button>
+      <button class="chip" id="btnAccount" data-mode="anon">Accedi</button>
+      <button class="ps-iconbtn" id="btnSettings" type="button" aria-label="Impostazioni"><svg aria-hidden="true"><use href="#i-gear"/></svg></button>
+    </header>
     <p class="notice" id="unsupported" hidden></p>
 
-    <h2>Giochi</h2>
-    <div class="filter" id="platformFilter" hidden></div>
-    <ul class="games" id="gameList"></ul>
-    <label class="cta file" id="addGame"><input type="file" id="romFile" accept=".nds,.srl,.cue,.bin,.chd,.iso,.img,.m3u,application/octet-stream" multiple hidden>＋ Aggiungi un gioco</label>
-    <p class="hint">Nintendo DS: un file .nds. PlayStation: .cue con i suoi .bin, oppure .chd, .iso o .m3u (anche più dischi insieme). PlaySphere riconosce da solo il sistema.</p>
-    <p class="err" id="libErr"></p>
-    <div id="cloudBar" class="cloudbar" hidden>
+    <!-- HOME -->
+    <div class="ps-panel" data-panel="home" id="panelHome">
+      <div class="ps-hello"><h1 id="homeHello">Ciao!</h1><p class="hint" id="homeSub">Pronto a giocare?</p></div>
+      <div class="ps-install" id="installCard" hidden><span aria-hidden="true">📲</span><p id="installText">Installa PlaySphere sul tuo dispositivo</p><button class="mini" id="btnInstall" type="button">INSTALLA PLAYSPHERE</button><button class="mini" id="btnInstallLater" type="button" aria-label="Non ora">✕</button></div>
+      <div id="homeHero"></div>
+      <div class="ps-home-grid">
+        <section class="span2"><div class="ps-h"><h2>Ultimi giochi</h2><button type="button" data-go="games">Vedi tutti</button></div><div class="ps-rail" id="homeRecent"></div></section>
+        <section><div class="ps-h"><h2>Amici online</h2><button type="button" data-go="friends">Vedi tutti</button></div><div class="ps-list" id="homeFriends"></div></section>
+        <section><div class="ps-h"><h2>Stanza e party</h2></div><div class="ps-list" id="homeParty"></div><div style="margin-top:12px"><span class="ps-sync" id="homeSync" data-state="local"><svg aria-hidden="true"><use href="#i-cloud"/></svg><span>Solo locale</span></span></div></section>
+        <section class="span2" id="homeTipSec" hidden><div class="ps-tip" id="homeTip"></div></section>
+      </div>
+    </div>
+
+    <!-- LIBRERIA -->
+    <div class="ps-panel" data-panel="games" id="panelGames" hidden>
+      <h1>Libreria</h1>
+      <div class="ps-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="gameSearch" type="search" class="sel" placeholder="Cerca un gioco…" aria-label="Cerca un gioco" autocomplete="off" autocapitalize="none" spellcheck="false"></div>
+      <div class="ps-seg" role="tablist" id="libTabs" aria-label="Elenco"><button type="button" role="tab" data-lib="all" aria-selected="true">Tutti</button><button type="button" role="tab" data-lib="recent" aria-selected="false">Recenti</button><button type="button" role="tab" data-lib="fav" aria-selected="false">Preferiti</button></div>
+      <div class="ps-filters"><div class="filter" id="platformFilter" hidden></div><div class="filter" id="locFilter" hidden></div></div>
+      <ul class="games ps-grid" id="gameList" aria-label="I tuoi giochi"></ul>
+      <label class="cta file" id="addGame"><input type="file" id="romFile" accept=".nds,.srl,.cue,.bin,.chd,.iso,.img,.m3u,application/octet-stream" multiple hidden><svg width="20" height="20" aria-hidden="true" style="stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;margin-right:8px"><use href="#i-plus"/></svg>Aggiungi un gioco</label>
+      <p class="hint">Nintendo DS: un file .nds. PlayStation: .cue con i suoi .bin, oppure .chd, .iso o .m3u (anche più dischi insieme). PlaySphere riconosce da solo il sistema.</p>
+      <p class="err" id="libErr" role="alert"></p>
+    </div>
+
+    <!-- MULTIPLAYER -->
+    <div class="ps-panel" data-panel="multiplayer" id="panelMp" hidden>
+      <h1>Multiplayer</h1>
+      <div class="ps-seg" role="tablist" id="mpSeg" aria-label="Modalità"><button type="button" role="tab" data-mp="local" aria-selected="true"><svg aria-hidden="true"><use href="#i-phones"/></svg>Locale</button><button type="button" role="tab" data-mp="online" aria-selected="false"><svg aria-hidden="true"><use href="#i-globe"/></svg>Online</button></div>
+      <div class="ps-pane" data-mp-pane="local">
+        <div class="ps-list" id="friendsRow">
+          <button class="cta primary ps-mp-card" id="btnCreate" type="button"><span class="ico"><svg aria-hidden="true"><use href="#i-users"/></svg></span><span><b>Crea stanza</b><small>Scegli il gioco e fai entrare un amico con il codice</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+          <button class="cta ps-mp-card" id="btnJoin" type="button"><span class="ico"><svg aria-hidden="true"><use href="#i-link"/></svg></span><span><b>Unisciti</b><small>Inserisci il codice o inquadra il QR</small></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        </div>
+        <p class="hint">Due dispositivi, ognuno con il suo gioco: tra i due passa solo la radio del DS. Serve lo stesso gioco su entrambi.</p>
+        <div id="mpRoomNow"></div>
+      </div>
+      <div class="ps-pane" data-mp-pane="online" hidden>
+        <div id="mpOnline"></div>
+      </div>
+    </div>
+
+    <!-- IMPOSTAZIONI -->
+    <div class="ps-panel" data-panel="settings" id="panelSettings" hidden>
+      <h1>Impostazioni</h1>
+      <h2>Aspetto</h2>
+      <div class="ps-card ps-set">
+        <div class="ps-line"><span id="lblTheme">Tema</span><div class="ps-seg" role="group" aria-labelledby="lblTheme" id="themeSeg"><button type="button" data-theme-set="dark" aria-selected="false">Scuro</button><button type="button" data-theme-set="light" aria-selected="false">Chiaro</button><button type="button" data-theme-set="system" aria-selected="false">Sistema</button></div></div>
+        <label class="ps-line chk"><span>Riduci gli effetti (consigliato su dispositivi lenti)</span><input type="checkbox" id="optLite"></label>
+        <label class="ps-line chk"><span>Vibrazione leggera nei menu</span><input type="checkbox" id="optHaptic"></label>
+        <label class="ps-line chk"><span>Vibrazione sui tasti di gioco</span><input type="checkbox" id="optHapticGame"></label>
+      </div>
+      <h2>Cloud</h2>
+      <div id="cloudBar" class="cloudbar" hidden>
       <label class="chk"><input type="checkbox" id="optAutoCloud"> Salva nel mio Cloud i giochi e i file di sistema che aggiungo</label>
       <p class="hint" id="usageBox"></p>
       <div class="row"><button class="mini" id="btnSyncNow">SINCRONIZZA ORA</button><small id="syncNote" class="hint"></small></div>
       <div class="row"><small class="hint">Questo dispositivo si chiama</small><input id="devName" class="sel" maxlength="24" aria-label="Nome del dispositivo"></div>
     </div>
-
-    <h2>Gioca con amici</h2>
-    <p class="hint">Due dispositivi, ognuno con il suo gioco: tra i due passa solo la radio del DS. Serve lo stesso gioco su entrambi.</p>
-    <div class="row" id="friendsRow"><button class="cta primary" id="btnCreate">CREA PARTITA</button><button class="cta" id="btnJoin">UNISCITI</button></div>
-
-    <h2>File di sistema Nintendo DS</h2>
+      <p class="hint" id="cloudOff">Accedi per sincronizzare giochi, file di sistema e salvataggi nel tuo Cloud privato.</p>
+      <h2>File di sistema Nintendo DS</h2>
     <p class="hint">Facoltativi per i gioco homebrew, consigliati per i giochi commerciali. Restano solo su questo dispositivo: non vengono mai inviati, né salvati nel sito.</p>
     <ul class="games sysfiles" id="sysList"></ul>
-    <h2>File di sistema PlayStation</h2>
+      <h2>File di sistema PlayStation</h2>
     <p class="hint">Il BIOS PlayStation serve per giocare ai dischi PlayStation (uno per regione: America, Europa, Giappone). Lo scegli tu: resta solo su questo dispositivo e, se vuoi, nel tuo Cloud privato.</p>
     <ul class="games sysfiles" id="ps1SysList"></ul>
     <label class="cta file" id="addPs1Bios"><input type="file" id="ps1BiosFile" accept=".bin,application/octet-stream" hidden>＋ Aggiungi un BIOS PlayStation</label>
     <p class="hint" id="storageNote"></p>
-
-    <details class="diag"><summary>Impostazioni di test</summary>
+      <h2>Informazioni</h2>
+      <div class="ps-card ps-set">
+        <div class="ps-line"><span>Versione</span><button type="button" class="mini" id="btnAbout">INFO E LICENZE</button></div>
+        <p class="hint" id="verLine"></p>
+      </div>
+      <details class="diag devonly"><summary>Impostazioni di test</summary>
       <div class="opts">
         <label>Rendering <select id="optRender"><option value="auto">Automatico (thread principale)</option><option value="main">Thread principale</option><option value="worker">Worker (OffscreenCanvas)</option></select></label>
         <label>Audio <select id="optAudio"><option value="auto">Automatico</option><option value="msg">Worklet + messaggi (senza SAB)</option><option value="sp">ScriptProcessor</option></select></label>
@@ -58,12 +153,14 @@
       </div>
       <p class="hint">Valgono dalla prossima partita. Restano solo su questo dispositivo.</p>
     </details>
-    <details class="diag"><summary>Compatibilità di questo dispositivo</summary><pre id="diagText"></pre><p class="hint">Solo su questo dispositivo: nessun dato viene inviato.</p></details>
+      <details class="diag"><summary>Compatibilità di questo dispositivo</summary><pre id="diagText"></pre><p class="hint">Solo su questo dispositivo: nessun dato viene inviato.</p></details>
+    </div>
   </section>
 
   <section class="screen" data-screen="account">
-    <h1>Il tuo account DSLink</h1>
+    <h1>Il tuo account PlaySphere</h1>
     <p class="hint">Serve solo per amici, inviti e libreria sul cloud. Giocare da solo non richiede un account.</p>
+    <p class="notice" id="authMsg" hidden></p>
     <input id="authUser" class="sel" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="nome utente (a-z 0-9 _)" maxlength="20">
     <input id="authDisplay" class="sel" autocomplete="nickname" placeholder="nome visualizzato (facoltativo)" maxlength="32">
     <div class="actions"><button class="cta primary" id="btnPkCreate">CREA ACCOUNT CON PASSKEY</button><button class="cta" id="btnPkLogin">ACCEDI CON PASSKEY</button></div>
@@ -77,11 +174,18 @@
 
   <section class="screen" data-screen="profile">
     <div class="prof"><span class="avbig" id="profAvatar">🎮</span><h1 id="profName"></h1><p class="hint" id="profUser"></p><p class="pres" id="profStatus"></p></div>
-    <div class="actions"><button class="cta primary" id="btnProfFriends">AMICI</button><button class="cta" id="btnProfLibrary">LIBRERIA</button><button class="cta" id="btnProfEdit">MODIFICA PROFILO</button></div>
-    <div id="profEdit" hidden><input id="editName" class="sel" maxlength="32" placeholder="nome visualizzato"><select id="editAvatar" class="sel"></select><div class="actions"><button class="cta primary" id="btnEditSave">SALVA</button></div></div>
-    <div class="actions"><button class="cta" id="btnProfSessions">DISPOSITIVI</button><button class="cta danger" id="btnProfLogout">ESCI</button></div>
-    <div id="profSessions" hidden></div>
-    <div class="actions"><button class="cta" id="btnProfBack">INDIETRO</button></div>
+    <div class="ps-stats" id="profStats"><div class="ps-stat"><b id="statGames">0</b><small>Giochi</small></div><div class="ps-stat"><b id="statFriends">0</b><small>Amici</small></div><div class="ps-stat"><b id="statRecent">0</b><small>Recenti</small></div></div>
+    <h2>Giochi recenti</h2><div class="ps-rail" id="profRecent"></div>
+    <div class="ps-menu">
+      <button class="cta" id="btnProfFriends" type="button"><svg width="22" height="22" aria-hidden="true" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><use href="#i-friends"/></svg>Amici</button>
+      <button class="cta" id="btnProfLibrary" type="button"><svg width="22" height="22" aria-hidden="true" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><use href="#i-cloud"/></svg>Libreria sul cloud</button>
+      <button class="cta" id="btnProfEdit" type="button"><svg width="22" height="22" aria-hidden="true" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><use href="#i-user"/></svg>Modifica profilo</button>
+      <button class="cta" id="btnProfSettings" type="button"><svg width="22" height="22" aria-hidden="true" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><use href="#i-gear"/></svg>Impostazioni</button>
+    </div>
+    <div id="profEdit" class="ps-card" hidden><input id="editName" class="sel" maxlength="32" placeholder="nome visualizzato" aria-label="Nome visualizzato"><select id="editAvatar" class="sel" aria-label="Avatar"></select><div class="actions"><button class="cta primary" id="btnEditSave" type="button">SALVA</button></div></div>
+    <div class="actions"><button class="cta" id="btnProfSessions" type="button">I MIEI DISPOSITIVI</button><button class="cta danger" id="btnProfLogout" type="button">ESCI</button></div>
+    <div id="profSessions" class="ps-card" hidden></div>
+    <div class="actions"><button class="cta" id="btnProfBack" type="button">INDIETRO</button></div>
   </section>
 
   <section class="screen" data-screen="friends">
@@ -116,7 +220,7 @@
 
   <section class="screen" data-screen="friends-create">
     <h1>Crea partita</h1><p class="hint">Scegli il gioco, poi fai inserire il codice all'amico.</p>
-    <select id="friendGame" class="sel"></select>
+    <select id="friendGame" class="sel" aria-label="Gioco da giocare insieme"></select>
     <div class="actions"><button class="cta primary" id="btnMakeRoom">CREA</button><button class="cta" id="btnCreateBack">INDIETRO</button></div>
     <p class="err" id="createErr"></p>
   </section>
@@ -132,44 +236,78 @@
 
   <section class="screen" data-screen="lobby">
     <h1 id="lobbyTitle">Sala</h1>
-    <div id="lobbyCode" class="bigcode" hidden><span id="codeText"></span><canvas id="codeQr" width="160" height="160"></canvas></div>
+    <div id="lobbyCode" class="bigcode" hidden><span class="label hint">La tua stanza</span><span id="codeText"></span><button class="ps-iconbtn ps-copy" id="btnCopyCode" type="button" aria-label="Copia il codice"><svg aria-hidden="true"><use href="#i-copy"/></svg></button><canvas id="codeQr" width="160" height="160" aria-label="QR della stanza"></canvas></div>
     <ul class="players" id="players">
-      <li data-slot="host"><b>HOST</b> <span class="st" id="stHost">—</span></li>
-      <li data-slot="guest"><b>PLAYER 2</b> <span class="st" id="stGuest">—</span></li>
+      <li data-slot="host"><span class="ps-pl"><span class="ps-avatar" aria-hidden="true">🎮</span><span><b>HOST <span class="ps-crown" role="img" aria-label="Host">👑</span></b><small id="nmHost">—</small></span></span><span class="st" id="stHost">—</span></li>
+      <li data-slot="guest"><span class="ps-pl"><span class="ps-avatar" aria-hidden="true">👾</span><span><b>PLAYER 2</b><small id="nmGuest">—</small></span></span><span class="st" id="stGuest">—</span></li>
     </ul>
     <p class="quality" id="lobbyQuality"></p>
     <p class="hint" id="lobbyNet"></p>
-    <p class="hint" id="lobbyNote"></p>
+    <p class="hint" id="lobbyNote" role="status"></p>
     <label class="cta file" id="lobbyRefsWrap" hidden><input type="file" id="lobbyRefs" hidden>IMPORTA refs.json</label>
     <div class="actions"><button class="cta primary" id="btnReady" hidden>PRONTO</button><button class="cta primary" id="btnStart" hidden disabled>AVVIA</button><button class="cta" id="btnLobbyLeave">ESCI</button></div>
   </section>
 
   <section class="screen" data-screen="lost">
-    <div class="alert">!</div><h1>Connessione persa</h1><p class="hint" id="lostNote"></p>
-    <div class="actions"><button class="cta primary" id="btnLostBack">INDIETRO</button></div>
+    <div class="ps-err-ico" aria-hidden="true">!</div><h1>Connessione persa</h1><p class="hint" id="lostNote" role="alert"></p>
+    <div class="actions"><button class="cta primary" id="btnLostBack" type="button">INDIETRO</button></div>
   </section>
 
   <section class="screen" data-screen="loading">
-    <div class="spinner"></div><h1>Avvio</h1><p class="hint" id="loadingNote">Carico il Nintendo DS…</p>
+    <img class="ps-load-logo" src="icons/logo.svg" alt="" width="96" height="96">
+    <h1 id="loadingTitle">Avvio</h1><p class="hint" id="loadingNote" role="status">Carico il gioco…</p>
+    <div class="ps-indet" role="progressbar" aria-label="Avvio in corso"></div>
+    <ul class="ps-steps" id="loadingSteps" aria-hidden="true"><li data-step="files">Leggo i file del gioco</li><li data-step="core">Avvio il sistema</li><li data-step="ready">Pronto</li></ul>
   </section>
 
   <section class="screen" data-screen="error">
-    <div class="alert">!</div><h1>Non riesco ad avviare</h1><p class="hint" id="errorNote"></p>
-    <div class="actions"><button class="cta primary" id="btnErrBack">INDIETRO</button></div>
+    <div class="ps-err-ico" aria-hidden="true">!</div><h1 id="errorTitle">Non riesco ad avviare</h1><p class="hint" id="errorNote" role="alert"></p>
+    <p class="ps-err-todo" id="errorTodo"></p>
+    <details class="ps-tech" id="errorTechBox" hidden><summary>Dettagli tecnici</summary><pre id="errorTech"></pre></details>
+    <div class="actions"><button class="cta primary" id="btnErrBack" type="button">INDIETRO</button><button class="cta" id="btnErrAlt" type="button" hidden></button></div>
   </section>
 </main>
 
 <div id="game" hidden></div>
+<div id="gameDetail" class="overlay sheet" hidden role="dialog" aria-modal="true" aria-labelledby="gdTitle"><div class="card ps-detail"><div class="ps-grab" aria-hidden="true"></div>
+  <div class="ps-cover" id="gdCover"></div><h2 class="ttl" id="gdTitle"></h2>
+  <ul class="ps-facts" id="gdFacts"></ul>
+  <div class="ps-friends-play" id="gdFriends" hidden></div>
+  <div class="actions"><button class="cta primary" id="gdPlay" type="button">GIOCA</button>
+    <div class="ps-two"><button class="cta" id="gdFav" type="button" aria-pressed="false">Preferito</button><button class="cta" id="gdFiles" type="button">Gestisci file</button></div>
+    <div class="ps-two"><button class="cta" id="gdSave" type="button">Salvataggi</button><button class="cta" id="gdInfo" type="button">Info</button></div>
+    <button class="cta" id="gdClose" type="button">CHIUDI</button></div>
+  <div id="gdPanel" class="ps-card" hidden></div></div></div>
+<div id="aboutBox" class="overlay sheet" hidden role="dialog" aria-modal="true" aria-labelledby="abTitle"><div class="card ps-about"><div class="ps-grab" aria-hidden="true"></div>
+  <img src="icons/logo.svg" alt="" width="64" height="64" style="border-radius:18px;align-self:center"><h2 id="abTitle" style="text-align:center">PlaySphere</h2><p id="abVersion" class="ps-ver" style="text-align:center"></p>
+  <h3>Privacy</h3><p>I tuoi giochi, i file di sistema (BIOS, firmware) e i salvataggi restano su questo dispositivo. Se attivi il Cloud, vanno solo nel tuo spazio privato. Il Party Voice non viene registrato.</p>
+  <h3>Licenze e componenti open source</h3>
+  <ul><li>melonDS DS (Nintendo DS) — GPL-3.0</li><li>PCSX-ReARMed (PlayStation) — GPL-2.0-or-later</li><li>libchdr — BSD-3-Clause · miniz — MIT · libretro-common — MIT</li><li>PlaySphere — GPL-3.0</li></ul>
+  <p>PlaySphere non include giochi, BIOS o firmware. Nintendo DS e PlayStation sono marchi dei rispettivi proprietari, non affiliati a PlaySphere.</p>
+  <p><a id="abNotices" href="third-party-notices.txt" target="_blank" rel="noopener">Avvisi completi sulle licenze</a></p>
+  <div class="actions"><button class="cta primary" id="abClose" type="button">CHIUDI</button></div></div></div>
+<div id="psWelcome" hidden role="dialog" aria-modal="true" aria-label="Benvenuto in PlaySphere">
+  <button class="ps-skip" id="wSkip" type="button">SALTA</button>
+  <div class="ps-slides" id="wSlides">
+    <div class="ps-slide on"><div class="ps-art"><img src="icons/logo.svg" alt=""></div><h1>Benvenuto in PlaySphere</h1><p>I tuoi giochi Nintendo DS e PlayStation, nel browser e sul tuo telefono. Un’unica libreria, tutto in un posto.</p></div>
+    <div class="ps-slide"><div class="ps-art"><svg aria-hidden="true"><use href="#i-plus"/></svg></div><h1>Aggiungi i tuoi giochi</h1><p>Scegli i file dei tuoi giochi dal dispositivo. PlaySphere riconosce da solo il sistema. Restano solo qui con te.</p></div>
+    <div class="ps-slide"><div class="ps-art"><svg aria-hidden="true"><use href="#i-file"/></svg></div><h1>File di sistema</h1><p>Per alcuni giochi servono i file di sistema (BIOS, firmware): li scegli tu, dalle Impostazioni, quando ti servono.</p></div>
+    <div class="ps-slide"><div class="ps-art"><svg aria-hidden="true"><use href="#i-cloud"/></svg></div><h1>Cloud, se vuoi</h1><p>Con un account i salvataggi ti seguono su ogni dispositivo. È facoltativo: puoi giocare da solo senza account.</p></div>
+    <div class="ps-slide"><div class="ps-art"><svg aria-hidden="true"><use href="#i-users"/></svg></div><h1>Gioca con gli amici</h1><p>Crea una stanza, invita gli amici e parlate nel Party mentre giocate.</p></div>
+  </div>
+  <div class="ps-foot"><div class="ps-dots" id="wDots" aria-hidden="true"></div><button class="cta primary" id="wNext" type="button">AVANTI</button></div>
+</div>
+
 <div id="resumeHint" class="overlay" hidden><div class="card"><h2>Gioco in pausa</h2><p>Tocca per riprendere audio e gioco.</p><button class="cta primary" id="btnResume">RIPRENDI</button></div></div>
 <div id="confirm" class="overlay" hidden><div class="card"><h2>Uscire dal gioco?</h2><p>Il salvataggio viene conservato su questo dispositivo.</p><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ESCI</button></div></div></div>
 <div id="hleBox" class="overlay" hidden><div class="card"><h2>Manca il BIOS PlayStation</h2><p>Senza il BIOS originale PlaySphere può usare una versione semplificata (HLE): molti giochi funzionano, altri no o con difetti. Per la migliore compatibilità aggiungi il tuo BIOS in «File di sistema PlayStation».</p><div class="row"><button class="cta" id="btnHleNo">ANNULLA</button><button class="cta primary" id="btnHleGo">AVVIA CON COMPATIBILITÀ RIDOTTA</button></div></div></div>
 <div id="assistStep" class="assist" hidden></div>
 <div id="cloudToast" class="assist" hidden></div>
-<div id="partyBar" class="pbar" hidden><button id="btnBarOpen" aria-label="Party">🎙<span id="barCount"></span></button><span id="barSpeaker" hidden>🗣</span><button id="btnBarMic" aria-label="Muta">🎙</button></div>
+<div id="partyBar" class="pbar" hidden role="group" aria-label="Party attivo"><span id="barAvatars" class="ps-bar-av" aria-hidden="true"></span><button id="btnBarOpen" aria-label="Apri il party" type="button">🎙<span id="barCount"></span></button><span id="barSpeaker" hidden>🗣</span><button id="btnBarMic" aria-label="Muta" type="button">🎙</button></div>
 <div id="partyInviteBox" class="overlay" hidden><div class="card"><h2>Invito al Party</h2><p id="pInvWho"></p><div class="row"><button class="cta" id="btnPInvRefuse">RIFIUTA</button><button class="cta primary" id="btnPInvAccept">ACCETTA</button></div></div></div>
 <div id="netBanner" class="assist" hidden>Riconnessione in corso…</div>
 <div id="netWarn" class="overlay" hidden><div class="card"><h2>Connessione lenta</h2><p id="netWarnText"></p><div class="row"><button class="cta primary" id="btnNetRetry">RIPROVA</button><button class="cta" id="btnNetGo">CONTINUA COMUNQUE</button></div><div class="row"><button class="cta" id="btnNetHosted" hidden>USA MODALITÀ HOSTED</button></div></div></div>
-<div id="updateBar" class="assist" hidden>Nuova versione di DSLink pronta. <button class="mini primary" id="btnUpdate">AGGIORNA</button></div>
+<div id="updateBar" class="assist" hidden role="status"><span>Aggiornamento disponibile</span><button class="mini primary" id="btnUpdate" type="button">AGGIORNA ORA</button><button class="mini" id="btnUpdateLater" type="button">DOPO</button></div>
 <div id="xfer" class="overlay" hidden><div class="card"><h2 id="xferTitle">Caricamento…</h2><p id="xferName" class="hint"></p><progress id="xferBar" max="100" value="0"></progress><p id="xferPct" class="hint"></p><p id="xferErr" class="err"></p><div class="row"><button class="cta" id="btnXferClose" hidden>CHIUDI</button></div></div></div>
 <div id="conflictBox" class="overlay" hidden><div class="card"><h2>Ci sono due salvataggi diversi</h2><p id="cfTitle" class="hint"></p>
   <div class="cfopt"><b id="cfLocalDev"></b><small id="cfLocalTime"></small><button class="cta primary" id="btnCfLocal">USA QUESTO</button></div>

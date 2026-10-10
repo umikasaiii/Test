@@ -19,11 +19,11 @@ const PASSWORD = 'correct horse battery staple';
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined, headless: true, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
 async function device(name, { rom, query = '', sw = false } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, acceptDownloads: false });
+  const ctx = await browser.newContext({ bypassCSP: true, viewport: { width: 390, height: 844 }, hasTouch: true, acceptDownloads: false });
   const p = await ctx.newPage(); p.devName = name; p.errors = []; p.on('pageerror', (e) => p.errors.push(String(e))); p.on('dialog', (d) => d.accept());
   await p.goto(`${BASE}/play/?stun=0${sw ? '' : '&nosw'}&devname=${name}${query}`); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 25000 });
   if (sw) await p.evaluate(async () => { await navigator.serviceWorker.ready; });
-  if (rom) { await p.setInputFiles('#romFile', rom); await until(() => p.locator('#gameList li.game').count()); }
+  if (rom) { await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', rom); await until(async () => (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game').count()); }
   return p;
 }
 const screen = (p) => p.evaluate(() => document.body.dataset.screen);
@@ -47,7 +47,7 @@ const saveMark = (p, id) => p.evaluate(async (i) => { const b = await window.dsl
 const syncSave = (p, id, gid) => p.evaluate(async ([i, g]) => { const r = await window.dslinkPlay.cfiles.syncSave(i, g); return { action: r.action, revision: r.revision }; }, [id, gid]);
 const heads = async (p) => (await api(p, 'GET', '/api/saves')).body.saves;
 async function playAndLeave(p, id, ms = 1500) {
-  await p.locator(`#gameList li.game[data-id="${id}"] button.play`).click();
+  await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator(`#gameList li.game[data-id="${id}"] button.play`).click();
   const up = await until(async () => await p.evaluate(() => window.dslinkPlay.isPlaying()), 40000); await sleep(ms);
   await p.evaluate(() => window.dslinkPlay.controls.openMenu()); await p.click('.ctl-menu [data-act=leave]'); await p.click('#confirmYes');
   await until(async () => (await screen(p)) === 'library' && !(await p.evaluate(() => window.dslinkPlay.isPlaying())), 20000);
@@ -81,7 +81,7 @@ let r0 = (await rows(H))[0];
 check('LOCAL ONLY: the imported game is "SOLO LOCALE", nothing is in the Cloud, it plays', r0.tag === 'SOLO LOCALE' && r0.state === 'local' && r0.buttons.includes('SALVA NEL MIO CLOUD') && (await api(H, 'GET', '/api/files')).body.games.length === 0);
 const seenPct = new Set();
 const poll = setInterval(() => H.evaluate(() => (document.getElementById('xfer').hidden ? null : document.getElementById('xferBar').value)).then((v) => { if (v !== null) seenPct.add(Math.round(v)); }).catch(() => {}), 40);
-await H.locator('#gameList li.game button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
+await (await H.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), H).locator('#gameList li.game button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
 const up1 = await until(async () => (await rows(H))[0].tag === 'LOCALE + CLOUD', 30000);
 clearInterval(poll);
 const f1 = (await api(H, 'GET', '/api/files')).body;
@@ -101,7 +101,7 @@ const P = await device('iPhone');
 check('ACCOUNT on the iPhone: login with the same account', await login(P, ua));
 const cloudOnly = await until(async () => (await rows(P)).find((r) => r.state === 'cloud'), 20000);
 check('NEW DEVICE: after login the library shows the game at once as CLOUD ONLY with SCARICA and GIOCA', !!cloudOnly && cloudOnly.tag === 'SOLO CLOUD' && cloudOnly.buttons.includes('SCARICA') && cloudOnly.buttons.includes('GIOCA'), JSON.stringify(cloudOnly));
-await P.locator('#gameList li.cloudonly button.play').click();
+await (await P.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), P).locator('#gameList li.cloudonly button.play').click();
 const dlOk = await until(async () => await P.evaluate(() => window.dslinkPlay.isPlaying()), 60000);
 const idP = await localId(P);
 const romLocal = await P.evaluate(async (i) => { const b = await window.dslinkPlay.store.get(`library/${i}/rom.nds`); return b ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map((x) => x.toString(16).padStart(2, '0')).join('') : null; }, idP);
@@ -150,7 +150,7 @@ check('SAVE CONFLICT: USA QUESTO -> Honor\'s save becomes the newest revision an
 check('SAVE REVISION: only the last 5 revisions are kept per game', hist.length <= 5 && hist.length >= 3, `${hist.length}`);
 
 // ============================================================================================ 5. history + restore
-await H.locator('#gameList li.game button', { hasText: 'SALVATAGGI' }).click(); await H.waitForSelector('#histBox:not([hidden])');
+await (await H.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), H).locator('#gameList li.game button', { hasText: 'SALVATAGGI' }).click(); await H.waitForSelector('#histBox:not([hidden])');
 await until(async () => (await H.locator('#histList li[data-rev]').count()) >= 3, 10000);          // the list fills in after the box opens
 const histRows = await H.locator('#histList li[data-rev]').count();
 const oldest = await H.locator('#histList li[data-rev]').last(); const oldRev = Number(await oldest.getAttribute('data-rev'));
@@ -166,12 +166,12 @@ check('SAVE RESTORE: an older revision is restored as a NEW revision (history st
 // ============================================================================================ 6. remove from device / remove from cloud
 await P.reload(); await P.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library');
 await until(async () => (await rows(P))[0]?.state === 'both', 15000);
-await P.locator('#gameList li.game button', { hasText: 'RIMUOVI DAL DISPOSITIVO' }).click();
+await (await P.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), P).locator('#gameList li.game button', { hasText: 'RIMUOVI DAL DISPOSITIVO' }).click();
 const afterLocal = await until(async () => (await rows(P)).length === 1 && (await rows(P))[0].state === 'cloud', 15000);
 const stillCloud = (await api(P, 'GET', '/api/files')).body.games.length === 1;
 check('REMOVE LOCAL: RIMUOVI DAL DISPOSITIVO deletes only the local copy - the game is CLOUD ONLY again and the Cloud keeps ROM and saves', !!afterLocal && stillCloud && (await api(P, 'GET', '/api/saves/' + GID)).body.history.length >= 3);
 check('CLOUD ONLY: after removing the local copy the ROM is no longer in the browser storage (only save bookkeeping may remain)', (await P.evaluate(async () => (await window.dslinkPlay.store.list('library/')).map((x) => String(x.key || x.name || x.path || x)).filter((k) => !/\/(sync\.json|save\.meta\.json|save)$/.test(k)).length)) === 0);
-await P.locator('#gameList li.cloudonly button', { hasText: 'RIMUOVI DAL CLOUD' }).click();
+await (await P.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), P).locator('#gameList li.cloudonly button', { hasText: 'RIMUOVI DAL CLOUD' }).click();
 const gone = await until(async () => (await api(P, 'GET', '/api/files')).body.games.length === 0, 15000);
 await H.reload(); await H.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library'); await sleep(1500);
 check('REMOVE CLOUD: RIMUOVI DAL CLOUD (with confirmation) deletes the Cloud file; Honor still has its local copy, now SOLO LOCALE', !!gone && (await rows(H)).length === 1 && (await rows(H))[0].tag === 'SOLO LOCALE' && (await api(H, 'GET', '/api/storage')).body.gamesBytes === 0);
@@ -196,13 +196,13 @@ await B.click('#btnLobbyLeave');
 const uc = uname('carol');
 const S1 = await device('Honor'); await signup(S1, uc);
 const sys = { bios7: crypto.randomBytes(16384), bios9: crypto.randomBytes(4096), firmware: crypto.randomBytes(131072) };
-for (const k of Object.keys(sys)) { fs.writeFileSync(`/tmp/pwa-${k}.bin`, sys[k]); await S1.setInputFiles(`#sysList li[data-key=${k}] input[type=file]`, `/tmp/pwa-${k}.bin`); await sleep(300); }
-await until(async () => (await S1.locator('#sysList li[data-key=firmware] small.ok').count()) > 0, 10000);
-await S1.locator('#sysList li[data-key=bios7] button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
+for (const k of Object.keys(sys)) { fs.writeFileSync(`/tmp/pwa-${k}.bin`, sys[k]); await (await S1.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), S1).setInputFiles(`#sysList li[data-key=${k}] input[type=file]`, `/tmp/pwa-${k}.bin`); await sleep(300); }
+await until(async () => (await (await S1.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), S1).locator('#sysList li[data-key=firmware] small.ok').count()) > 0, 10000);
+await (await S1.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), S1).locator('#sysList li[data-key=bios7] button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
 await until(async () => (await api(S1, 'GET', '/api/files')).body.system.some((x) => x.name === 'bios7.bin'), 15000);
-await S1.locator('#sysList li[data-key=bios9] button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
+await (await S1.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), S1).locator('#sysList li[data-key=bios9] button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
 await until(async () => (await api(S1, 'GET', '/api/files')).body.system.some((x) => x.name === 'bios9.bin'), 15000);
-await S1.locator('#sysList li[data-key=firmware] button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
+await (await S1.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), S1).locator('#sysList li[data-key=firmware] button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
 await until(async () => (await api(S1, 'GET', '/api/files')).body.system.length === 3, 15000);
 const cs = (await api(S1, 'GET', '/api/files')).body.system;
 check('BIOS CLOUD + FIRMWARE CLOUD: bios7, bios9 and firmware.bin were saved in the private Cloud (optional "Salva nel mio Cloud"), SHA-256 equal to the files', cs.length === 3 && cs.find((x) => x.name === 'bios7.bin').sha256 === sha(sys.bios7) && cs.find((x) => x.name === 'firmware.bin').sha256 === sha(sys.firmware) && cs.find((x) => x.name === 'bios9.bin').size === 4096);
@@ -214,14 +214,14 @@ void got;
 const h7 = await S2.evaluate(async () => { const b = await window.dslinkPlay.store.get('system/bios7.bin'); return [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map((x) => x.toString(16).padStart(2, '0')).join(''); });
 check('SYSTEM FILE CLOUD: a new device gets BIOS and firmware back automatically after login, identical bytes, "pronto" with no manual import', !!gotAll && h7 === sha(sys.bios7));
 const sysLocalOnly = await device('Local'); const uf = uname('dave'); await signup(sysLocalOnly, uf);
-await sysLocalOnly.setInputFiles('#sysList li[data-key=bios9] input[type=file]', '/tmp/pwa-bios9.bin'); await sleep(800);
+await (await sysLocalOnly.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), sysLocalOnly).setInputFiles('#sysList li[data-key=bios9] input[type=file]', '/tmp/pwa-bios9.bin'); await sleep(800);
 check('LOCAL ONLY (system files): without "Salva nel mio Cloud" a BIOS stays on the device only', (await api(sysLocalOnly, 'GET', '/api/files')).body.system.length === 0 && (await sysLocalOnly.evaluate(async () => (await window.dslinkPlay.store.get('system/bios9.bin')).byteLength)) === 4096);
 
 // ============================================================================================ 9. big ROM: multipart upload with real progress, then download on another device
 const ud = uname('erin');
 const G1 = await device('Honor', { rom: bigRom }); await signup(G1, ud);
 const pcts = new Set(); const poll2 = setInterval(() => G1.evaluate(() => (document.getElementById('xfer').hidden ? null : document.getElementById('xferBar').value)).then((v) => { if (v !== null) pcts.add(Math.round(v)); }).catch(() => {}), 30);
-await G1.locator('#gameList li.game button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
+await (await G1.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), G1).locator('#gameList li.game button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
 const bigUp = await until(async () => (await api(G1, 'GET', '/api/files')).body.games.length === 1, 90000); clearInterval(poll2);
 const bigSha = sha(fs.readFileSync(bigRom));
 const bf = (await api(G1, 'GET', '/api/files')).body.games[0];
@@ -236,7 +236,7 @@ await G2.route('**/api/files/game/*', async (route) => {
   const resp = await route.fetch(); const body = await resp.body(); cut = true;
   return route.fulfill({ status: 200, headers: { ...resp.headers(), 'content-length': String(body.length) }, body: body.subarray(0, Math.floor(body.length / 2)) });
 });
-await G2.locator('#gameList li.cloudonly button', { hasText: 'SCARICA' }).click();
+await (await G2.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), G2).locator('#gameList li.cloudonly button', { hasText: 'SCARICA' }).click();
 const dl2 = await until(async () => (await rows(G2)).some((r) => r.state === 'both'), 60000);
 await G2.unroute('**/api/files/game/*');
 const bigLocal = await G2.evaluate(async () => { const g = window.dslinkPlay.games[0]; const b = await window.dslinkPlay.store.get(`library/${g.id}/rom.nds`); return b ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map((x) => x.toString(16).padStart(2, '0')).join('') : null; });
@@ -245,7 +245,7 @@ check('DOWNLOAD interrupted: the connection drops half way -> the client resumes
 await G2.evaluate(async () => { const g = window.dslinkPlay.games[0]; for (const n of ['rom.nds', 'meta.json', 'save', 'sync.json']) await window.dslinkPlay.store.del(`library/${g.id}/${n}`); });
 await G2.reload(); await G2.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library'); await until(async () => (await rows(G2)).find((r) => r.state === 'cloud'), 20000);
 await G2.route('**/api/files/game/*', async (route) => { const resp = await route.fetch(); const b = Buffer.from(await resp.body()); b[5000] ^= 1; return route.fulfill({ status: 200, headers: resp.headers(), body: b }); });
-await G2.locator('#gameList li.cloudonly button', { hasText: 'SCARICA' }).click();
+await (await G2.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), G2).locator('#gameList li.cloudonly button', { hasText: 'SCARICA' }).click();
 const errShown = await until(async () => /integro/.test(await G2.evaluate(() => document.getElementById('xferErr').textContent)), 60000);
 const nothing = (await G2.evaluate(async () => (await window.dslinkPlay.store.list('library/')).length)) === 0;
 await G2.unroute('**/api/files/game/*');
@@ -255,12 +255,12 @@ await G2.click('#btnXferClose');
 // ============================================================================================ 10. errors: quota, R2 down, local quota - local files are never lost
 const L = await device('Honor', { rom: rom1 }); await signup(L, uname('frank'));
 await L.route('**/api/files/uploads', (route) => route.fulfill({ status: 507, contentType: 'application/json', body: JSON.stringify({ error: 'cloud_quota_exceeded' }) }));
-await L.locator('#gameList li.game button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
+await (await L.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), L).locator('#gameList li.game button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
 const qErr = await until(async () => await L.evaluate(() => document.getElementById('xferErr').textContent), 10000);
 const stillLocal = (await L.evaluate(async () => (await window.dslinkPlay.store.list('library/')).length)) === 2;
 await L.click('#btnXferClose'); await L.unroute('**/api/files/uploads');
 await L.route('**/api/files/uploads', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'storage_unavailable' }) }));
-await L.locator('#gameList li.game button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
+await (await L.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), L).locator('#gameList li.game button', { hasText: 'SALVA NEL MIO CLOUD' }).click();
 const rErr = await until(async () => { const t = await L.evaluate(() => document.getElementById('xferErr').textContent); return t && t !== qErr ? t : ''; }, 10000);
 await L.click('#btnXferClose'); await L.unroute('**/api/files/uploads');
 check('QUOTA / R2 UNAVAILABLE: "Spazio Cloud esaurito" and "il Cloud non riesce ad accedere ai file" are shown, the local game and its save are untouched, GIOCA still works', /Spazio Cloud esaurito/.test(qErr) && /non riesce ad accedere/.test(rErr) && stillLocal && (await playAndLeave(L, await localId(L))));

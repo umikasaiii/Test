@@ -56,7 +56,7 @@ async function device(host, name, query = '') {
     const gum = navigator.mediaDevices && navigator.mediaDevices.getUserMedia; if (gum) navigator.mediaDevices.getUserMedia = function (...a) { window.__media++; return gum.apply(this, a); };
   });
   await p.goto(`${host.base}/play/?stun=0&nosw${query}`); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });
-  await p.setInputFiles('#romFile', romFile); await until(() => p.locator('#gameList li.game').count());
+  await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', romFile); await until(async () => (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game').count());
   return p;
 }
 const stats = (p) => p.evaluate(() => window.dslinkPlay.stats());
@@ -70,9 +70,9 @@ const rxLen = async (p) => { const b = await grab(p); let n = 0; while (n < 60 &
 /** create + join + ready + start through the real UI. Returns the two pages already playing. */
 async function pair(host, qa = '', qb = '') {
   const A = await device(host, 'A', qa), B = await device(host, 'B', qb);
-  await A.click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom');
+  await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), A).click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom');
   await A.waitForSelector('[data-screen=lobby].on'); const code = await until(() => A.evaluate(() => document.getElementById('codeText').textContent), 8000);
-  await B.click('#btnJoin'); await B.waitForSelector('[data-screen=friends-join].on'); await B.fill('#joinCode', code); await B.click('#btnDoJoin');
+  await (await B.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), B).click('#btnJoin'); await B.waitForSelector('[data-screen=friends-join].on'); await B.fill('#joinCode', code); await B.click('#btnDoJoin');
   await B.waitForSelector('[data-screen=lobby].on');
   return { A, B, code };
 }
@@ -103,9 +103,9 @@ const host = await startHost({ coi: true });
 for (const sc of MATRIX) {
   const t0 = Date.now();
   const A = await device(host, 'A', sc.q), B = await device(host, 'B', sc.q);
-  await A.click('#btnCreate'); await A.click('#btnMakeRoom'); await A.waitForSelector('[data-screen=lobby].on');
+  await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), A).click('#btnCreate'); await A.click('#btnMakeRoom'); await A.waitForSelector('[data-screen=lobby].on');
   const code = await until(() => A.evaluate(() => document.getElementById('codeText').textContent), 8000);
-  await B.click('#btnJoin'); await B.fill('#joinCode', code); await B.click('#btnDoJoin');
+  await (await B.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), B).click('#btnJoin'); await B.fill('#joinCode', code); await B.click('#btnDoJoin');
   const tj = Date.now();
   const open = await until(async () => (await sess(A))?.peer === 'open' && (await sess(B))?.peer === 'open', 20000);
   const connectMs = Date.now() - tj;

@@ -34,13 +34,13 @@ const cacheKeys = () => p.evaluate(async () => { const out = {}; for (const k of
 const ps1In = (list) => list.filter((x) => x.includes('/core/ps1/')).length;
 const ver = () => p.evaluate(() => window.__appVersion);
 async function boot() { await p.goto(URL0); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library'); await p.evaluate(async () => { await navigator.serviceWorker.ready; }); }
-async function playPs1() { await p.click('li.game[data-platform=PS1] .play'); await p.waitForSelector('#hleBox:not([hidden])', { timeout: 20000 }); await p.click('#btnHleGo'); return until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 60000); }
+async function playPs1() { await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).click('li.game[data-platform=PS1] .play'); await p.waitForSelector('#hleBox:not([hidden])', { timeout: 20000 }); await p.click('#btnHleGo'); return until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 60000); }
 async function leave() { const b = await p.locator('.ctl-c[data-id=menu] .ctl-pillbtn').boundingBox(); await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await p.mouse.down(); await p.mouse.up(); await p.waitForSelector('.ctl-menu .sheet'); await p.evaluate(() => document.querySelector('.ctl-menu [data-act=leave]').click()); await p.waitForSelector('#confirmYes', { state: 'visible' }); await p.evaluate(() => document.querySelector('#confirmYes').click()); return until(async () => (await p.evaluate(() => document.body.dataset.screen)) === 'library', 20000); }
 
 await boot(); await p.reload(); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library');
 let k = await cacheKeys();
 check('INSTALL: version A is installed (service worker active), the PlayStation core is NOT part of the install (nothing fetched, nothing cached for it)', (await ver()) === 'A' && Object.keys(k).includes('dslink-play-aaaaaaaaaaaa') && ps1In(k['dslink-play-aaaaaaaaaaaa']) === 0 && ps1In(log) === 0);
-await p.setInputFiles('#romFile', files(dir, 'Test Game.cue', 'Test Game.bin')); await until(async () => (await p.evaluate(() => window.dslinkPlay.games.length)) === 1, 60000);
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', files(dir, 'Test Game.cue', 'Test Game.bin')); await until(async () => (await p.evaluate(() => window.dslinkPlay.games.length)) === 1, 60000);
 k = await cacheKeys();
 check('LAZY CORE: the first PlayStation use fetches the core and stores loader + wasm + build-info TOGETHER in this version\'s cache', ps1In(k['dslink-play-aaaaaaaaaaaa']) === 3 && ps1In(log) === 3, JSON.stringify(k['dslink-play-aaaaaaaaaaaa'].filter((x) => x.includes('ps1'))));
 const up1 = await playPs1(); await sleep(3500); const f1 = await grab(p);

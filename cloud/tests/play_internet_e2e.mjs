@@ -17,7 +17,7 @@ const turn = (cmd) => execFileSync(new URL('./turn_local.sh', import.meta.url).p
 const browser = await launch();
 const pair = async (q = '') => {
   const A = await device(browser, BASE, { name: 'Honor', rom, query: q }), B = await device(browser, BASE, { name: 'iPhone', rom, query: q }); const na = uname('ia'), nb = uname('ib');
-  await account(A, na); await account(B, nb); await A.setInputFiles('#romFile', ampRom); await B.setInputFiles('#romFile', ampRom); await sleep(800);
+  await account(A, na); await account(B, nb); await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), A).setInputFiles('#romFile', ampRom); await (await B.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), B).setInputFiles('#romFile', ampRom); await sleep(800);
   await befriend(A, B, nb); await until(async () => (await api(A, 'GET', '/api/friends')).body.friends.every((f) => f.status !== 'OFFLINE'), 10000);
   return { A, B, na, nb };
 };

@@ -12,7 +12,7 @@ cp -r "$ROOT/cloud/worker/public/controls" "$OUT/controls"
 cp "$ROOT/cloud/web/mp/mp.css" "$OUT/mp/mp.css"
 mkdir -p "$OUT/mp/vendor" && cp "$ROOT/cloud/web/mp/vendor/qrcode.js" "$ROOT/cloud/web/mp/vendor/jsQR.js" "$OUT/mp/vendor/"
 cat > "$OUT/index.html" <<'HTML'
-<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=play/"><title>DSLink</title><a href="play/">DSLink</a>
+<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=play/"><title>PlaySphere</title><a href="play/">PlaySphere</a>
 HTML
 # --- where the DSLink Cloud lives (read by the PWA at start; nothing for the user to type). OFFICIAL BUILD: no DSLINK_CLOUD_URL = this page's own origin (the Cloudflare Worker serves /play/, /api/ and /signal itself).
 #     The modes below (a separate static host such as Netlify) are kept only for historical tests: they are not part of the architecture.
@@ -27,11 +27,22 @@ else
   printf '{ "api": "", "signal": "%s", "ws": "%s" }\n' "$CLOUD" "$CLOUD" > "$OUT/play/cloud-config.json"
   printf '/api/*  %s/api/:splat  200\n' "$CLOUD" > "$OUT/_redirects"
 fi
+# --- release info shown in Impostazioni > Informazioni (version, commit, date) and the third-party notices (licences of the cores and libraries that ship in this package)
+VER=$(tr -d '[:space:]' < "$ROOT/VERSION" 2>/dev/null || echo dev)
+COMMIT="${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo "")}"
+printf '{ "version": "%s", "commit": "%s", "date": "%s" }\n' "$VER" "$COMMIT" "$(date -u +%Y-%m-%d)" > "$OUT/play/version.json"
+[ -f "$ROOT/THIRD_PARTY_NOTICES.md" ] && cp "$ROOT/THIRD_PARTY_NOTICES.md" "$OUT/play/third-party-notices.txt"
 # cross-origin isolation (SharedArrayBuffer radio ring) straight from the host's headers: Netlify and Workers static assets both read _headers
-cat > "$OUT/_headers" <<'HDR'
+# Content-Security-Policy (cloud/csp.txt): scripts only from this origin (plus WebAssembly), no inline script, no framing. When the Cloud lives on another origin (DSLINK_CLOUD_URL) that origin is added to connect-src.
+CSP=$(tr -d '\n' < "$ROOT/cloud/csp.txt"); if [ -n "$CLOUD" ]; then CSP="${CSP//connect-src \'self\'/connect-src \'self\' $CLOUD}"; fi
+cat > "$OUT/_headers" <<HDR
 /play/*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
+  Content-Security-Policy: $CSP
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(self), microphone=(self), geolocation=(), payment=(), usb=()
 /controls/*
   Cross-Origin-Resource-Policy: same-origin
 /mp/*
@@ -39,6 +50,8 @@ cat > "$OUT/_headers" <<'HDR'
 /play/sw.js
   Cache-Control: no-cache, max-age=0
 /play/build.json
+  Cache-Control: no-store
+/play/version.json
   Cache-Control: no-store
 HDR
 # --- one build id for the whole shell (JS + CSS + WASM core + controls): the service worker caches and serves them as ONE version (see sw.js)

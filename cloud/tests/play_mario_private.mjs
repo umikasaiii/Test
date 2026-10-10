@@ -41,8 +41,8 @@ async function device(name, files, withSave) {
   const q = `?stun=0&nosw${RINGMSG ? '&radioring=msg' : ''}${opt('delay') ? '&delay=' + opt('delay') : ''}${opt('jitter') ? '&jitter=' + opt('jitter') : ''}${opt('loss') ? '&loss=' + opt('loss') : ''}&dlscale=${WS}&dev=1`;
   await p.goto(`${BASE}/play/${q}`); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });
   for (const f of files) {
-    if (f === 'mario.nds') { await p.setInputFiles('#romFile', path.join(priv, f)); await until(() => p.locator('#gameList li.game').count(), 60000); }
-    else await p.setInputFiles(`input[data-sys="${f === 'refs.json' ? 'refs' : f.replace('.bin', '').replace('firmware', 'firmware')}"]`, f === 'refs.json' ? path.join(priv, 'out', 'refs.json') : path.join(priv, f));
+    if (f === 'mario.nds') { await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', path.join(priv, f)); await until(async () => (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game').count(), 60000); }
+    else await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), p).setInputFiles(`input[data-sys="${f === 'refs.json' ? 'refs' : f.replace('.bin', '').replace('firmware', 'firmware')}"]`, f === 'refs.json' ? path.join(priv, 'out', 'refs.json') : path.join(priv, f));
     await sleep(300);
   }
   if (withSave) {   // a pristine save (a slot exists) so the menus are deterministic; copied into this browser's own storage
@@ -61,10 +61,10 @@ mark('devices', { coi: COI, ringMsg: RINGMSG, impair: [opt('delay'), opt('jitter
 const LATE = argv.includes('--late-refs');   // host starts WITHOUT refs.json: START must be refused before it, the room must survive, importing it in the lobby unblocks START
 const A = await device('host', ['mario.nds', 'bios7.bin', 'bios9.bin', 'firmware.bin', ...(LATE ? [] : ['refs.json'])], true);
 const B = await device('guest', ['bios7.bin', 'bios9.bin', 'firmware.bin'], false);
-check('HOST has ROM + BIOS + firmware + refs.json; GUEST has BIOS + firmware only (no game in its library)', (await A.evaluate(() => window.dslinkPlay.games.length)) === 1 && (await B.evaluate(() => window.dslinkPlay.games.length)) === 0 && (await B.locator('#sysList li small.ok').count()) >= 3);
-await A.click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom'); await A.waitForSelector('[data-screen=lobby].on');
+check('HOST has ROM + BIOS + firmware + refs.json; GUEST has BIOS + firmware only (no game in its library)', (await A.evaluate(() => window.dslinkPlay.games.length)) === 1 && (await B.evaluate(() => window.dslinkPlay.games.length)) === 0 && (await (await B.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), B).locator('#sysList li small.ok').count()) >= 3);
+await (await A.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), A).click('#btnCreate'); await A.waitForSelector('[data-screen=friends-create].on'); await A.click('#btnMakeRoom'); await A.waitForSelector('[data-screen=lobby].on');
 const code = await until(() => A.evaluate(() => document.getElementById('codeText').textContent), 8000);
-await B.click('#btnJoin'); await B.waitForSelector('[data-screen=friends-join].on'); await B.fill('#joinCode', code); await B.click('#btnDoJoin'); await B.waitForSelector('[data-screen=lobby].on');
+await (await B.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('multiplayer')), B).click('#btnJoin'); await B.waitForSelector('[data-screen=friends-join].on'); await B.fill('#joinCode', code); await B.click('#btnDoJoin'); await B.waitForSelector('[data-screen=lobby].on');
 check('LOBBY: DataChannel open, GUEST in Download Play mode (no copy of the game)', await until(async () => { const a = await sess(A), b = await sess(B); return a && b && a.peer === 'open' && b.peer === 'open' && b.dl && a.dl; }, 20000), JSON.stringify([await sess(A), await sess(B)]));
 await until(() => B.evaluate(() => !document.getElementById('btnReady').disabled), 8000); await B.click('#btnReady');
 if (LATE) {

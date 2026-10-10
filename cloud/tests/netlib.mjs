@@ -23,8 +23,8 @@ function makeTone() {
 export const launch = () => { makeTone(); return chromium.launch({ executablePath: process.env.CHROME || undefined, headless: true, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--use-file-for-fake-audio-capture=${TONE}`, '--disable-features=WebRtcHideLocalIpsWithMdns'] }); };
 
 export async function device(browser, base, { name = 'dev', query = '', rom = null, mic = 'ok', sw = false } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, permissions: mic === 'deny' ? [] : ['microphone'] });
-  const p = await ctx.newPage(); p.devName = name; p.errors = []; p.on('pageerror', (e) => p.errors.push(String(e))); p.on('dialog', (d) => d.accept());
+  const ctx = await browser.newContext({ bypassCSP: process.env.DSLINK_TEST_CSP !== '1', viewport: { width: 390, height: 844 }, hasTouch: true, permissions: mic === 'deny' ? [] : ['microphone'] });
+  const p = await ctx.newPage(); p.devName = name; p.errors = []; p.on('pageerror', (e) => p.errors.push(String(e))); p.on('dialog', (d) => d.accept()); p.on('console', (m) => { if (/Refused to|Content Security Policy/i.test(m.text())) p.errors.push('CSP: ' + m.text().slice(0, 140)); });   // with DSLINK_TEST_CSP=1 the page runs under the real CSP and a violation fails the run
   await p.addInitScript((deny) => {
     window.__gum = 0; const md = navigator.mediaDevices; if (!md) return; const orig = md.getUserMedia.bind(md);
     md.getUserMedia = (c) => { window.__gum++; if (deny) return Promise.reject(new DOMException('Permission denied', 'NotAllowedError')); return orig(c); };

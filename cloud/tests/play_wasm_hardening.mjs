@@ -37,8 +37,8 @@ async function play(base, query = '?store=idb') {
   const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(String(e)));
   page.cdp = await ctx.newCDPSession(page);
   await page.goto(`${base}/play/${query}`); await page.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });
-  await page.setInputFiles('#romFile', rom1); await until(() => page.locator('#gameList li.game').count());
-  await page.click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000);
+  await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).setInputFiles('#romFile', rom1); await until(async () => (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).locator('#gameList li.game').count());
+  await (await page.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), page).click('#gameList li.game .play'); await until(() => page.evaluate(() => window.dslinkPlay.isPlaying()), 30000);
   await until(async () => (await st(page)).frames > 120, 20000); await sleep(1500);
   return page;
 }

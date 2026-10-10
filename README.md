@@ -5,6 +5,13 @@
 > only** (parity baseline, not in the production image). Native Android/iOS apps are frozen (baseline `2e5ed1d`).
 > Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/CLOUD.md](docs/CLOUD.md) (status table, how to run, what is NOT done).
 
+> **PlaySphere V1 (FASE 9):** final design system, app shell (Home, Libreria, Multiplayer, Amici, Profilo), hardening and release documentation:
+> [docs/PLAYSPHERE_V1_ARCHITECTURE.md](docs/PLAYSPHERE_V1_ARCHITECTURE.md), [docs/PLAYSPHERE_DESIGN_SYSTEM.md](docs/PLAYSPHERE_DESIGN_SYSTEM.md),
+> [docs/PLAYSPHERE_V1_SECURITY_AUDIT.md](docs/PLAYSPHERE_V1_SECURITY_AUDIT.md), [docs/PLAYSPHERE_V1_TEST_MATRIX.md](docs/PLAYSPHERE_V1_TEST_MATRIX.md),
+> [docs/PLAYSPHERE_V1_RELEASE_CHECKLIST.md](docs/PLAYSPHERE_V1_RELEASE_CHECKLIST.md), [docs/PLAYSPHERE_V1_KNOWN_ISSUES.md](docs/PLAYSPHERE_V1_KNOWN_ISSUES.md),
+> [docs/PLAYSPHERE_DEVICE_VALIDATION.md](docs/PLAYSPHERE_DEVICE_VALIDATION.md). Software is ready for device validation; **no real-device test has been run yet**.
+> Licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+>
 > **PlaySphere (FASE 8):** the PWA is now multi-core — one library, DS (melonDS) and PlayStation 1 (PCSX-ReARMed), both in WebAssembly, the core is chosen
 > from the game, never by the user. See [docs/PLAYSPHERE_MULTICORE_ARCHITECTURE.md](docs/PLAYSPHERE_MULTICORE_ARCHITECTURE.md),
 > [docs/PLAYSPHERE_PS1.md](docs/PLAYSPHERE_PS1.md), [docs/PLAYSPHERE_PS1_CORE_DECISION.md](docs/PLAYSPHERE_PS1_CORE_DECISION.md) and

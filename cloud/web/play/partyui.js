@@ -19,12 +19,15 @@ export function initPartyUI(ctx) {
 
   function render() {
     const inP = party.inParty, logged = cloud.state === "user";
-    $("btnParty").hidden = !logged; $("btnParty").textContent = inP ? `🎙 PARTY (${party.members.size})` : "🎙 PARTY"; $("btnParty").dataset.in = inP ? "1" : "0";
+    const pb = $("btnParty"); pb.hidden = !logged; pb.dataset.in = inP ? "1" : "0"; pb.dataset.count = inP ? String(party.members.size) : "";
+    { const ns = "http://www.w3.org/2000/svg", ic = document.createElementNS(ns, "svg"), u = document.createElementNS(ns, "use"); ic.setAttribute("aria-hidden", "true"); u.setAttribute("href", "#i-mic"); ic.append(u);
+      const lb = document.createElement("span"); lb.className = "sr-only"; lb.textContent = inP ? `Party (${party.members.size})` : "Party"; pb.replaceChildren(ic, lb); pb.setAttribute("aria-label", lb.textContent); }
     const bar = $("partyBar"); bar.hidden = !inP;
     if (inP) {
       const micOn = party.micState === "on" && !party.muted; bar.dataset.speaking = party.localSpeaking ? "1" : "0"; bar.dataset.muted = party.muted ? "1" : "0";
       $("btnBarMic").textContent = party.micState !== "on" ? "🎙?" : party.muted ? "🔇" : "🎙"; $("btnBarMic").setAttribute("aria-label", micOn ? "Muta" : "Attiva microfono"); $("barCount").textContent = String(party.members.size);
       $("barSpeaker").hidden = ![...party.members.values()].some((m) => m.speaking && m.userId !== party.me);
+      const av = $("barAvatars"); if (av) { av.replaceChildren(...[...party.members.values()].slice(0, 3).map((m) => { const e = document.createElement("span"); e.className = "ps-avatar sm" + (m.speaking ? " speaking" : ""); e.textContent = ctx.avatarOf ? ctx.avatarOf(m.avatar) : "🎙"; return e; })); }
     }
     if (document.body.dataset.screen === "party") renderPanel();
   }

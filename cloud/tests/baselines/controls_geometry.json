@@ -1,0 +1,442 @@
+{
+ "nds-portrait": {
+  "stage": [
+   390,
+   844
+  ],
+  "controls": [
+   [
+    "ctl-clip#0",
+    16,
+    64,
+    359,
+    538
+   ],
+   [
+    "ctl-c ctl-shoulder#1",
+    14,
+    14,
+    68,
+    40
+   ],
+   [
+    "ctl-c ctl-shoulder#2",
+    308,
+    14,
+    68,
+    40
+   ],
+   [
+    "ctl-c ctl-dpad#3",
+    14,
+    628,
+    140,
+    140
+   ],
+   [
+    "ctl-c ctl-cluster#4",
+    220,
+    612,
+    156,
+    156
+   ],
+   [
+    "ctl-c ctl-pill#5",
+    125,
+    774,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#6",
+    173,
+    774,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#7",
+    221,
+    774,
+    44,
+    56
+   ]
+  ]
+ },
+ "ps1-portrait": {
+  "stage": [
+   390,
+   844
+  ],
+  "controls": [
+   [
+    "ctl-clip#0",
+    14,
+    64,
+    362,
+    272
+   ],
+   [
+    "ctl-c ctl-shoulder#1",
+    14,
+    14,
+    54,
+    40
+   ],
+   [
+    "ctl-c ctl-shoulder#2",
+    74,
+    14,
+    54,
+    40
+   ],
+   [
+    "ctl-c ctl-shoulder#3",
+    262,
+    14,
+    54,
+    40
+   ],
+   [
+    "ctl-c ctl-shoulder#4",
+    322,
+    14,
+    54,
+    40
+   ],
+   [
+    "ctl-c ctl-dpad#5",
+    14,
+    628,
+    140,
+    140
+   ],
+   [
+    "ctl-c ctl-cluster#6",
+    220,
+    612,
+    156,
+    156
+   ],
+   [
+    "ctl-c ctl-pill#7",
+    125,
+    774,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#8",
+    173,
+    774,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#9",
+    221,
+    774,
+    44,
+    56
+   ]
+  ]
+ },
+ "nds-landscape": {
+  "stage": [
+   844,
+   390
+  ],
+  "controls": [
+   [
+    "ctl-clip#0",
+    301,
+    14,
+    241,
+    362
+   ],
+   [
+    "ctl-c ctl-shoulder#1",
+    14,
+    14,
+    68,
+    40
+   ],
+   [
+    "ctl-c ctl-shoulder#2",
+    762,
+    14,
+    68,
+    40
+   ],
+   [
+    "ctl-c ctl-dpad#3",
+    14,
+    236,
+    140,
+    140
+   ],
+   [
+    "ctl-c ctl-cluster#4",
+    674,
+    220,
+    156,
+    156
+   ],
+   [
+    "ctl-c ctl-pill#5",
+    62,
+    77,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#6",
+    62,
+    141,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#7",
+    730,
+    77,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#8",
+    730,
+    141,
+    44,
+    56
+   ]
+  ]
+ },
+ "ps1-landscape": {
+  "stage": [
+   844,
+   390
+  ],
+  "controls": [
+   [
+    "ctl-clip#0",
+    181,
+    14,
+    483,
+    362
+   ],
+   [
+    "ctl-c ctl-shoulder#1",
+    14,
+    14,
+    54,
+    40
+   ],
+   [
+    "ctl-c ctl-shoulder#2",
+    74,
+    14,
+    54,
+    40
+   ],
+   [
+    "ctl-c ctl-shoulder#3",
+    716,
+    14,
+    54,
+    40
+   ],
+   [
+    "ctl-c ctl-shoulder#4",
+    776,
+    14,
+    54,
+    40
+   ],
+   [
+    "ctl-c ctl-dpad#5",
+    14,
+    236,
+    140,
+    140
+   ],
+   [
+    "ctl-c ctl-cluster#6",
+    674,
+    220,
+    156,
+    156
+   ],
+   [
+    "ctl-c ctl-pill#7",
+    62,
+    77,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#8",
+    62,
+    141,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#9",
+    730,
+    77,
+    44,
+    56
+   ],
+   [
+    "ctl-c ctl-pill#10",
+    730,
+    141,
+    44,
+    56
+   ]
+  ]
+ },
+ "nds-tablet": {
+  "stage": [
+   820,
+   1180
+  ],
+  "controls": [
+   [
+    "ctl-clip#0",
+    118,
+    80,
+    583,
+    875
+   ],
+   [
+    "ctl-c ctl-shoulder#1",
+    18,
+    18,
+    85,
+    50
+   ],
+   [
+    "ctl-c ctl-shoulder#2",
+    718,
+    18,
+    85,
+    50
+   ],
+   [
+    "ctl-c ctl-dpad#3",
+    18,
+    988,
+    175,
+    175
+   ],
+   [
+    "ctl-c ctl-cluster#4",
+    608,
+    968,
+    195,
+    195
+   ],
+   [
+    "ctl-c ctl-pill#5",
+    323,
+    1093,
+    55,
+    70
+   ],
+   [
+    "ctl-c ctl-pill#6",
+    383,
+    1093,
+    55,
+    70
+   ],
+   [
+    "ctl-c ctl-pill#7",
+    443,
+    1093,
+    55,
+    70
+   ]
+  ]
+ },
+ "ps1-tablet": {
+  "stage": [
+   820,
+   1180
+  ],
+  "controls": [
+   [
+    "ctl-clip#0",
+    18,
+    80,
+    785,
+    589
+   ],
+   [
+    "ctl-c ctl-shoulder#1",
+    18,
+    18,
+    68,
+    50
+   ],
+   [
+    "ctl-c ctl-shoulder#2",
+    93,
+    18,
+    68,
+    50
+   ],
+   [
+    "ctl-c ctl-shoulder#3",
+    660,
+    18,
+    68,
+    50
+   ],
+   [
+    "ctl-c ctl-shoulder#4",
+    735,
+    18,
+    68,
+    50
+   ],
+   [
+    "ctl-c ctl-dpad#5",
+    18,
+    988,
+    175,
+    175
+   ],
+   [
+    "ctl-c ctl-cluster#6",
+    608,
+    968,
+    195,
+    195
+   ],
+   [
+    "ctl-c ctl-pill#7",
+    323,
+    1093,
+    55,
+    70
+   ],
+   [
+    "ctl-c ctl-pill#8",
+    383,
+    1093,
+    55,
+    70
+   ],
+   [
+    "ctl-c ctl-pill#9",
+    443,
+    1093,
+    55,
+    70
+   ]
+  ]
+ }
+}

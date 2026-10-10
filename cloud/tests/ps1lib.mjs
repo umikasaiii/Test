@@ -25,22 +25,26 @@ export function buildDiscs(dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps1discs
 }
 
 /** static host: /play -> cloud/web/play, /controls -> the frozen controls, everything else under cloud/web. `log` records every request path. */
-export async function staticServer({ coi = false } = {}) {
-  const WEB = path.join(ROOT, 'cloud/web'), CONTROLS = path.join(ROOT, 'cloud/worker/public/controls'), log = [];
-  const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png' };
+export async function staticServer({ coi = false, root = ROOT, csp = false } = {}) {
+  // Playwright's own waitForFunction() evaluates its predicate with eval() in the page: for the TEST server only, 'unsafe-eval' is added. The app itself never uses eval / new Function (play_ui_e2e.mjs scans for it).
+  const CSP = csp ? fs.readFileSync(path.join(root, 'cloud/csp.txt'), 'utf8').replace(/\s+/g, ' ').trim().replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval' 'unsafe-eval'") : '';
+  const WEB = path.join(root, 'cloud/web'), CONTROLS = path.join(root, 'cloud/worker/public/controls'), log = [];
+  const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain' };
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x'); log.push(u.pathname);
     let p = decodeURIComponent(u.pathname); if (p.endsWith('/')) p += 'index.html';
     const file = p.startsWith('/controls/') ? path.join(CONTROLS, p.slice(10)) : path.join(WEB, p);
     if (!file.startsWith(WEB) && !file.startsWith(CONTROLS)) { res.writeHead(403).end(); return; }
-    fs.readFile(file, (err, data) => { if (err) { res.writeHead(404).end(); return; } const h = { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' }; if (coi) { h['cross-origin-opener-policy'] = 'same-origin'; h['cross-origin-embedder-policy'] = 'require-corp'; } res.writeHead(200, h); res.end(data); });
+    fs.readFile(file, (err, data) => { if (err) { res.writeHead(404).end(); return; } const h = { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' }; if (CSP && u.pathname.startsWith('/play/')) { h['content-security-policy'] = CSP; h['x-content-type-options'] = 'nosniff'; } if (coi) { h['cross-origin-opener-policy'] = 'same-origin'; h['cross-origin-embedder-policy'] = 'require-corp'; } res.writeHead(200, h); res.end(data); });
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   return { base: `http://127.0.0.1:${server.address().port}`, log, close: () => server.close() };
 }
 export const launch = () => chromium.launch({ executablePath: process.env.CHROME || undefined, headless: true, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
 export async function openApp(browser, base, query = '', vp = { width: 390, height: 844 }, ctxOpts = {}) {
-  const ctx = await browser.newContext({ viewport: vp, hasTouch: true, deviceScaleFactor: 2, ...ctxOpts });
+  // pages served by the Worker carry the production CSP (Playwright's waitForFunction needs eval): only those contexts bypass it; the static test server (127.0.0.1) keeps it for play_ui_e2e.mjs
+  const ctx = await browser.newContext({ viewport: vp, hasTouch: true, deviceScaleFactor: 2, bypassCSP: new URL(base).hostname !== '127.0.0.1', ...ctxOpts });
+  await ctx.addInitScript(() => { window.__csp = []; document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(e.violatedDirective + ' ' + e.blockedURI)); });
   const p = await ctx.newPage(); const errors = []; p.on('pageerror', (e) => errors.push(String(e))); p.errors = errors;
   await p.goto(`${base}/play/${query}`); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 20000 });
   return p;

@@ -42,8 +42,8 @@ await p.goto(URL0); await p.waitForFunction(() => window.dslinkPlay && document.
 await p.evaluate(async () => { await navigator.serviceWorker.ready; });
 await p.reload(); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library');
 check('VERSION A installed: controlled by its own service worker, one cache named after the build', (await ver()) === 'A' && (await swState()).controlled && JSON.stringify((await caches()).filter((k) => k.startsWith('dslink-play'))) === '["dslink-play-aaaaaaaaaaaa"]', JSON.stringify(await caches()));
-await p.setInputFiles('#romFile', rom); await until(() => p.locator('#gameList li.game').count());
-await p.locator('#gameList li.game button.play').click();
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', rom); await until(async () => (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game').count());
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game button.play').click();
 check('GAME running on version A', !!(await until(async () => await p.evaluate(() => window.dslinkPlay.isPlaying()), 40000)));
 await p.evaluate(() => { window.__stay = 1; });
 
@@ -73,13 +73,13 @@ await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen 
 const after = await until(async () => (await ver()) === 'B', 15000);
 const keys = (await caches()).filter((k) => k.startsWith('dslink-play'));
 check('AGGIORNA: the page reloads on version B, the old cache is deleted, only B remains', !!after && JSON.stringify(keys) === '["dslink-play-bbbbbbbbbbbb"]', JSON.stringify(keys));
-await p.locator('#gameList li.game button.play').click();
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game button.play').click();
 check('VERSION B plays: B\'s JS with B\'s core', !!(await until(async () => await p.evaluate(() => window.dslinkPlay.isPlaying()), 40000)));
 await p.evaluate(() => window.dslinkPlay.controls.openMenu()); await p.click('.ctl-menu [data-act=leave]'); await p.click('#confirmYes'); await until(async () => (await p.evaluate(() => document.body.dataset.screen)) === 'library', 20000);
 
 // 4. offline start of B straight from its own cache
 await ctx.setOffline(true); await p.reload(); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library', null, { timeout: 25000 });
-await p.locator('#gameList li.game button.play').click();
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('#gameList li.game button.play').click();
 check('OFFLINE: version B starts and plays with no network, from its own cache', (await ver()) === 'B' && !!(await until(async () => await p.evaluate(() => window.dslinkPlay.isPlaying()), 40000)));
 check('NO SCRIPT ERRORS', errors.length === 0, errors.join(' | ').slice(0, 300));
 await browser.close(); srv.close();

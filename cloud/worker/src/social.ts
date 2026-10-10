@@ -5,6 +5,7 @@ import type { Env, User } from "./env";
 import { publicUser } from "./auth";
 import { areFriends, notify } from "./friends";
 import { cancelInvitesBetween } from "./playinvites";
+import { limit } from "./ratelimit";
 import { HttpError, json, now, readJson, str } from "./util";
 
 export type Relation = "NONE" | "OUTGOING" | "INCOMING" | "FRIEND" | "BLOCKED";
@@ -29,6 +30,7 @@ async function byUsername(env: Env, username: string): Promise<User | null> {
 export async function handleSocial(env: Env, req: Request, path: string, user: User): Promise<Response | null> {
   const m = req.method;
   if (m === "GET" && path === "/api/users/search") {
+    limit(user.id, "user-search", 90);                                          // user enumeration is throttled (90 / 10 min / account)
     const q = (new URL(req.url).searchParams.get("q") ?? "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
     if (q.length < 2) return json({ users: [] });
     const rows = await env.DB.prepare(

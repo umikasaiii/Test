@@ -18,25 +18,26 @@ function h(tag, props, ...kids) {
 
 export function initCloudUI(ctx) {
   const { $, show, cloud } = ctx;
-  const toast = (msg) => { const t = $("cloudToast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 4500); };
+  const toast = (msg, kind) => { if (ctx.toast) { ctx.toast(msg, kind); return; } const t = $("cloudToast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 4500); };
   let back = "library";
   const go = (name) => { back = document.body.dataset.screen === name ? back : document.body.dataset.screen; show(name); };
 
   // ---- account chip in the library header
   const chip = () => {
     const b = $("btnAccount"); if (!b) return;
-    if (cloud.state === "user" && cloud.user) { b.textContent = `${avatarOf(cloud.user.avatar)} @${cloud.user.username}`; b.dataset.mode = "user"; }
-    else if (cloud.state === "offline") { b.textContent = "☁ Cloud non raggiungibile"; b.dataset.mode = "offline"; }
-    else { b.textContent = "ACCEDI"; b.dataset.mode = "anon"; }
+    if (cloud.state === "user" && cloud.user) { const av = document.createElement("span"); av.setAttribute("aria-hidden", "true"); av.textContent = avatarOf(cloud.user.avatar); const nm = document.createElement("span"); nm.className = "sr-only"; nm.textContent = `@${cloud.user.username}`; b.replaceChildren(av, nm); b.setAttribute("aria-label", `Profilo di @${cloud.user.username}`); b.dataset.mode = "user"; }
+    else if (cloud.state === "offline") { b.textContent = "Offline"; b.dataset.mode = "offline"; b.title = "Cloud non raggiungibile: i giochi su questo dispositivo funzionano comunque"; }
+    else { b.textContent = "ACCEDI"; b.removeAttribute("aria-label"); b.dataset.mode = "anon"; }
     const n = (cloud.invites.incoming || []).length + (cloud.requests.incoming || []).length;
     b.dataset.badge = n ? String(n) : "";
+    const nb = document.querySelector('#psNav [data-nav="friends"]'); if (nb) nb.dataset.badge = n ? String(n) : "";
   };
   $("btnAccount").onclick = () => { if (cloud.state === "user") { renderProfile(); go("profile"); } else { renderAuth(); go("account"); } };
 
   // ---- sign in / create account
   const authErr = (m) => { $("authErr").textContent = m || ""; };
-  function renderAuth() {
-    authErr(""); $("authPasskeyNote").hidden = ctx.passkeys();
+  function renderAuth(msg) {
+    authErr(""); $("authPasskeyNote").hidden = ctx.passkeys(); const m = $("authMsg"); if (m) { m.textContent = msg || ""; m.hidden = !msg; }
   }
   const fields = () => ({ username: $("authUser").value.trim().toLowerCase(), display: $("authDisplay").value.trim(), password: $("authPass").value });
   $("btnAuthBack").onclick = () => show("library");
@@ -73,12 +74,12 @@ export function initCloudUI(ctx) {
 
   // ---- friends
   const badge = (f) => h("span", { class: "pres " + (f.status || "OFFLINE").toLowerCase(), text: statusText(f) });
-  const who = (u, extra) => h("div", { class: "who" }, h("span", { class: "av", text: avatarOf(u.avatar) }), h("span", { class: "nm" }, h("b", { text: u.displayName }), h("small", { text: "@" + u.username })), extra || "");
+  const who = (u, extra) => h("div", { class: "who" }, h("span", { class: "av", "data-status": u.status || "", text: avatarOf(u.avatar) }), h("span", { class: "nm" }, h("b", { text: u.displayName }), h("small", { text: "@" + u.username })), extra || "");
   async function renderFriends() {
     await Promise.all([cloud.loadFriends(), cloud.loadRequests(), cloud.loadBlocked()]);
     const act = async (fn, okMsg) => { const r = await fn(); if (!r.ok) toast(errText(r)); else if (okMsg) toast(okMsg); await renderFriends(); };
     const L = $("friendList"); L.innerHTML = "";
-    if (!cloud.friends.length) L.append(h("li", { class: "hint", text: "Nessun amico ancora. Cerca un nome utente qui sopra." }));
+    if (!cloud.friends.length) L.append(h("li", { class: "hint" }, h("div", { class: "ps-empty" }, h("h3", { text: "Nessun amico ancora" }), h("p", { text: "Cerca un nome utente qui sopra e invia la prima richiesta." }), h("button", { class: "cta primary", type: "button", text: "CERCA UN AMICO", onclick: () => $("friendSearch").focus() }))));
     for (const f of cloud.friends) L.append(h("li", {}, who(f, badge(f)),
       h("div", { class: "acts" }, h("button", { class: "mini primary", text: "INVITA A GIOCARE", disabled: f.status === "OFFLINE" || f.status === "IN_GAME", onclick: () => pickGame(f) }),
         h("button", { class: "mini", text: "INVITA AL PARTY", disabled: f.status === "OFFLINE" || !!f.party, onclick: () => ctx.partyInvite && ctx.partyInvite(f) }), h("button", { class: "mini", text: "RIMUOVI", onclick: () => act(() => cloud.removeFriend(f.userId)) }), h("button", { class: "mini danger", text: "BLOCCA", onclick: () => act(() => cloud.block(f.username)) }))));
@@ -149,5 +150,6 @@ export function initCloudUI(ctx) {
   $("btnInvRefuse").onclick = async () => { if (!current) return; const inv = current; $("inviteBox").hidden = true; current = null; await cloud.respondInvite(inv.id, false); };
 
   chip();
-  return { chip, toast, renderProfile };
+  return { chip, toast, renderProfile, invite: pickGame,
+    async openFriends() { await renderFriends(); go("friends"); }, openProfile() { renderProfile(); go("profile"); }, openAccount(msg) { renderAuth(msg); go("account"); } };
 }

@@ -19,8 +19,9 @@ async function app(query = '', ctxOpts = {}) {
   p.ctx = ctx; return p;
 }
 const gamesOf = (p) => p.evaluate(() => window.dslinkPlay.games.length);
-async function importGame(p, ...names) { const n = await gamesOf(p); await p.setInputFiles('#romFile', files(dir, ...names)); return until(async () => (await gamesOf(p)) > n, 60000); }
+async function importGame(p, ...names) { const n = await gamesOf(p); await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', files(dir, ...names)); return until(async () => (await gamesOf(p)) > n, 60000); }
 async function play(p, { hle = true, id = '' } = {}) {
+  await p.evaluate(() => window.dslinkPlay.go('games'));
   await p.click(id ? `li.game[data-id="${id}"] .play` : 'li.game[data-platform=PS1] .play');
   if (hle) { await p.waitForSelector('#hleBox:not([hidden])', { timeout: 20000 }); await p.click('#btnHleGo'); }
   return until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 60000);
@@ -48,12 +49,12 @@ const g1 = await p.evaluate(() => window.dslinkPlay.games[0]);
 check('GAME PROFILE: platform PS1, serial PSPH00001, one disc, files kept as picked, runtime chosen by the platform',
   g1.platform === 'PS1' && g1.serial === 'PSPH00001' && g1.discs.length === 1 && g1.files.length === 2 && (await p.evaluate(() => { const r = window.dslinkPlay.resolve(window.dslinkPlay.games[0].platform); return r.coreId; })) === 'pcsx-rearmed', JSON.stringify({ title: g1.title, region: g1.region }));
 check('IMPORT: the PlayStation core is downloaded only now (to read the disc)', hasCore());
-check('LIBRARY: the game shows its platform (PS1) in the single library', (await p.locator('li.game[data-platform=PS1] .plat').innerText()) === 'PS1');
-await p.setInputFiles('#romFile', files(dir, 'Test Game.cue'));
-await sleep(1500); const e1 = await p.innerText('#libErr');
+check('LIBRARY: the game shows its platform (PS1) in the single library', (await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).locator('li.game[data-platform=PS1] .plat').innerText()) === 'PS1');
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', files(dir, 'Test Game.cue'));
+await sleep(1500); const e1 = await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).innerText('#libErr');
 check('IMPORT: a .cue without its .bin is refused with a clear message (nothing is stored)', /Manca il file/.test(e1) && (await gamesOf(p)) === 1, e1);
 fs.writeFileSync(`${dir}/broken.bin`, Buffer.alloc(5000, 7));
-await p.setInputFiles('#romFile', files(dir, 'broken.bin')); await sleep(2500); const e2 = await p.innerText('#libErr');
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', files(dir, 'broken.bin')); await sleep(2500); const e2 = await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).innerText('#libErr');
 check('IMPORT: a file that is not a PlayStation disc is refused with a clear message', /non è un disco|non è un'immagine|non riesco|valido/i.test(e2) && (await gamesOf(p)) === 1, e2);
 check('IMPORT CHD: a .chd is recognised by the core (libchdr) and added as its own game', await importGame(p, 'Test Game.chd'));
 const chd = await p.evaluate(() => window.dslinkPlay.games.find((g) => g.format === 'chd'));
@@ -73,7 +74,7 @@ const ids = await p.evaluate(() => window.dslinkPlay.games.map((g) => ({ id: g.i
 
 // =================================================================================== 3. BIOS policy: never HLE silently
 await p.evaluate((id) => { window.__only = id; document.querySelectorAll('li.game').forEach((li) => { if (li.dataset.id !== id) li.remove(); }); }, ids.find((x) => x.d === 1 && /Test Game/.test(x.t)).id);
-await p.click('li.game .play'); await p.waitForSelector('#hleBox:not([hidden])', { timeout: 20000 });
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).click('li.game .play'); await p.waitForSelector('#hleBox:not([hidden])', { timeout: 20000 });
 check('BIOS POLICY: with no BIOS the page asks and explains (HLE is never used silently); the player has not started', (await p.innerText('#hleBox')).includes('compatibilità') && !(await p.evaluate(() => window.dslinkPlay.isPlaying())));
 await p.click('#btnHleNo'); await sleep(500);
 check('BIOS POLICY: ANNULLA goes back to the library, nothing runs, no worker is left', (await p.evaluate(() => document.body.dataset.screen)) === 'library' && !(await p.evaluate(() => window.dslinkPlay.isPlaying())) && (await p.evaluate(() => window.__workers.size)) === 0);
@@ -86,8 +87,8 @@ const biosTests = await p.evaluate(async () => {
 check('BIOS: recognised by content (region from the version string), wrong size / not a BIOS refused, region matching reported honestly',
   biosTests.na === 'NTSC-U' && biosTests.eu === 'PAL' && biosTests.jp === 'NTSC-J' && biosTests.small === 'size' && biosTests.junk === 'not_bios' && biosTests.matchNa === 'match' && biosTests.otherEu === 'other' && biosTests.none === 'none', JSON.stringify(biosTests));
 fs.writeFileSync(`${dir}/not-a-bios.bin`, Buffer.alloc(524288, 1));
-await p.setInputFiles('#ps1BiosFile', `${dir}/not-a-bios.bin`); await sleep(800);
-check('BIOS IMPORT: a 512 KB file that is not a BIOS is refused with a message and not stored', /non sembra un BIOS/.test(await p.innerText('#libErr')) && (await p.evaluate(() => window.dslinkPlay.store.get('system/ps1-bios-na.bin'))) === null);
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('settings')), p).setInputFiles('#ps1BiosFile', `${dir}/not-a-bios.bin`); await sleep(800);
+check('BIOS IMPORT: a 512 KB file that is not a BIOS is refused with a message and not stored', /non sembra un BIOS/.test(await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).innerText('#libErr')) && (await p.evaluate(() => window.dslinkPlay.store.get('system/ps1-bios-na.bin'))) === null);
 await p.reload(); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library');
 
 // =================================================================================== 4. single player: boot, video, audio, input
@@ -178,7 +179,7 @@ await leave(p);
 
 // =================================================================================== 9. multi disc + disc swap
 await p.evaluate(() => { document.querySelectorAll('li.game').forEach((li) => { li.hidden = li.querySelector('.t').textContent.indexOf('Two Disc') < 0; }); });
-await p.click('li.game:not([hidden]) .play'); await p.waitForSelector('#hleBox:not([hidden])'); await p.click('#btnHleGo');
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).click('li.game:not([hidden]) .play'); await p.waitForSelector('#hleBox:not([hidden])'); await p.click('#btnHleGo');
 await until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 60000); await sleep(3500);
 const d1 = await grab(p);
 check('MULTI-DISC: the game boots from disc 1 (the program reads disc number 1 from the CD)', discOf(d1) === 1 && (await p.evaluate(() => window.dslinkPlay.player.disc.count)) === 2);

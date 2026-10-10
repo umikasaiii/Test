@@ -3,6 +3,7 @@ import { publicUser } from "./auth";
 import { HttpError, json, now, randomId, readJson, str } from "./util";
 import { cancelInvitesBetween } from "./playinvites";
 import { cancelPartyInvitesBetween } from "./party";
+import { limit } from "./ratelimit";
 
 export const presenceOf = (env: Env, userId: string) => env.PRESENCE.get(env.PRESENCE.idFromName(userId));
 export const notify = (env: Env, userId: string, msg: Record<string, unknown>) => presenceOf(env, userId).event(msg).catch(() => 0);
@@ -47,6 +48,7 @@ export async function handleFriends(env: Env, req: Request, path: string, user: 
   }
 
   if (m === "POST" && path === "/api/friends/requests") {
+    limit(user.id, "friend-request", 30);                                    // a script cannot spam people with requests (30 / 10 min / account)
     const b = await readJson(req);
     const username = str(b.username, "username", 3, 20).toLowerCase();
     const target = await env.DB.prepare("SELECT id, username, display_name, avatar, created_at FROM users WHERE username = ?").bind(username).first<User>();

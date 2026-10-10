@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PlaySphere">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2f6bff"/><stop offset=".55" stop-color="#4b3fe0"/><stop offset="1" stop-color="#7a35d6"/></linearGradient>
+    <radialGradient id="sp" cx=".34" cy=".28" r=".95"><stop offset="0" stop-color="#e9fbff"/><stop offset=".22" stop-color="#7fe3ff"/><stop offset=".6" stop-color="#3b8dff"/><stop offset="1" stop-color="#5a3fd8"/></radialGradient>
+    <linearGradient id="rg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#bfeaff"/><stop offset=".5" stop-color="#ffffff"/><stop offset="1" stop-color="#9ad7ff"/></linearGradient>
+    <radialGradient id="gl" cx=".5" cy="0" r=".9"><stop offset="0" stop-color="#ffffff" stop-opacity=".38"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="116" fill="url(#gl)"/>
+  <g transform="translate(256 262) rotate(-24)">
+    <path d="M-176 0 A176 54 0 0 1 176 0" fill="none" stroke="url(#rg)" stroke-width="15" stroke-linecap="round" opacity=".62"/>
+    <circle r="118" fill="url(#sp)"/>
+    <path d="M-176 0 A176 54 0 0 0 176 0" fill="none" stroke="url(#rg)" stroke-width="17" stroke-linecap="round"/>
+  </g>
+</svg>

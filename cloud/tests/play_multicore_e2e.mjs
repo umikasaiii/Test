@@ -22,9 +22,9 @@ async function leave() { await openMenu(); await p.evaluate(() => document.query
 const snapshot = () => p.evaluate(() => ({ workers: window.__workers.size, open: window.__audio.filter((a) => a.state !== 'closed').length, platform: document.getElementById('game') ? document.getElementById('game').dataset.platform : '' }));
 
 // ---------------------------------------------------------------- 1. a Nintendo DS game: the DS core, no PlayStation download
-await p.setInputFiles('#romFile', nds); await until(async () => (await p.evaluate(() => window.dslinkPlay.games.length)) === 1, 20000);
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', nds); await until(async () => (await p.evaluate(() => window.dslinkPlay.games.length)) === 1, 20000);
 const dsId = await p.evaluate(() => window.dslinkPlay.games[0].id);
-await p.click(`li.game[data-id="${dsId}"] .play`); await until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 40000); await sleep(2500);
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).click(`li.game[data-id="${dsId}"] .play`); await until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 40000); await sleep(2500);
 let s1 = await snapshot();
 check('NDS: GIOCA starts the DS core (melonDS), touch layout nds, input profile NDS_STANDARD, exactly one worker and one audio context', s1.platform === 'nds' && s1.workers === 1 && s1.open === 1 && (await p.evaluate(() => window.dslinkPlay.profile.inputProfile)) === 'NDS_STANDARD' && (await p.evaluate(() => window.dslinkPlay.player.core.id)) === 'melonds' && (await p.evaluate(() => window.dslinkPlay.stats().emuFps)) > 50);
 check('LAZY LOAD: a user who only plays DS games never downloads the PlayStation core', !hasCore('/core/ps1/') && hasCore('/core/dslink_wasm.wasm'));
@@ -33,10 +33,10 @@ await leave(); let s2 = await snapshot();
 check('NDS EXIT: no zombie worker, the audio context is closed', s2.workers === 0 && s2.open === 0);
 
 // ---------------------------------------------------------------- 2. a PlayStation game in the same page: the PS1 core
-await p.setInputFiles('#romFile', files(dir, 'Test Game.cue', 'Test Game.bin')); await until(async () => (await p.evaluate(() => window.dslinkPlay.games.length)) === 2, 60000);
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).setInputFiles('#romFile', files(dir, 'Test Game.cue', 'Test Game.bin')); await until(async () => (await p.evaluate(() => window.dslinkPlay.games.length)) === 2, 60000);
 const psId = await p.evaluate(() => window.dslinkPlay.games.find((g) => g.platform === 'PS1').id);
 const before = await heap();
-await p.click(`li.game[data-id="${psId}"] .play`); await p.waitForSelector('#hleBox:not([hidden])'); await p.click('#btnHleGo');
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).click(`li.game[data-id="${psId}"] .play`); await p.waitForSelector('#hleBox:not([hidden])'); await p.click('#btnHleGo');
 await until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 40000); await sleep(3500);
 let s3 = await snapshot(); const f = await grab(p);
 check('PS1: GIOCA starts the PlayStation core (pcsx-rearmed), touch layout ps1, input profile PS1_DIGITAL, exactly one worker and one audio context', s3.platform === 'ps1' && s3.workers === 1 && s3.open === 1 && (await p.evaluate(() => window.dslinkPlay.profile.inputProfile)) === 'PS1_DIGITAL' && (await p.evaluate(() => window.dslinkPlay.player.core.id)) === 'pcsx-rearmed' && near(pix(f, ...LAYOUT.header), [0, 121, 57]));
@@ -46,7 +46,7 @@ await leave(); let s4 = await snapshot();
 check('PS1 EXIT: no zombie worker, the audio context is closed', s4.workers === 0 && s4.open === 0);
 
 // ---------------------------------------------------------------- 3. back to the DS game: still the DS core, still its own controls
-await p.click(`li.game[data-id="${dsId}"] .play`); await until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 40000); await sleep(2500);
+await (await p.evaluate(() => window.dslinkPlay && window.dslinkPlay.go('games')), p).click(`li.game[data-id="${dsId}"] .play`); await until(() => p.evaluate(() => window.dslinkPlay.isPlaying()), 40000); await sleep(2500);
 let s5 = await snapshot();
 check('NDS AGAIN: the DS game starts again with the DS core and the DS controls (nothing of the PS1 session leaked in)', s5.platform === 'nds' && s5.workers === 1 && s5.open === 1 && (await p.evaluate(() => window.dslinkPlay.profile.platform)) === 'NDS' && (await p.evaluate(() => window.dslinkPlay.player.core.id)) === 'melonds' && (await p.evaluate(() => window.dslinkPlay.stats().emuFps)) > 50);
 await p.screenshot({ path: `${shots}/nds_again.png` });

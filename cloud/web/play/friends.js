@@ -40,7 +40,7 @@ export function initFriends(ctx) {
     if (!navigator.serviceWorker.controller) await new Promise((r) => { const to = setTimeout(r, 3000); navigator.serviceWorker.addEventListener("controllerchange", () => { clearTimeout(to); r(); }, { once: true }); });
     store(TRIED, "1"); store(INTENT, JSON.stringify(intent));
     await new Promise((resolve) => { const to = setTimeout(resolve, 2000); navigator.serviceWorker.addEventListener("message", function f(e) { if (e.data && e.data.t === "coi") { clearTimeout(to); navigator.serviceWorker.removeEventListener("message", f); resolve(); } }); reg.active.postMessage({ t: "coi", on: true }); });
-    const u = new URL(location.href); u.searchParams.delete("friends"); location.replace(u.href); return true;   // (a ?join=CODE of a scanned QR stays in the URL)
+    const u = new URL(location.href); u.searchParams.delete("friends"); u.hash = ""; location.replace(u.href); return true;   // (a ?join=CODE of a scanned QR stays in the URL)
   }
   const hpBlock = (s) => (!isolated() ? "Modalità multiplayer ad alte prestazioni richiesta, non disponibile su questo browser." : s.other.hp === false ? "Il dispositivo dell'amico non supporta la modalità multiplayer ad alte prestazioni." : "");
 
@@ -117,6 +117,8 @@ export function initFriends(ctx) {
     if (host && s.code && $("codeQr").dataset.code !== s.code) drawQr(s.code);
     const mine = s.me.ready ? ["Pronto", "ok"] : ["Connesso", "ok"], theirs = !both ? (s.state === "connecting" ? ["Connessione…", "wait"] : ["In attesa…", "wait"]) : s.other.ready ? ["Pronto", "ok"] : ["Connesso", "ok"];
     slot("stHost", host ? mine[0] : theirs[0], host ? mine[1] : theirs[1]); slot("stGuest", host ? theirs[0] : mine[0], host ? theirs[1] : mine[1]);
+    $("nmHost").textContent = host ? "Tu" : "Il tuo amico"; $("nmGuest").textContent = host ? (both ? "Il tuo amico" : "In attesa") : "Tu";
+    for (const id of ["stHost", "stGuest"]) { const e = $(id), was = e.dataset.was; if (was !== e.textContent) { e.dataset.was = e.textContent; if (e.textContent === "Pronto") e.classList.add("ready"); } }
     const q = s.quality, d = s.decision; $("lobbyQuality").className = "quality " + (q ? q.level : ""); $("lobbyQuality").textContent = s.qualityBusy ? "Controllo la connessione…" : q ? "Connessione: " + q.label : "";
     $("lobbyNet").textContent = both && q && q.path && q.path !== "unknown" ? (q.path === "relay" ? "Tramite relay" : "Diretta") + (s.o.relayAvailable === false && q.path !== "relay" ? " · relay non disponibile" : "") : "";
     const ask = host && !!d && d.block && !s.forced && !s.qualityBusy && both;
