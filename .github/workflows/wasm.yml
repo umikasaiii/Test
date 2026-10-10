@@ -138,6 +138,9 @@ jobs:
           node play_party_e2e.mjs http://localhost:8788 "$PWD/../../build/rom/dslink_test_1.nds"
           node play_cloud_files_e2e.mjs http://localhost:8788 "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_big.nds" | tee /tmp/nor2_files.txt
           grep -q "SKIPPED: R2 disabled" /tmp/nor2_files.txt
+          # the deploy smoke test itself, against both local Workers (R2_ENABLED=true and false)
+          bash ../../scripts/cf_smoke.sh http://localhost:8787 true
+          bash ../../scripts/cf_smoke.sh http://localhost:8788 false
       - name: PWA UPDATE safety (service worker versions JS + WASM together, incomplete update refused, running game never swapped, AGGIORNA from the menu, offline start)
         env:
           CHROME: /opt/google/chrome/chrome

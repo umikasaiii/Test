@@ -114,7 +114,7 @@ const net = await page.evaluate(() => window.__net);
 const reqsDuring = log.length;
 await sleep(1500);
 check('NO NETWORK EMULATION: no WebSocket, no WebRTC, no fetch/XHR from the page while a game runs, no new HTTP request', net.ws === 0 && net.rtc === 0 && net.xhr === 0 && log.length === reqsDuring, JSON.stringify(net) + ` requests ${log.length}`);
-check('NO NETWORK EMULATION: every request is a static file of the player (only the optional account restore GET /api/me at start, no ws)', log.every((l) => l.startsWith('GET /play/') || l.startsWith('GET /controls/') || l === 'GET /api/me' || l.startsWith('GET /mp/mp.css') || l.startsWith('GET /mp/vendor/qrcode.js') || l.startsWith('GET /favicon')), [...new Set(log.filter((l) => !l.startsWith('GET /play/') && !l.startsWith('GET /controls/')))].join(' '));
+check('NO NETWORK EMULATION: every request is a static file of the player (only the two expected bootstrap API reads at start: GET /api/me, the optional account restore, and GET /api/config, which says whether private Cloud storage exists; no ws, no signaling, no upload, no save sync)', log.every((l) => l.startsWith('GET /play/') || l.startsWith('GET /controls/') || l === 'GET /api/me' || l === 'GET /api/config' || l.startsWith('GET /mp/mp.css') || l.startsWith('GET /mp/vendor/qrcode.js') || l.startsWith('GET /favicon')), [...new Set(log.filter((l) => !l.startsWith('GET /play/') && !l.startsWith('GET /controls/')))].join(' '));
 
 // ---- SAVE: play, leave through the exit dialog (save on exit), reload the page, play again
 const mem = (await stats(page)).wasmMB;

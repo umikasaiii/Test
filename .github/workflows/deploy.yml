@@ -84,39 +84,8 @@ jobs:
         run: |
           have=$(npx wrangler secret list -c wrangler.prod.jsonc --format json | python3 -c 'import sys,json;print(" ".join(s["name"] for s in json.load(sys.stdin)))')
           case " $have " in *" INTERNAL_TOKEN "*) ;; *) openssl rand -hex 32 | npx wrangler secret put INTERNAL_TOKEN -c wrangler.prod.jsonc >/dev/null; echo "set INTERNAL_TOKEN";; esac
-      - name: Smoke test the public URL
-        run: |
-          url="${{ steps.prep.outputs.URL }}"
-          for i in $(seq 1 30); do curl -sf "$url/api/health" && break; sleep 4; done
-          curl -sf "$url/api/health"; echo
-          curl -sf -o /dev/null "$url/play/" && echo "PWA served"
-          curl -sf -X POST "$url/signal/create" -H 'content-type: application/json' -d '{}' | head -c 120; echo
-          # authenticated smoke test with a throw-away account (deleted at the end)
-          u=smoke$RANDOM$RANDOM; H=(-H "origin: $url"); R2="${{ steps.prep.outputs.R2_ENABLED }}"
-          tok=$(curl -sf -X POST "$url/api/auth/register" "${H[@]}" -H 'content-type: application/json' -d "{\"username\":\"$u\",\"password\":\"correct horse battery staple\"}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-          if [ "$R2" = "true" ]; then
-            # private storage: the account stores a save in R2, reads it back, an anonymous caller is refused
-            head -c 4096 /dev/urandom > /tmp/s1.bin
-            curl -sf -X PUT "$url/api/saves/nds-smok?base=0&device=smoke-device-1&name=CI" "${H[@]}" -H "authorization: Bearer $tok" --data-binary @/tmp/s1.bin > /dev/null
-            curl -sf "$url/api/saves/nds-smok/data" "${H[@]}" -H "authorization: Bearer $tok" -o /tmp/s2.bin && cmp /tmp/s1.bin /tmp/s2.bin && echo "R2 round trip OK"
-            [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/api/saves/nds-smok/data")" = 401 ] && echo "anonymous refused (401)"
-          else
-            echo "R2 disabled — local storage mode"
-            [ "$(curl -sf "$url/api/config" | python3 -c 'import sys,json;print(json.load(sys.stdin)["storage"])')" = none ] || { echo "::error::/api/config should report storage=none"; exit 1; }
-            echo "config reports storage=none"
-            code=$(curl -s -o /tmp/nr2.json -w '%{http_code}' "$url/api/saves/nds-smok" "${H[@]}" -H "authorization: Bearer $tok")
-            { [ "$code" = 503 ] && grep -q STORAGE_NOT_CONFIGURED /tmp/nr2.json; } || { echo "::error::file routes should answer 503 STORAGE_NOT_CONFIGURED (got $code)"; exit 1; }
-            echo "file routes answer 503 STORAGE_NOT_CONFIGURED (no crash)"
-          fi
-          curl -sf "$url/api/friends" "${H[@]}" -H "authorization: Bearer $tok" > /dev/null && echo "account / friends OK"
-          [ "$(curl -s -X POST -o /dev/null -w '%{http_code}' "$url/api/party" "${H[@]}" -H "authorization: Bearer $tok")" = 201 ] || { echo "::error::Party Voice signaling should answer 201"; exit 1; }
-          echo "Party Voice signaling OK"; curl -s -X POST -o /dev/null "$url/api/party/leave" "${H[@]}" -H "authorization: Bearer $tok"
-          ice=$(curl -sf "$url/api/realtime/ice" "${H[@]}" -H "authorization: Bearer $tok"); echo "$ice" | python3 -c 'import sys,json;d=json.load(sys.stdin);p=d["policy"];print("ICE:", "TURN relay available" if p["relayAvailable"] else "STUN only (relay NOT available)", "- ttl", d["ttlSeconds"], "s")'
-          [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/api/realtime/ice")" = 401 ] && echo "ICE endpoint refuses anonymous callers (401)"
-          curl -sf -X DELETE "$url/api/account" "${H[@]}" -H "authorization: Bearer $tok" -H 'content-type: application/json' -d "{\"confirm\":\"$u\"}" > /dev/null && echo "smoke account deleted"
-          echo "CLOUD API URL: $url" >> "$GITHUB_STEP_SUMMARY"
-          echo "SIGNALING URL: $url/signal" >> "$GITHUB_STEP_SUMMARY"
-          echo "PWA URL: $url/play/" >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke test the public URL (every request reports its method, path and HTTP status; R2 round trip only when R2_ENABLED=true)
+        run: bash scripts/cf_smoke.sh "${{ steps.prep.outputs.URL }}" "${{ steps.prep.outputs.R2_ENABLED }}"
 
   public-e2e:
     needs: deploy
