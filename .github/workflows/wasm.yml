@@ -66,9 +66,11 @@ jobs:
         env:
           CHROME: /opt/google/chrome/chrome
         run: |
+          sudo apt-get install -y --no-install-recommends coturn >/dev/null; sudo systemctl stop coturn 2>/dev/null || true
+          cloud/tests/turn_local.sh start
           cd cloud/worker
           npx wrangler d1 migrations apply dslink --local -c wrangler.cloud.dev.jsonc
-          (npx wrangler dev -c wrangler.cloud.dev.jsonc --port 8787 --local > /tmp/wrangler.log 2>&1 &)
+          (npx wrangler dev -c wrangler.cloud.dev.jsonc --port 8787 --local --var "DSLINK_TURN_URLS:turn:127.0.0.1:3478?transport=udp" --var "DSLINK_TURN_SECRET:dslink-local-turn-test-secret" > /tmp/wrangler.log 2>&1 &)
           for i in $(seq 1 60); do curl -sf http://localhost:8787/api/health && break; sleep 2; done
           cd ../tests
           node signal_contract.mjs http://localhost:8787
@@ -89,6 +91,11 @@ jobs:
           open("../../build/rom/dslink_big.nds", "wb").write(bytes(b) + bytes(pad))
           PY
           node play_cloud_files_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_big.nds" /tmp/playcloudfiles
+          # FASE 7: Internet multiplayer (ICE/STUN/TURN on a local coturn, preflight and quality gate, ICE restart, network change, matrix) and Party Voice (2/3/4 peers, relay)
+          node netquality_unit.mjs
+          node play_internet_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
+          node play_party_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
+          node play_party_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds" --relay
       - name: PWA UPDATE safety (service worker versions JS + WASM together, incomplete update refused, running game never swapped, AGGIORNA from the menu, offline start)
         env:
           CHROME: /opt/google/chrome/chrome

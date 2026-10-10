@@ -57,3 +57,7 @@ signalling:  browser ─WS─▶ Worker ─▶ GameSession DO ─▶ container.f
 * `POST /accounts/{id}/calls/turn_keys` (used by the workflow to create the TURN key) — taken from the Realtime docs; if the API differs the workflow fails
   loudly at that step and the key can be created in the dashboard (Realtime → TURN) and stored as `TURN_KEY_ID` / `TURN_KEY_API_TOKEN` Worker secrets.
 * Android Chrome ↔ iPhone Safari: **DEVICE PENDING**.
+
+## Internet multiplayer and Party Voice (FASE 7)
+
+Optional TURN for players on different networks: repository variables `TURN_PROVIDER`, `TURN_URL`, `DSLINK_STUN_URLS` and the secret `TURN_SECRET` (coturn `static-auth-secret`); the Worker derives short-lived credentials (`GET /api/realtime/ice`). Without TURN the app uses STUN and says the relay is unavailable. D1 migration `0004_party_net.sql` and the `PartyRoom` Durable Object are applied by the same workflow. See [INTERNET_VOICE.md](INTERNET_VOICE.md).

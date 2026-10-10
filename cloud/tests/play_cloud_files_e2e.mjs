@@ -170,7 +170,7 @@ await P.locator('#gameList li.game button', { hasText: 'RIMUOVI DAL DISPOSITIVO'
 const afterLocal = await until(async () => (await rows(P)).length === 1 && (await rows(P))[0].state === 'cloud', 15000);
 const stillCloud = (await api(P, 'GET', '/api/files')).body.games.length === 1;
 check('REMOVE LOCAL: RIMUOVI DAL DISPOSITIVO deletes only the local copy - the game is CLOUD ONLY again and the Cloud keeps ROM and saves', !!afterLocal && stillCloud && (await api(P, 'GET', '/api/saves/' + GID)).body.history.length >= 3);
-check('CLOUD ONLY: after removing the local copy the ROM is no longer in the browser storage', (await P.evaluate(async () => (await window.dslinkPlay.store.list('library/')).length)) === 0);
+check('CLOUD ONLY: after removing the local copy the ROM is no longer in the browser storage (only save bookkeeping may remain)', (await P.evaluate(async () => (await window.dslinkPlay.store.list('library/')).map((x) => String(x.key || x.name || x.path || x)).filter((k) => !/\/(sync\.json|save\.meta\.json|save)$/.test(k)).length)) === 0);
 await P.locator('#gameList li.cloudonly button', { hasText: 'RIMUOVI DAL CLOUD' }).click();
 const gone = await until(async () => (await api(P, 'GET', '/api/files')).body.games.length === 0, 15000);
 await H.reload(); await H.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library'); await sleep(1500);

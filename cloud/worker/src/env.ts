@@ -23,6 +23,7 @@ export interface Env {
   ENVIRONMENT: string;
   INTERNAL_TOKEN: string;             // shared secret container <-> Worker
   DSLINK_STUN_URLS?: string;          // comma separated stun: URLs (default: public STUN)
+  DSLINK_TURN_PROVIDER?: string;      // label only (reported in /api/realtime/ice policy)
   DSLINK_TURN_URLS?: string;          // comma separated turn:/turns: URLs of YOUR TURN server (coturn, ...)
   DSLINK_TURN_SECRET?: string;        // secret shared with the TURN server (use-auth-secret): credentials are derived from it per request, short-lived, and never leave the Worker
   DSLINK_TURN_USERNAME_MODE?: string; // "timestamp-user" (default: <expiry>:<opaque user tag>) or "timestamp" (<expiry>)

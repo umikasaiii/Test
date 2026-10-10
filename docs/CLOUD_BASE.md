@@ -47,3 +47,5 @@ Variables (in `wrangler.jsonc`): `ORIGINS` (exact allowed origins, comma separat
 
 ## Local verification
 `cloud/worker`: `npx vitest run` (worker suites), `npx wrangler dev -c wrangler.cloud.dev.jsonc --local` after `d1 migrations apply --local`, then `cloud/tests/play_cloud_e2e.mjs` (two accounts, passkeys via a virtual authenticator, friends, presence, invite → room → WebRTC) and `play_cloud_static.mjs` (PWA on another origin, proxy + direct).
+
+FASE 7 adds the `PartyRoom` Durable Object (Party Voice signaling) and `/api/realtime/ice`, `/api/party/*`: see [INTERNET_VOICE.md](INTERNET_VOICE.md).

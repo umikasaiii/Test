@@ -123,6 +123,7 @@ await until(async () => (await screen(A)) === 'library', 8000); console.log('scr
 await A.click('#btnParty'); await A.waitForSelector('[data-screen=party].on'); await A.click('#btnPartyLeave');
 const handed = await until(async () => { const o = (await partyState(B)).owner; return (o === idB || o === idC) && (await partyState(B)).n >= 2; }, 15000);
 const newOwner = (await partyState(B)).owner, OW = newOwner === idB ? B : C;
+await until(async () => (await partyState(C)).owner === newOwner && (await OW.evaluate(() => window.dslinkPlay.party.amOwner)) === true, 10000);
 check('ESCI: the owner leaves, the party goes on, ownership passes to the longest-standing member (server decides), who can now remove others', !!handed && !(await partyState(A)).inParty && (await partyState(C)).owner === newOwner && (await OW.evaluate(() => window.dslinkPlay.party.amOwner)) === true, JSON.stringify({ newOwner, idB, idC }));
 const errs = [A, B, C].flatMap((p) => p.errors);
 check('NO SCRIPT ERRORS on any device', errs.length === 0, errs.join(' | ').slice(0, 300));

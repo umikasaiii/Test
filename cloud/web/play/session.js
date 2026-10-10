@@ -106,7 +106,9 @@ export class Session {
   async measure(ms = 2500) {
     if (this.qualityBusy || !this.peer) return; this.qualityBusy = true; this.forced = false; this.change();
     let pre; try { pre = await this.peer.preflight(ms); } catch { pre = null; }
-    const profile = this.profile(), q = classify(pre, profile), d = chooseMode({ path: pre ? pre.path : "unknown", quality: q, profile, hostedAvailable: this.hostedAvailable() });
+    const profile = this.profile(), q = classify(pre, profile), d0 = chooseMode({ path: pre ? pre.path : "unknown", quality: q, profile, hostedAvailable: this.hostedAvailable() });
+    // the gate belongs to Internet rooms (ICE servers present); a local / LAN room keeps the measure-only behaviour of the local Distributed mode
+    const d = (this.o.iceServers || []).length ? d0 : { ...d0, block: false, warn: false, actions: [], message: "" };
     this.quality = { ...q, probe: pre, path: pre ? pre.path : "unknown", profile }; this.decision = d; this.qualityBusy = false;
     if (this.peer) this.peer.sendCtl({ t: "quality", level: q.level, label: q.label, oneWayMs: q.oneWayMs, path: this.quality.path, profile, mode: d.mode, block: d.block, warn: d.warn, message: d.message });
     this.change();
