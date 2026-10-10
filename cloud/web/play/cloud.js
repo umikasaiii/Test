@@ -52,15 +52,15 @@ export class Cloud {
   // ---------------------------------------------------------------- session
   /** restore the session at startup (the cookie is HttpOnly: this is the only way to know). Never throws, never blocks the app. */
   async restore() {
+    this.probeStorage().catch(() => {});
     const r = await this.api("GET", "/api/me");
-    if (r.ok) { if (r.body.storage) this.setStorage(r.body.storage === "none" ? "none" : "r2"); this.user = r.body.user; this.passkeys = r.body.passkeys; this.avatars = r.body.avatars; this.state = "user"; this.emit("login"); this.startPresence(); await this.refreshAll(); }
+    if (r.ok) { this.user = r.body.user; this.passkeys = r.body.passkeys; this.avatars = r.body.avatars; this.state = "user"; this.emit("login"); this.startPresence(); await this.refreshAll(); }
     else if (r.status === 401) { this.user = null; this.state = "anon"; this.emit("anon"); }
     else { this.user = null; this.state = "offline"; this.emit("offline"); }
     return this.state;
   }
   async afterLogin(r) {
     if (!r.ok) return r;
-    await this.probeStorage();                                   // user-initiated sign-in: one small anonymous call, then the app knows whether Cloud files exist here
     this.user = r.body.user; this.state = "user"; this.emit("login"); this.startPresence(); await this.refreshAll(); return r;
   }
   async registerPassword(username, password, displayName) { return this.afterLogin(await this.api("POST", "/api/auth/register", { username, password, ...(displayName ? { displayName } : {}) })); }

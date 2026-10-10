@@ -243,7 +243,7 @@ export async function handleAuth(env: Env, req: Request, path: string, user: Use
 export async function handleMe(env: Env, req: Request, path: string, user: User): Promise<Response | null> {
   if (path === "/api/me" && req.method === "GET") {
     const creds = await env.DB.prepare("SELECT COUNT(*) AS n FROM credentials WHERE user_id = ?").bind(user.id).first<{ n: number }>();
-    return json({ user: publicUser(user), passkeys: creds?.n ?? 0, avatars: AVATARS, lastSeen: now(), storage: env.STORE ? "r2" : "none" });   // storage: is private Cloud storage (R2) configured here
+    return json({ user: publicUser(user), passkeys: creds?.n ?? 0, avatars: AVATARS, lastSeen: now() });
   }
   if (path === "/api/auth/sessions" && req.method === "GET") {         // where am I logged in: one row per device/browser, the current one flagged
     const cur = (await sha256hex(readToken(req) ?? "")).slice(0, 16);
