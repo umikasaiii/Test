@@ -39,7 +39,7 @@ export function mountPs1Extras(ctx) {
   const showSticks = (on) => { layer.hidden = !on; if (!on) for (const st of [sticks.left, sticks.right]) { st.id = null; st.vx = st.vy = 0; st.base.style.display = "none"; } };
 
   // ---- the menu section (the frozen menu sheet is opened by the controls; this runs right after and adds a block above "Riprendi")
-  async function onMenu() {
+  function onMenu() {
     const sheet = container.querySelector(".ctl-menu .sheet"); if (!sheet || sheet.querySelector(".ps1-section")) return;
     const sec = h("div", { class: "ps1-section" });
     sec.append(h("h4", { text: "PlayStation" }));
@@ -54,12 +54,11 @@ export function mountPs1Extras(ctx) {
       go.onclick = async () => { go.disabled = true; go.textContent = "Cambio disco…"; const ok = await session.changeDisc(+sel.value); go.disabled = false; go.textContent = "CAMBIA DISCO"; toast(ok ? "Disco cambiato" : "Il disco non è cambiato"); };
       sec.append(h("label", {}, h("div", { class: "row" }, h("span", { text: "Disco" }), sel)), go);
     }
-    // save states (not the game's memory card)
+    // save states (not the game's memory card): the rows are built at once, what each slot holds is filled in as soon as the storage answers
     const grid = h("div", { class: "ps1-states" });
     for (let n = 1; n <= STATE_SLOTS; n++) {
-      let meta = null; try { const b = await store.get(stateKey(n) + ".json"); if (b) meta = JSON.parse(new TextDecoder().decode(b)); } catch { /* none */ }
       const save = h("button", { class: "mini", text: "SALVA", "data-act": "state-save", "data-slot": String(n) }), load = h("button", { class: "mini", text: "CARICA", "data-act": "state-load", "data-slot": String(n) });
-      load.disabled = !meta;
+      const info = h("small", { class: "hint", text: `${n}: …` });
       save.onclick = async () => {
         const r = await session.saveState(); if (r.error) { toast("Stato non salvato"); return; }
         const m = { core: r.core, coreVersion: r.coreVersion, stateFormat: r.stateFormat, size: r.size, t: Date.now() };
@@ -72,7 +71,8 @@ export function mountPs1Extras(ctx) {
         const r = await session.loadState(raw, m);
         toast(r.ok ? `Stato ${n} caricato` : r.error === "incompatible" ? "Questo stato è di un'altra versione del core: non viene caricato" : "Stato non caricato");
       };
-      const info = h("small", { class: "hint", text: meta ? `${n}: ${fmtTime(meta.t)}` : `${n}: vuoto` });
+      load.disabled = true;
+      store.get(stateKey(n) + ".json").then((b) => { if (b) { try { const m = JSON.parse(new TextDecoder().decode(b)); info.textContent = `${n}: ${fmtTime(m.t)}`; load.disabled = false; return; } catch { /* damaged */ } } info.textContent = `${n}: vuoto`; }).catch(() => { info.textContent = `${n}: vuoto`; });
       grid.append(h("div", { class: "ps1-slot" }, h("b", { text: String(n) }), save, load, info));
     }
     sec.append(h("p", { class: "hint", text: "Gli stati sono diversi dal salvataggio del gioco (memory card): restano su questo dispositivo." }), grid);

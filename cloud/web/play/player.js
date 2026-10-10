@@ -239,7 +239,7 @@ export class Player {
     return { video: this.videoMode, renderMode: this.renderMode, renderFallback: this.renderFallbackWhy || "", emuFps: ws.emuFps || 0, frameMsAvg: ws.frameMsAvg || 0, frameMsMax: ws.frameMsMax || 0, tickLateAvgMs: ws.tickLateAvgMs || 0, tickLateMaxMs: ws.tickLateMaxMs || 0,
       submitted: ws.submitted || 0, droppedAtSource: ws.droppedAtSource || 0, frames: ws.frames || 0, received: v.received, rendered: v.rendered, droppedRender: v.droppedRender,
       renderFps: v.renderFps, mainFrameMsAvg: v.mainFrameMsAvg, mainFrameMsMax: v.mainFrameMsMax, uploadMsAvg: v.uploadMsAvg || 0, uploadMsMax: v.uploadMsMax || 0, drawMsAvg: v.drawMsAvg || 0, drawMsMax: v.drawMsMax || 0,
-      stalls: v.stalls, longTasks: v.longTasks, wasmMB: (ws.wasmBytes || 0) / 1048576, queued: rwm ? rwm.queued : this.queue.length, audio: a, audioSourceDropped: ws.audioDropped || 0, audioFramesProduced: ws.audioFrames || 0,
+      stalls: v.stalls, longTasks: v.longTasks, wasmMB: (ws.wasmBytes || 0) / 1048576, queued: rwm ? rwm.queued : this.queue.length, audio: a, audioSourceDropped: ws.audioDropped || 0, audioPeak: ws.audioPeak || 0, audioFramesProduced: ws.audioFrames || 0,
       radio: this.radio ? { mode: this.radio.mode, role: this.radio.role, pushed: this.radio.pushed, droppedPaused: this.radio.droppedPaused, ringDropped: this.radioProducer ? this.radioProducer.dropped : 0, ringFill: this.radioProducer ? this.radioProducer.fillBytes : 0, txLagAvg: this.radio.txLagAvg || 0, txLagMax: this.radio.txLagMax || 0, txN: this.radio.txN || 0, core: ws.radio || null, peer: this.radio.peer.metrics() } : null,
       dl: ws.dl || null,
       lifecycle: { ...this.lifecycle, paused: this.paused, reason: this.pauseReason }, underruns: a.underEvents || 0 };

@@ -11,10 +11,11 @@ const av = createAvPipe({ post, getM: () => M });                       // exist
 let paused = true, timer = 0, started = false, info = null;
 let frameMs = 1000 / 59.94, next = 0, frames = 0, romId = "", sramFile = "", lastSram = null, sampleRate = 44100;
 let statT = 0, statFrames = 0, statEmuMs = 0, statMax = 0, lateSum = 0, lateMax = 0, lastRumble = [0, 0];
-let discPhase = null, mounted = false, comboFrames = 0, pads = [{ m: 0, a: [0, 0, 0, 0] }, { m: 0, a: [0, 0, 0, 0] }];
+let discPhase = null, mounted = false, comboAt = -1, pads = [{ m: 0, a: [0, 0, 0, 0] }, { m: 0, a: [0, 0, 0, 0] }];
 const cstr = (s) => { const n = M.lengthBytesUTF8(s) + 1, p = M._malloc(n); M.stringToUTF8(s, p, n); return p; };
 const mkdirs = (p) => { try { M.FS.mkdirTree(p); } catch { /* exists */ } };
 const ANALOG_COMBO = (1 << 14) | (1 << 15);                                // L3 + R3: the option below makes the core toggle the DualShock between DIGITAL and ANALOG
+const COMBO_DELAY = 45, COMBO_HOLD = 6;                                    // frames: let the pad change type (the core "replugs" it) before the toggle is pressed
 
 const optionText = (o) => [
   `pcsx_rearmed_bios = "${o.bios === "hle" ? "HLE" : "auto"}"`, `pcsx_rearmed_region = "${o.region === "PAL" ? "PAL" : o.region === "NTSC" ? "NTSC" : "auto"}"`,
@@ -51,9 +52,9 @@ function startGame(msg) {
   if (!M._ps1_start(cstr(optionText(msg.options || {})), cstr("/system"), cstr("/saves"), cstr(content))) {
     post({ t: "error", msg: "Avvio non riuscito: " + M.UTF8ToString(M._dsl_error()) + " " + coreLogTail().split("\n").slice(-3).join(" ") }); return;
   }
-  for (let p = 0; p < 2; p++) M._ps1_set_device(p, (msg.options && msg.options.analog) ? (1 << 8) | 5 : 1);
+  for (let p = 0; p < 2; p++) M._ps1_set_device(p, (msg.options && msg.options.analog) ? ((1 + 1) << 8) | 5 : 1);
   sampleRate = M._dsl_sample_rate() || 44100; const fps = M._dsl_fps() || 59.94; frameMs = 1000 / fps;
-  started = true; paused = false; next = performance.now(); frames = 0; statT = next; resetStats(); discPhase = null; lastRumble = [0, 0]; comboFrames = 0; pads = [{ m: 0, a: [0, 0, 0, 0] }, { m: 0, a: [0, 0, 0, 0] }];
+  started = true; paused = false; next = performance.now(); frames = 0; statT = next; resetStats(); discPhase = null; lastRumble = [0, 0]; comboAt = -1; pads = [{ m: 0, a: [0, 0, 0, 0] }, { m: 0, a: [0, 0, 0, 0] }];
   post({ t: "started", sampleRate, fps, w: M._dsl_video_w(), h: M._dsl_video_h(), audio: av.s.audioMode, aspect: M._ps1_aspect(), discs: M._ps1_disc_count(), disc: M._ps1_disc_index(), stateSize: M._ps1_state_size(),
     core: { id: "pcsx-rearmed", name: M.UTF8ToString(M._ps1_core_name()), version: info.coreVersion, stateFormat: info.stateFormat }, srmPath: M.UTF8ToString(M._dsl_sram_path()), log: coreLogTail() });
   schedule();
@@ -70,13 +71,12 @@ function takeSram(force) {
   post({ t: "sram", id: romId, data: buf }, [buf]);
 }
 
-function applyPads() { for (let p = 0; p < 2; p++) { const q = pads[p]; let m = q.m; if (p === 0 && comboFrames > 0) m |= ANALOG_COMBO; M._ps1_set_pad(p, m, q.a[0], q.a[1], q.a[2], q.a[3]); } }
+function applyPads() { for (let p = 0; p < 2; p++) { const q = pads[p]; let m = q.m; if (p === 0 && comboAt >= 0 && frames >= comboAt && frames < comboAt + COMBO_HOLD) m |= ANALOG_COMBO; M._ps1_set_pad(p, m, q.a[0], q.a[1], q.a[2], q.a[3]); } }
 
 function runOne() {
   applyPads();
   const t0 = performance.now(), alive = M._dsl_run_frame(), dt = performance.now() - t0;
   statEmuMs += dt; if (dt > statMax) statMax = dt; statFrames++; frames++;
-  if (comboFrames > 0) comboFrames--;
   av.sendAudio(); av.sendVideo();
   const s = M._ps1_rumble(0, 0), w = M._ps1_rumble(0, 1); if (s !== lastRumble[0] || w !== lastRumble[1]) { lastRumble = [s, w]; post({ t: "rumble", strong: s, weak: w }); }
   if (discPhase) {                                                                  // disc swap: lid open for a moment, new disc in, lid closed
@@ -96,9 +96,9 @@ function tick() {
   if (now - statT >= 1000) {
     const sec = (now - statT) / 1000, s = av.s;
     post({ t: "stats", emuFps: statFrames / sec, frameMsAvg: statFrames ? statEmuMs / statFrames : 0, frameMsMax: statMax, tickLateAvgMs: statFrames ? lateSum / statFrames : 0, tickLateMaxMs: lateMax,
-      submitted: s.vsubmitted, droppedAtSource: s.vdropped, audioFrames: s.audioFrames, audioDropped: s.audioDropped, wasmBytes: M.HEAPU8.byteLength, frames, dl: null, radio: null,
+      submitted: s.vsubmitted, droppedAtSource: s.vdropped, audioFrames: s.audioFrames, audioDropped: s.audioDropped, audioPeak: s.peak, wasmBytes: M.HEAPU8.byteLength, frames, dl: null, radio: null,
       ps1: { w: M._dsl_video_w(), h: M._dsl_video_h(), fps: 1000 / frameMs, disc: M._ps1_disc_index(), discs: M._ps1_disc_count(), ejected: !!M._ps1_disc_ejected() } });
-    statT = now; resetStats();
+    statT = now; resetStats(); s.peak = 0;
   }
   schedule();
 }
@@ -132,8 +132,8 @@ self.onmessage = async (e) => {
       case "start": startGame(m); break;
       case "buttons": pads[0].m = m.mask; break;
       case "pad": { const q = pads[m.port | 0]; if (q) { q.m = m.mask; q.a = [m.lx | 0, m.ly | 0, m.rx | 0, m.ry | 0]; } break; }
-      case "analogToggle": comboFrames = 6; break;                                  // the core toggles the DualShock mode when it sees the combo
-      case "device": if (started) M._ps1_set_device(m.port | 0, m.analog ? (1 << 8) | 5 : 1); break;
+      case "analogToggle": comboAt = frames + COMBO_DELAY; break;                                  // the core toggles the DualShock mode when it sees the combo
+      case "device": if (started) M._ps1_set_device(m.port | 0, m.analog ? ((1 + 1) << 8) | 5 : 1); break;
       case "recycle": av.recycle(m.buf); break;
       case "pause": paused = true; clearTimeout(timer); timer = 0; takeSram(false); break;
       case "resume": if (started && paused) { paused = false; next = performance.now(); statT = next; resetStats(); schedule(); } break;

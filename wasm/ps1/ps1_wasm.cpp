@@ -79,7 +79,7 @@ std::unique_ptr<Disc> openDisc(const std::string& path, std::string& err) {
         if (chd_get_metadata(d->c, 0x43485432 /*CHT2*/, 0, meta, sizeof meta, &len, nullptr, nullptr) == CHDERR_NONE || chd_get_metadata(d->c, 0x43485452 /*CHTR*/, 0, meta, sizeof meta, &len, nullptr, nullptr) == CHDERR_NONE) {
             std::string m(meta, len); auto p = m.find("TYPE:"); if (p != std::string::npos) { p += 5; auto e = m.find(' ', p); type = m.substr(p, e == std::string::npos ? std::string::npos : e - p); }
         } else { err = "no_track_metadata"; return nullptr; }
-        bool data; trackGeometry(type, d->unit == 2448 ? d->unit : d->unit, d->off, data);
+        bool data; uint32_t cooked = 0; trackGeometry(type, cooked, d->off, data);          // the stride of a CHD frame is its own unit size (2448); only the data offset comes from the track type
         if (!data) { err = "audio_only"; return nullptr; }
         d->trackType = type; d->sectors = h->logicalbytes / d->unit;
         return d;
@@ -238,7 +238,7 @@ EMSCRIPTEN_KEEPALIVE void ps1_set_pad(int port, uint32_t mask, int lx, int ly, i
     if (!g_host || port < 0 || port >= LibretroHost::kPorts) return;
     auto& in = g_host->input[port]; in.buttons = mask; in.analog[0] = lx; in.analog[1] = ly; in.analog[2] = rx; in.analog[3] = ry;
 }
-// device: 1 = RETRO_DEVICE_JOYPAD (digital pad), 5 = analog pad class; the DualShock subclass is (1 << 8) | 5
+// device: 1 = RETRO_DEVICE_JOYPAD (digital pad); the DualShock is RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1) = ((1 + 1) << 8) | 5 = 517
 EMSCRIPTEN_KEEPALIVE void ps1_set_device(int port, unsigned device) { if (g_host) g_host->setControllerDevice(unsigned(port), device); }
 EMSCRIPTEN_KEEPALIVE int ps1_rumble(int port, int motor) { return g_host && port >= 0 && port < LibretroHost::kPorts && motor >= 0 && motor < 2 ? g_host->rumble[port][motor].load() : 0; }
 

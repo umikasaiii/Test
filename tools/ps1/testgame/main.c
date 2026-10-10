@@ -195,6 +195,11 @@ void main(void) {
             rect(8, 80 + i * 18, v ? v : 1, 12, RGB(0, 200, 255));
             rect(8 + 128, 80 + i * 18 - 2, 1, 16, RGB(255, 0, 255));
         }
+        {                                                                                // player 2 (pad buffer 2): 16 small squares + pad type, at y 216
+            u32 b2 = (pad1[0] == 0) ? (u32)(~(pad1[2] | (pad1[3] << 8)) & 0xFFFF) : 0;
+            for (int i = 0; i < 16; i++) rect(8 + i * 10, 216, 8, 8, (b2 >> i) & 1 ? RGB(255, 255, 255) : RGB(60, 60, 60));
+            rect(172, 216, 8, 8, pad1[0] == 0 ? (pad1[1] == 0x73 ? RGB(0, 255, 0) : RGB(255, 255, 0)) : RGB(255, 0, 0));
+        }
         rect(8, 150, 16, 16, mc_status == 3 ? RGB(0, 255, 0) : mc_status == 2 ? RGB(255, 0, 255) : mc_status == 1 ? RGB(255, 128, 0) : RGB(255, 0, 0));
         for (int i = 0; i < (mc_counter & 15); i++) rect(8 + i * 16, 170, 14, 14, RGB(255, 140, 0));
         for (int i = 0; i < disc_num; i++) rect(8 + i * 16, 200, 14, 14, RGB(80, 120, 255));

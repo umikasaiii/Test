@@ -3,7 +3,7 @@
 // page is cross-origin isolated, else through a MessagePort with recycled buffers. The emulation never waits for the page.
 export function createAvPipe({ post, getM }) {
   const VPOOL = 4;
-  const s = { vfree: [], vlen: 0, vsubmitted: 0, vdropped: 0, seqSent: 0, vPort: null, aPort: null, aFree: [], aSab: null, aCtrl: null, aCap: 0, aWrite: 0, audioFrames: 0, audioDropped: 0, audioMode: "none" };
+  const s = { vfree: [], vlen: 0, vsubmitted: 0, vdropped: 0, seqSent: 0, vPort: null, aPort: null, aFree: [], aSab: null, aCtrl: null, aCap: 0, aWrite: 0, audioFrames: 0, audioDropped: 0, audioMode: "none", peak: 0 };
   return {
     s,
     audioPort(port) { s.aPort = port; s.audioMode = "msg"; port.onmessage = (ev) => { const f = ev.data; if (Array.isArray(f)) for (const b of f) if (s.aFree.length < 16) s.aFree.push(b); }; },
@@ -14,6 +14,7 @@ export function createAvPipe({ post, getM }) {
       const M = getM();
       const n = M._dsl_audio_frames(); if (n <= 0) { M._dsl_audio_clear(); return; }
       const src = new Int16Array(M.HEAP16.buffer, M._dsl_audio_ptr(), n * 2);
+      for (let i = 0; i < src.length; i += 16) { const v = src[i] < 0 ? -src[i] : src[i]; if (v > s.peak) s.peak = v; }        // loudest sample seen (statistics only: tells a silent core from a playing one)
       if (s.aSab) {
         const free = s.aCap - ((s.aWrite - Atomics.load(s.aCtrl, 1)) | 0);
         if (n > free) s.audioDropped += n; else {

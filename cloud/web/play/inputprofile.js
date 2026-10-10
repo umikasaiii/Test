@@ -10,7 +10,7 @@ export const INPUT_PROFILES = Object.freeze({
     keys: { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", z: "b", x: "a", a: "y", s: "x", q: "l", w: "r", Enter: "start", Shift: "select" } },
   PS1_DIGITAL: { id: "PS1_DIGITAL", platform: PLATFORMS.PS1, touchLayout: "ps1", buttons: Object.keys(PAD_BITS), analog: false, stylus: false, device: 1,
     keys: { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", z: "b", x: "a", a: "y", s: "x", q: "l", w: "r", e: "l2", r: "r2", Enter: "start", Shift: "select" } },
-  PS1_DUALSHOCK: { id: "PS1_DUALSHOCK", platform: PLATFORMS.PS1, touchLayout: "ps1", buttons: Object.keys(PAD_BITS), analog: true, stylus: false, device: (1 << 8) | 5,
+  PS1_DUALSHOCK: { id: "PS1_DUALSHOCK", platform: PLATFORMS.PS1, touchLayout: "ps1", buttons: Object.keys(PAD_BITS), analog: true, stylus: false, device: ((1 + 1) << 8) | 5,
     keys: { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", z: "b", x: "a", a: "y", s: "x", q: "l", w: "r", e: "l2", r: "r2", Enter: "start", Shift: "select" } },
 });
 export const inputProfileFor = (gameProfile) => INPUT_PROFILES[gameProfile.inputProfile] || INPUT_PROFILES[gameProfile.platform === PLATFORMS.PS1 ? "PS1_DIGITAL" : "NDS_STANDARD"];
