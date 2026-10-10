@@ -145,7 +145,7 @@ const pcInfo = (p) => p.evaluate(async () => { const pc = window.__pcs[0]; if (!
   await A.mouse.move(vr.x + vr.w * 0.5, vr.y + vr.h * 0.75); await A.mouse.down(); await sleep(400);
   const w1 = white(await grab(A)), wB1 = white(await grab(B)); await A.mouse.up();
   check('TOUCH LOCAL: the stylus on device A reaches A\'s DS touchscreen only', w1 - w0 > 15 && Math.abs(wB1 - wB0) < 10, `A white ${w0}->${w1}, B ${wB0}->${wB1}`);
-  const hits = host.hits.filter((h) => !/favicon|^GET \/api\/me$/.test(h) && !/\/play\/|\/controls\/|\/mp\//.test(h) && !/^\w+ \/signal\//.test(h));
+  const hits = host.hits.filter((h) => !/favicon|^GET \/api\/(me|config)$/.test(h) && !/\/play\/|\/controls\/|\/mp\//.test(h) && !/^\w+ \/signal\//.test(h));
   check('NO MEDIA OVER THE SERVER: besides static files, the server only saw signaling requests (/signal/*), never frames, video or audio', hits.length === 0, hits.slice(0, 5).join(' '));
   check('NO SCRIPT ERRORS on either device', A.errors.length === 0 && B.errors.length === 0, [...A.errors, ...B.errors].join(' | '));
   await A.screenshot({ path: `${shots}/game-host.png` }); await B.screenshot({ path: `${shots}/game-guest.png` });
