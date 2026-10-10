@@ -21,7 +21,7 @@ jobs:
         with: { node-version: "22" }
       - name: Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3 gcc-arm-none-eabi binutils-arm-none-eabi clang lld mame-tools
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3 gcc-arm-none-eabi binutils-arm-none-eabi clang lld llvm mame-tools
           cd cloud/tests && npm install && npx playwright install --with-deps chrome
       - name: Homebrew test ROMs (own code)
         run: mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"

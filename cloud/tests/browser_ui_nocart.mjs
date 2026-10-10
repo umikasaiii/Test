@@ -18,8 +18,10 @@ const browser = await chromium.launch({ executablePath: chrome, headless: true,
 const A = await (await browser.newContext({ viewport: { width: 540, height: 1000 } })).newPage();
 const B = await (await browser.newContext({ viewport: { width: 540, height: 1000 } })).newPage();
 
+// the product default is the distributed mode (one console per device); this test checks the HOSTED video path, so select it the way a user does (Sviluppatore > MULTIPLAYER MODE)
+for (const p of [A, B]) await p.addInitScript(() => { try { localStorage.setItem('dslink.mpmode', 'hosted'); } catch { /* ignore */ } });
 await A.goto(base);
-check('home shows CREA PARTITA and ENTRA', (await A.textContent('#menu')).includes('CREA PARTITA') && (await A.textContent('#menu')).includes('ENTRA'));
+check('home shows CREA PARTITA and UNISCITI', (await A.textContent('#menu')).includes('CREA PARTITA') && (await A.textContent('#menu')).includes('UNISCITI'));
 await A.click('#btnCreate');
 await A.setInputFiles('#rom', rom1);
 await A.click('#btnUpload');

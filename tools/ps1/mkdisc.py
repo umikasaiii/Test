@@ -18,12 +18,16 @@ def build_exe(pal: bool) -> bytes:
     src = os.path.join(HERE, "testgame")
     tmp = tempfile.mkdtemp(prefix="psph")
     flags = ["--target=mipsel-none-elf", "-march=mips1", "-msoft-float", "-mno-abicalls", "-fno-pic", "-mno-gpopt", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-nostdlib"]
+    def tool(n):   # distro packages ship unversioned names or only versioned ones (/usr/lib/llvm-18/bin)
+        import glob
+        p = shutil.which(n) or next(iter(sorted(glob.glob(f"/usr/lib/llvm-*/bin/{n}"), reverse=True)), None)
+        return p or sys.exit(f"{n} is required (apt: clang lld llvm)")
     cc = shutil.which("clang") or sys.exit("clang with the MIPS target is required")
     def run(cmd): subprocess.run(cmd, check=True, stderr=subprocess.DEVNULL if cmd[0] == cc else None)
     run([cc, *flags, "-O2", f"-DPAL={1 if pal else 0}", "-c", f"{src}/main.c", "-o", f"{tmp}/main.o"])
     run([cc, *flags, "-c", f"{src}/crt0.S", "-o", f"{tmp}/crt0.o"])
-    run(["ld.lld", "-m", "elf32ltsmip", "-T", f"{src}/link.ld", "-o", f"{tmp}/g.elf", f"{tmp}/crt0.o", f"{tmp}/main.o"])
-    run(["llvm-objcopy", "-O", "binary", f"{tmp}/g.elf", f"{tmp}/g.bin"])
+    run([tool("ld.lld"), "-m", "elf32ltsmip", "-T", f"{src}/link.ld", "-o", f"{tmp}/g.elf", f"{tmp}/crt0.o", f"{tmp}/main.o"])
+    run([tool("llvm-objcopy"), "-O", "binary", f"{tmp}/g.elf", f"{tmp}/g.bin"])
     body = open(f"{tmp}/g.bin", "rb").read()
     shutil.rmtree(tmp, ignore_errors=True)
     body += b"\0" * (-len(body) % 2048)
