@@ -113,7 +113,7 @@ describe("session: authorisation and content", () => {
     for (const acc of [a, b]) {
       const r = await api("GET", `/api/sessions/${sid}`, { token: acc.token });
       expect(JSON.stringify(r.body)).not.toContain(man!.files[0].id);
-      expect(JSON.stringify(r.body)).not.toMatch(/ticket|token|r2|u\//i);
+      expect(JSON.stringify(r.body)).not.toMatch(/"[a-z]*(ticket|token|r2|key)[a-z]*":|\bu\//i);      // field names, not random ids that may contain "r2"
     }
     // a logged-in guest cannot reach the internal route (needs the shared secret AND the ticket)
     const g = await api("GET", `/internal/sessions/${sid}/files/${man!.files[0].id}`, { token: b.token, headers: { "x-dslink-ticket": "guess" } });
