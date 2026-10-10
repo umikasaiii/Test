@@ -5,6 +5,7 @@ import { createRenderer } from "./video.js";
 import { AudioRing } from "./audio-worklet.js";
 import { opt } from "./options.js";
 import { createSharedRadio, RadioRxProducer, epochMs } from "./radio-ring.js";
+import { CORES } from "./coreregistry.js";
 
 const PAD = { b: 0, y: 1, select: 2, start: 3, up: 4, down: 5, left: 6, right: 7, a: 8, x: 9, l: 10, r: 11 };   // RETRO_DEVICE_ID_JOYPAD_*
 const QUEUE_MAX = 3;                                                                                              // pictures waiting for a vsync before the oldest are dropped
@@ -23,6 +24,7 @@ export function detectCaps() {
 export class Player {
   /** @param {{canvas: HTMLCanvasElement, onSram?: (id:string, data:ArrayBuffer)=>void, onError?: (msg:string)=>void, onShutdown?: ()=>void, onNeedGesture?: ()=>void, onResumed?: ()=>void}} o */
   constructor(o) {
+    this.core = o.core || CORES.melonds;                                                // the CoreAdapter's registry entry: worker file, audio rate. The DS core unless a subclass says otherwise
     this.canvas = o.canvas; this.onSram = o.onSram || (() => {}); this.onError = o.onError || (() => {}); this.onShutdown = o.onShutdown || (() => {});
     this.onNeedGesture = o.onNeedGesture || (() => {}); this.onResumed = o.onResumed || (() => {});
     this.worker = null; this.ctx = null; this.node = null; this.ring = null; this.sp = null; this.renderer = null; this.mask = 0; this.running = false; this.paused = false; this.pauseReason = "";
@@ -43,21 +45,29 @@ export class Player {
     if (this.ctx && this.ctx.resume) this.ctx.resume().catch(() => {});
   }
 
-  async start({ id, rom, system, sram, radio }) {
+  /** extension points for the cores that are not the DS: what to tell the worker at init and at start (the DS messages are the defaults) */
+  initMessage() { return { t: "init" }; }
+  startMessage({ id, rom, system, sram, radio }) {
+    const tr = rom ? [rom] : []; if (system) for (const b of Object.values(system)) if (b) tr.push(b); if (sram) tr.push(sram);
+    return { msg: { t: "start", id, rom, system, sram, radio }, transfer: tr };
+  }
+  onExtraMsg() {}                                                                      // worker messages only some cores send (rumble, disc, states...)
+
+  async start({ id, rom, system, sram, radio, extra }) {
     const keep = this.ctx; this.ctx = null; await this.stop(); this.ctx = keep;       // a previous game is closed first; the AudioContext made in the tap is kept
     this.prepare();
-    const worker = this.worker = new Worker(new URL("./emulator.worker.js", import.meta.url), { type: "module" });
+    const worker = this.worker = new Worker(new URL(this.core.worker, import.meta.url), { type: "module" });
     const ready = new Promise((resolve, reject) => { this._ready = resolve; this._fail = reject; });
     worker.onmessage = (e) => this.onMsg(e.data);
     worker.onerror = (e) => { this.onError("Errore del core: " + (e.message || "caricamento")); if (this._fail) this._fail(new Error("worker")); };
     await this.setupVideo();
     await this.setupAudio();
-    worker.postMessage({ t: "init" });
+    worker.postMessage(this.initMessage());
     await ready;
     const started = new Promise((resolve) => { this._started = resolve; });
-    const tr = rom ? [rom] : []; if (system) for (const b of Object.values(system)) if (b) tr.push(b); if (sram) tr.push(sram);
     const rcfg = this.setupRadio(radio);
-    worker.postMessage({ t: "start", id, rom, system, sram, radio: rcfg }, tr);
+    const { msg, transfer } = this.startMessage({ id, rom, system, sram, radio: rcfg, extra });
+    worker.postMessage(msg, transfer);
     const info = await started;
     if (radio) this.radioOpen(radio.peer.state === "open" || radio.peer.state === "degraded" ? 1 : 0);
     this.srcRate = info.sampleRate; this.sendAudioRate(info.sampleRate);
@@ -132,7 +142,7 @@ export class Player {
     try {
       if (this.ctx.audioWorklet && self.AudioWorkletNode && forced !== "sp") {
         await this.ctx.audioWorklet.addModule(new URL("./audio-worklet.js", import.meta.url));
-        this.node = new AudioWorkletNode(this.ctx, "dslink-audio", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { srcRate: 32768 } });
+        this.node = new AudioWorkletNode(this.ctx, "dslink-audio", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { srcRate: this.core.audioRate || 32768 } });
         this.node.connect(this.ctx.destination);
         this.node.port.onmessage = (e) => { this.audioMetrics = e.data; };
         if (self.crossOriginIsolated && typeof SharedArrayBuffer === "function" && forced !== "msg") {   // lock-free ring shared with the worker (only on isolated pages)
@@ -191,6 +201,7 @@ export class Player {
       case "pong": if (this._pong && this._pong.token === m.token) this._pong.resolve(true); break;
       case "error": this.onError(m.msg); if (this._fail) this._fail(new Error(m.msg)); if (this._started) this._started({ sampleRate: 32768 }); break;
       case "shutdown": this.shutdownInfo = { log: m.log || "", dl: m.dl || null, at: Date.now() }; this.onShutdown(); break;
+      default: this.onExtraMsg(m);
     }
   }
   recycle(buf) { if (buf && this.worker) this.worker.postMessage({ t: "recycle", buf }, [buf]); }
@@ -206,7 +217,7 @@ export class Player {
       const t0 = performance.now(), f = this.queue.shift();
       const px = new Uint8Array(f.buf);
       this.renderer.draw(px, f.w, f.h); v.rendered++; w.frames++;
-      if (this._grab) { const g = new Uint8Array(px.length); for (let i = 0; i < px.length; i += 4) { g[i] = px[i + 2]; g[i + 1] = px[i + 1]; g[i + 2] = px[i]; g[i + 3] = 255; } this._grab(g); this._grab = null; }   // tests: the next picture as RGBA
+      if (this._grab) { const g = new Uint8Array(px.length); for (let i = 0; i < px.length; i += 4) { g[i] = px[i + 2]; g[i + 1] = px[i + 1]; g[i + 2] = px[i]; g[i + 3] = 255; } g.w = f.w; g.h = f.h; this._grab(g); this._grab = null; }   // tests: the next picture as RGBA
       this.recycle(f.buf);
       const ms = performance.now() - t0; w.mainMsSum += ms; if (ms > w.mainMsMax) w.mainMsMax = ms;
     }
@@ -235,6 +246,11 @@ export class Player {
   }
 
   grab() { return new Promise((resolve) => { this._grab = resolve; if (this.rw) this.rw.postMessage({ t: "grab" }); }); }
+
+  // ------------------------------------------------------------------ GameSession interface (gamesession.js): the names the app uses for every core
+  pause(reason) { this.pauseAll(reason || "manual"); }
+  getStats() { return this.stats; }
+  sendInput(ev) { if (ev.type === "button") this.btn(ev.name, !!ev.down, ev.port | 0); else if (ev.type === "touch") this.touch(ev.x, ev.y, !!ev.down); else if (ev.type === "analog") this.analog && this.analog(ev.lx, ev.ly, ev.rx, ev.ry, ev.port | 0); }
 
   // ------------------------------------------------------------------ input
   btn(k, down) { if (!(k in PAD) || !this.worker) return; this.mask = down ? (this.mask | (1 << PAD[k])) : (this.mask & ~(1 << PAD[k])); this.worker.postMessage({ t: "buttons", mask: this.mask }); }

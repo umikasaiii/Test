@@ -7,11 +7,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="DSLink">
+<meta name="apple-mobile-web-app-title" content="PlaySphere">
 <meta name="format-detection" content="telephone=no">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<title>DSLink · Gioca</title>
+<title>PlaySphere · Gioca</title>
 <link rel="stylesheet" href="../controls/controls.css">
 <link rel="stylesheet" href="../mp/mp.css">
 <link rel="stylesheet" href="play.css">
@@ -19,12 +19,14 @@
 <body>
 <main id="app" aria-live="polite">
   <section class="screen on" data-screen="library">
-    <header class="brand"><span class="logo">DS<b>Link</b></span><span class="sub">Nintendo DS nel browser</span><button class="chip" id="btnParty" hidden>🎙 PARTY</button><button class="chip" id="btnAccount" data-mode="anon">ACCEDI</button></header>
+    <header class="brand"><span class="logo">Play<b>Sphere</b></span><span class="sub">I tuoi giochi nel browser</span><button class="chip" id="btnParty" hidden>🎙 PARTY</button><button class="chip" id="btnAccount" data-mode="anon">ACCEDI</button></header>
     <p class="notice" id="unsupported" hidden></p>
 
     <h2>Giochi</h2>
+    <div class="filter" id="platformFilter" hidden></div>
     <ul class="games" id="gameList"></ul>
-    <label class="cta file" id="addGame"><input type="file" id="romFile" accept=".nds,.srl,application/octet-stream" hidden>＋ Aggiungi un gioco (.nds)</label>
+    <label class="cta file" id="addGame"><input type="file" id="romFile" accept=".nds,.srl,.cue,.bin,.chd,.iso,.img,.m3u,application/octet-stream" multiple hidden>＋ Aggiungi un gioco</label>
+    <p class="hint">Nintendo DS: un file .nds. PlayStation: .cue con i suoi .bin, oppure .chd, .iso o .m3u (anche più dischi insieme). PlaySphere riconosce da solo il sistema.</p>
     <p class="err" id="libErr"></p>
     <div id="cloudBar" class="cloudbar" hidden>
       <label class="chk"><input type="checkbox" id="optAutoCloud"> Salva nel mio Cloud i giochi e i file di sistema che aggiungo</label>
@@ -37,9 +39,13 @@
     <p class="hint">Due dispositivi, ognuno con il suo gioco: tra i due passa solo la radio del DS. Serve lo stesso gioco su entrambi.</p>
     <div class="row" id="friendsRow"><button class="cta primary" id="btnCreate">CREA PARTITA</button><button class="cta" id="btnJoin">UNISCITI</button></div>
 
-    <h2>File di sistema</h2>
+    <h2>File di sistema Nintendo DS</h2>
     <p class="hint">Facoltativi per i gioco homebrew, consigliati per i giochi commerciali. Restano solo su questo dispositivo: non vengono mai inviati, né salvati nel sito.</p>
     <ul class="games sysfiles" id="sysList"></ul>
+    <h2>File di sistema PlayStation</h2>
+    <p class="hint">Il BIOS PlayStation serve per giocare ai dischi PlayStation (uno per regione: America, Europa, Giappone). Lo scegli tu: resta solo su questo dispositivo e, se vuoi, nel tuo Cloud privato.</p>
+    <ul class="games sysfiles" id="ps1SysList"></ul>
+    <label class="cta file" id="addPs1Bios"><input type="file" id="ps1BiosFile" accept=".bin,application/octet-stream" hidden>＋ Aggiungi un BIOS PlayStation</label>
     <p class="hint" id="storageNote"></p>
 
     <details class="diag"><summary>Impostazioni di test</summary>
@@ -156,6 +162,7 @@
 <div id="game" hidden></div>
 <div id="resumeHint" class="overlay" hidden><div class="card"><h2>Gioco in pausa</h2><p>Tocca per riprendere audio e gioco.</p><button class="cta primary" id="btnResume">RIPRENDI</button></div></div>
 <div id="confirm" class="overlay" hidden><div class="card"><h2>Uscire dal gioco?</h2><p>Il salvataggio viene conservato su questo dispositivo.</p><div class="row"><button class="cta" id="confirmNo">NO</button><button class="cta danger" id="confirmYes">SÌ, ESCI</button></div></div></div>
+<div id="hleBox" class="overlay" hidden><div class="card"><h2>Manca il BIOS PlayStation</h2><p>Senza il BIOS originale PlaySphere può usare una versione semplificata (HLE): molti giochi funzionano, altri no o con difetti. Per la migliore compatibilità aggiungi il tuo BIOS in «File di sistema PlayStation».</p><div class="row"><button class="cta" id="btnHleNo">ANNULLA</button><button class="cta primary" id="btnHleGo">AVVIA CON COMPATIBILITÀ RIDOTTA</button></div></div></div>
 <div id="assistStep" class="assist" hidden></div>
 <div id="cloudToast" class="assist" hidden></div>
 <div id="partyBar" class="pbar" hidden><button id="btnBarOpen" aria-label="Party">🎙<span id="barCount"></span></button><span id="barSpeaker" hidden>🗣</span><button id="btnBarMic" aria-label="Muta">🎙</button></div>

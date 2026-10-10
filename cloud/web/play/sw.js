@@ -1,4 +1,4 @@
-// DSLink PWA service worker: caches the player shell and the emulator core so the player starts offline. Nothing private is ever fetched by this app, so there is nothing private to cache.
+// PlaySphere (DSLink) PWA service worker: caches the player shell and the emulator core so the player starts offline. Nothing private is ever fetched by this app, so there is nothing private to cache.
 // All paths are relative to the worker's scope so the app works under any base path (a domain root, /play/, a GitHub Pages project path).
 // One build = one cache. scripts/package_pwa.sh stamps BUILD with a hash of EVERY shell file (JS, CSS, WebAssembly core, controls), so the files of a version can only ever be served together:
 //  - install fetches the whole shell fresh and fails (the old version stays in charge) if any file is missing: a half-updated cache never exists;
@@ -8,7 +8,11 @@
 const BUILD = "dev";
 const CACHE = "dslink-play-" + BUILD, FLAGS = "dslink-flags", PACKAGED = BUILD !== "dev";
 const BASE = new URL("./", self.location).href, UP = new URL("../", self.location).href;
-const SHELL = ["", "index.html", "play.js", "play.css", "player.js", "video.js", "storage.js", "sha256.js", "emulator.worker.js", "audio-worklet.js", "render-worker.js", "options.js", "radio-ring.js", "radio-peer.js", "session.js", "friends.js", "dlassist.js", "cloud.js", "cloudui.js", "cloudfiles.js", "net.js", "netquality.js", "voice.js", "partyui.js", "netprofiles.json", "cloud-config.json", "core/dslink_wasm.js", "core/dslink_wasm.wasm", "manifest.webmanifest",
+// Cores that are not needed to start the app (the PlayStation core) are NOT in the install set: they are fetched the first time a game needs them and then belong to THIS version's cache.
+// The two files of a core (loader + wasm) are fetched and stored together or not at all, so a core is never half old / half new; build-info.json carries the protocol number the worker checks.
+const LAZY = ["core/ps1/playsphere_ps1.js", "core/ps1/playsphere_ps1.wasm", "core/ps1/build-info.json"].map((p) => BASE + p);
+const SHELL = ["", "index.html", "play.js", "play.css", "player.js", "video.js", "storage.js", "sha256.js", "emulator.worker.js", "audio-worklet.js", "render-worker.js", "options.js", "radio-ring.js", "radio-peer.js", "session.js", "friends.js", "dlassist.js", "cloud.js", "cloudui.js", "cloudfiles.js", "net.js", "netquality.js", "voice.js", "partyui.js", "netprofiles.json",
+  "coreregistry.js", "gameprofile.js", "runtimeresolver.js", "inputprofile.js", "gamepad.js", "gamesession.js", "dom.js", "avpipe.js", "ps1session.js", "ps1.worker.js", "ps1import.js", "ps1bios.js", "ps1ui.js", "cloud-config.json", "core/dslink_wasm.js", "core/dslink_wasm.wasm", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"].map((p) => BASE + p).concat(["controls/controls.css", "controls/controls.js", "controls/layouts.js", "controls/components.js", "controls/input.js", "controls/menu.js", "mp/mp.css", "mp/vendor/qrcode.js"].map((p) => UP + p));
 self.addEventListener("install", (e) => {
   e.waitUntil((async () => {
@@ -41,11 +45,25 @@ const isolate = (r) => {
   const h = new Headers(r.headers); h.set("Cross-Origin-Opener-Policy", "same-origin"); h.set("Cross-Origin-Embedder-Policy", "require-corp"); h.set("Cross-Origin-Resource-Policy", "same-origin");
   return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
 };
+async function lazyCore(req, clean) {
+  if (!PACKAGED) return fetch(req);                                                         // development: always the files on disk
+  const c = await caches.open(CACHE), hit = await c.match(clean);
+  if (hit) return hit;
+  try {                                                                                      // first use in this version: the whole set arrives together, then it is stored together
+    const res = await Promise.all(LAZY.map((u) => fetch(new Request(u, { cache: "reload" }))));
+    if (!res.every((r) => r.ok)) return fetch(req);
+    const copies = await Promise.all(res.map(async (r) => { const h = new Headers(r.headers); h.delete("content-encoding"); h.delete("content-length"); return new Response(await r.arrayBuffer(), { status: 200, headers: h }); }));
+    await Promise.all(LAZY.map((u, i) => c.put(u, copies[i])));
+    return (await c.match(clean)) || fetch(req);
+  } catch { return fetch(req); }
+}
 self.addEventListener("fetch", (e) => {
   const u = new URL(e.request.url);
   if (e.request.method !== "GET" || u.origin !== location.origin) return;
   if (u.pathname.startsWith("/api/") || u.pathname.startsWith("/signal/") || u.pathname.startsWith("/internal/")) return;      // the Cloud is never intercepted or cached (files, saves, sessions)
-  const clean = u.href.split("?")[0], shell = SHELL.includes(clean), inScope = (clean.startsWith(UP) || clean === BASE.slice(0, -1)) && !u.pathname.includes("/signal/");
+  const clean = u.href.split("?")[0];
+  if (LAZY.includes(clean)) { e.respondWith(lazyCore(e.request, clean)); return; }
+  const shell = SHELL.includes(clean), inScope = (clean.startsWith(UP) || clean === BASE.slice(0, -1)) && !u.pathname.includes("/signal/");
   if (!shell && !inScope) return;
   e.respondWith((async () => {
     const coi = await coiOn(); if (!shell && !coi) return fetch(e.request);                    // only the shell is ever cached: never an API, never anything private

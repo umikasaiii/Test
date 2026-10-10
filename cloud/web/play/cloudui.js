@@ -120,8 +120,8 @@ export function initCloudUI(ctx) {
 
   // ---- invite: pick one of MY games (cloud library entries whose file is on this device), then the room opens and the friend is told
   async function pickGame(friend) {
-    const local = ctx.localByGameId(), mine = cloud.library.filter((e) => local.has(e.gameId));
-    if (!mine.length) { toast("Aggiungi prima un gioco a questo dispositivo."); return; }
+    const local = ctx.localByGameId(), mine = cloud.library.filter((e) => local.has(e.gameId) && e.multiplayerMode !== "none");      // PlaySphere multiplayer exists for the systems that have it: no INVITA for a game that cannot be played together
+    if (!mine.length) { toast("Nessun gioco di questo dispositivo supporta il multiplayer PlaySphere."); return; }
     const box = $("pickList"); box.innerHTML = ""; $("pickWho").textContent = friend.displayName;
     for (const e of mine) box.append(h("li", {}, h("span", { class: "t", text: e.title }), h("button", { class: "mini primary", text: "INVITA", onclick: async () => {
       $("pickGame").hidden = true;

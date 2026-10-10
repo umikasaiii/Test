@@ -58,3 +58,15 @@ li.pm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; } li.pm.s
 
 /* the hidden attribute always wins over a component display rule (USA MODALITÀ HOSTED must not show without a host) */
 button[hidden] { display: none !important; }
+
+/* PlaySphere (FASE 8): platform badge and filter, PlayStation extras in the in-game menu, floating analog sticks */
+.games li.game .plat { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 1px 6px; border-radius: 6px; margin-left: 6px; color: #bcd9ff; border: 1px solid #36507f; }
+.games li.game[data-platform=PS1] .plat { color: #ffd7a1; border-color: #8a5a1c; }
+.filter { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; } .filter[hidden] { display: none; }
+.filter .chip { margin-left: 0; } .filter .chip.on { background: #1b3a78; border-color: #5aa8ff; }
+.ctl-menu .ps1-section { display: grid; gap: 8px; border-top: 1px solid rgba(112,176,255,.25); padding-top: 10px; } .ctl-menu .ps1-section h4 { margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #9fc3ff; }
+.ctl-menu .ps1-states { display: grid; gap: 6px; } .ctl-menu .ps1-slot { display: grid; grid-template-columns: 18px 1fr 1fr; gap: 6px; align-items: center; } .ctl-menu .ps1-slot small { grid-column: 1 / -1; }
+.ctl-menu button.mini { min-height: 36px; padding: 6px 8px; font-size: 12px; } .ctl-menu .sel { width: 100%; min-height: 36px; background: rgba(8,16,36,.8); color: #e9f2ff; border: 1px solid var(--edge); border-radius: 10px; }
+.ps1-sticks { position: absolute; inset: 0; pointer-events: none; z-index: 3; } .ps1-sticks[hidden] { display: none; }
+.stk-base { position: absolute; width: 112px; height: 112px; border-radius: 50%; border: 2px solid rgba(160, 205, 255, .6); background: rgba(20, 40, 90, .28); }
+.stk-knob { position: absolute; left: 32px; top: 32px; width: 48px; height: 48px; border-radius: 50%; background: rgba(120, 185, 255, .55); border: 2px solid rgba(220, 238, 255, .85); }

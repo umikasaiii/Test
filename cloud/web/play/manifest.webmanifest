@@ -1,7 +1,7 @@
 {
-  "name": "DSLink",
-  "short_name": "DSLink",
-  "description": "Nintendo DS nel browser: gioca ai tuoi giochi, in locale su questo dispositivo.",
+  "name": "PlaySphere",
+  "short_name": "PlaySphere",
+  "description": "PlaySphere: i tuoi giochi Nintendo DS e PlayStation nel browser, in locale su questo dispositivo.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

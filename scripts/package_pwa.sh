@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT="$ROOT/build/pwa"
 [ -f "$ROOT/cloud/web/play/core/dslink_wasm.wasm" ] || { echo "run scripts/build_wasm.sh first" >&2; exit 1; }
+[ -f "$ROOT/cloud/web/play/core/ps1/playsphere_ps1.wasm" ] || echo "warning: the PlayStation core is not built (scripts/build_ps1_wasm.sh): this package will not run PlayStation games" >&2
 rm -rf "$OUT" && mkdir -p "$OUT/mp"
 cp -r "$ROOT/cloud/web/play" "$OUT/play"
 cp -r "$ROOT/cloud/worker/public/controls" "$OUT/controls"

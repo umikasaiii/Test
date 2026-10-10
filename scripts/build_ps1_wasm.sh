@@ -55,6 +55,7 @@ cat > "$OUT/build-info.json" <<JSON
   "upstreamCommit": "$PCSX_REARMED_COMMIT",
   "license": "GPL-2.0-or-later",
   "emscripten": "$EMSCRIPTEN_TAG",
+  "api": 1,
   "stateFormat": 1,
   "requires": ["wasm", "wasm-simd", "worker-module"],
   "files": { "playsphere_ps1.wasm": { "bytes": $(stat -c %s "$OUT/playsphere_ps1.wasm"), "sha256": "$WASM_SHA" }, "playsphere_ps1.js": { "bytes": $(stat -c %s "$OUT/playsphere_ps1.js"), "sha256": "$JS_SHA" } }

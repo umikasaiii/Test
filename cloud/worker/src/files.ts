@@ -15,7 +15,8 @@ export const SAVE_MAX = 8 * 2 ** 20;
 export const SAVE_KEEP = 5;                       // revisions kept per game
 const UPLOAD_TTL = 24 * 3600 * 1000;
 const MAX_PENDING = 8;
-const SYSTEM_SIZES: Record<string, number[]> = { "bios7.bin": [16384], "bios9.bin": [4096], "firmware.bin": [131072, 262144, 524288] };
+// the user's own BIOS files: Nintendo DS (bios7, bios9, firmware) and PlayStation (one 512 KiB BIOS per region). Sizes only: the Cloud never inspects or compares a BIOS.
+const SYSTEM_SIZES: Record<string, number[]> = { "bios7.bin": [16384], "bios9.bin": [4096], "firmware.bin": [131072, 262144, 524288], "ps1-bios-na.bin": [524288], "ps1-bios-eu.bin": [524288], "ps1-bios-jp.bin": [524288] };
 const GAME_RE = /^[a-z0-9]{2,8}-[a-z0-9]{4,12}$/;
 const HEX = /^[0-9a-f]{64}$/;
 const DEVICE_RE = /^[A-Za-z0-9_-]{6,64}$/;

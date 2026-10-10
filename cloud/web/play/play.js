@@ -14,6 +14,16 @@ import { profileFor } from "./netquality.js";
 import { PartyVoice } from "./voice.js";
 import { initPartyUI } from "./partyui.js";
 import { DlAssist, validateRefs, HOST_REFS } from "./dlassist.js";
+import { PLATFORMS, availablePlatforms } from "./coreregistry.js";
+import { gameIdOf as gameIdOfProfile, profileOf as profileOfMeta, cloudEntry } from "./gameprofile.js";
+import { resolveRuntime, deviceCapabilities } from "./runtimeresolver.js";
+import { inputProfileFor } from "./inputprofile.js";
+import { createGameSession } from "./gamesession.js";
+import { probeDiscs } from "./ps1session.js";
+import { GamepadInput } from "./gamepad.js";
+import { PS1_ACCEPT, groupFiles, contentId, IMPORT_ERR, extOf } from "./ps1import.js";
+import { BIOS_SLOTS, BIOS_SIZE, inspectBios, BIOS_ERR, biosForGame } from "./ps1bios.js";
+import { mountPs1Extras } from "./ps1ui.js";
 
 const $ = (id) => document.getElementById(id);
 let DEV = opt("dev", "") === "1" || (() => { try { return localStorage.getItem("dslink.dev") === "1"; } catch { return false; } })();
@@ -22,6 +32,10 @@ const SYS = [
   { key: "bios9", file: "bios9.bin", title: "BIOS ARM9", sizes: [4096] },
   { key: "firmware", file: "firmware.bin", title: "Firmware", sizes: [131072, 262144, 524288] },
 ];
+// PlayStation BIOS files (any of the three regions): same Cloud rules as the DS system files, own list in the page
+const PS1_SYS = BIOS_SLOTS.map((b) => ({ key: b.key, file: b.file, title: b.title, sizes: [BIOS_SIZE], ps1: true }));
+const SYS_ALL = [...SYS, ...PS1_SYS];
+let libFilter = "all", currentProfile = null, gamepad = null, ps1x = null;
 let store = null, caps = null, games = [], sysInfo = {}, player = null, controls = null, current = null, guard = false, saveChain = Promise.resolve(), savesWritten = 0, friends = null, cloud = null, cloudUi = null, cfiles = null, partyVoice = null, partyUi = null, netTable = null, refsText = null, assist = null;
 
 const show = (name) => { document.body.dataset.screen = name; document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("on", s.dataset.screen === name)); };
@@ -83,13 +97,13 @@ function renderDiag() {
   $("diagText").textContent = lines.join("\n");
 }
 // The cloud identifies a game by platform + product code (stable across devices and regions of the same dump); the file itself is only ever local.
-const gameIdOf = (g) => (g && g.code ? "nds-" + String(g.code).toLowerCase().replace(/[^a-z0-9]/g, "") : "");
+const gameIdOf = (g) => gameIdOfProfile(g);
 function localByGameId() { const m = new Map(); for (const g of games) { const id = gameIdOf(g); if (id.length >= 5 && !m.has(id)) m.set(id, g); } return m; }
 let syncT = 0;
 function syncLibrary() {                       // push this device's library METADATA (never files) after login and whenever the local library changes
   clearTimeout(syncT); syncT = setTimeout(() => {
     if (!cloud || cloud.state !== "user") return;
-    const entries = games.filter((g) => gameIdOf(g).length >= 5).map((g) => ({ gameId: gameIdOf(g), platform: "nds", title: g.title || g.code, productCode: g.code, coreId: "melonds-ds", multiplayerMode: "distributed", downloadPlaySupported: false }));
+    const entries = games.filter((g) => gameIdOf(g).length >= 5).map((g) => cloudEntry(profileOfMeta(g)));
     cloud.syncLibrary(entries).catch(() => {});
   }, 400);
 }
@@ -101,21 +115,35 @@ async function refresh() {
       try { games.push(JSON.parse(new TextDecoder().decode(await store.get(p)))); } catch { /* damaged entry: ignore */ }
     }
     for (const s of SYS) { const b = await store.get("system/" + s.file); sysInfo[s.key] = b ? { size: b.byteLength, ok: s.sizes.includes(b.byteLength) } : null; }
+    for (const s of PS1_SYS) { const b = await store.get("system/" + s.file); const r = b ? inspectBios(b) : null; sysInfo[s.key] = b ? { size: b.byteLength, ok: !!(r && r.ok), version: r && r.version, date: r && r.date } : null; }
     const rb = await store.get("system/refs.json"); refsText = rb ? new TextDecoder().decode(rb) : null;      // screen references: this device only, never sent, never logged
   }
   games.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
   renderLibrary(); syncLibrary();
 }
 
+function renderFilter() {
+  const box = $("platformFilter"); if (!box) return; box.innerHTML = "";
+  const present = availablePlatforms().filter((p) => games.some((g) => (g.platform || PLATFORMS.NDS) === p));
+  box.hidden = present.length < 2; if (libFilter !== "all" && !present.includes(libFilter)) libFilter = "all";
+  if (box.hidden) return;
+  for (const [id, txt] of [["all", "TUTTI"], ...present.map((p) => [p, p === PLATFORMS.NDS ? "NINTENDO DS" : "PLAYSTATION"])]) {
+    const b = document.createElement("button"); b.className = "chip" + (libFilter === id ? " on" : ""); b.dataset.filter = id; b.textContent = txt; b.onclick = () => { libFilter = id; renderLibrary(); }; box.append(b);
+  }
+}
 function renderLibrary() {
+  renderFilter();
   const ul = $("gameList"); ul.innerHTML = "";
   if (!games.length && !(cfiles && cfiles.ready && cfiles.games.size)) { const li = document.createElement("li"); li.textContent = "Nessun gioco. Aggiungine uno."; ul.append(li); }
   const cl = cfiles && cfiles.ready;
   for (const g of games) {
-    const gid = gameIdOf(g), inCloud = cl && gid && cfiles.inCloud(gid);
-    const li = document.createElement("li"); li.className = "game"; li.dataset.id = g.id; if (cl) li.dataset.state = inCloud ? "both" : "local";
-    const t = document.createElement("span"); t.className = "t"; t.textContent = g.title || g.id; const sm = document.createElement("small"); sm.textContent = (g.code || "") + " · " + fmtSize(g.size); t.append(sm);
-    if (cl) { const tag = document.createElement("span"); tag.className = "tag " + (inCloud ? "both" : ""); tag.textContent = inCloud ? "LOCALE + CLOUD" : "SOLO LOCALE"; t.append(tag); }
+    const ps1 = g.platform === PLATFORMS.PS1; if (libFilter !== "all" && libFilter !== (g.platform || PLATFORMS.NDS)) continue;
+    const gid = gameIdOf(g), inCloud = cl && gid && (ps1 ? cfiles.heads.has(gid) : cfiles.inCloud(gid));
+    const li = document.createElement("li"); li.className = "game"; li.dataset.id = g.id; li.dataset.platform = g.platform || PLATFORMS.NDS; if (cl) li.dataset.state = inCloud ? "both" : "local";
+    const t = document.createElement("span"); t.className = "t"; t.textContent = g.title || g.id; const sm = document.createElement("small");
+    sm.textContent = ps1 ? (g.serial || "PlayStation") + ((g.discs || []).length > 1 ? " · " + g.discs.length + " dischi" : "") + " · " + fmtSize(g.size) : (g.code || "") + " · " + fmtSize(g.size); t.append(sm);
+    const plat = document.createElement("span"); plat.className = "plat"; plat.textContent = ps1 ? "PS1" : "DS"; t.append(plat);
+    if (cl) { const tag = document.createElement("span"); tag.className = "tag " + (inCloud ? "both" : ""); tag.textContent = ps1 ? (inCloud ? "SALVATAGGI NEL CLOUD" : "SOLO LOCALE") : (inCloud ? "LOCALE + CLOUD" : "SOLO LOCALE"); t.append(tag); }
     if (cl && cfiles.conflicts.has(g.id)) { const w = document.createElement("span"); w.className = "tag warn"; w.textContent = "⚠ DUE SALVATAGGI"; t.append(w); }
     const play = document.createElement("button"); play.className = "cta primary play"; play.textContent = "GIOCA"; play.onclick = () => playGame(g.id);
     const del = document.createElement("button"); del.className = "del"; del.setAttribute("aria-label", "Rimuovi dal dispositivo"); del.textContent = "✕"; del.onclick = () => removeGame(g);
@@ -123,7 +151,8 @@ function renderLibrary() {
     if (cl) {
       const acts = document.createElement("div"); acts.className = "acts";
       const mk = (txt, fn, cls = "mini") => { const b = document.createElement("button"); b.className = cls; b.textContent = txt; b.onclick = fn; acts.append(b); return b; };
-      if (!inCloud) mk("SALVA NEL MIO CLOUD", () => uploadGameUi(g));
+      if (ps1) { if (!inCloud) mk("SALVA NEL MIO CLOUD", () => pushPs1Save(g)); }                            // PlayStation: the Cloud keeps the memory card (saves); the disc image stays on the device
+      else if (!inCloud) mk("SALVA NEL MIO CLOUD", () => uploadGameUi(g));
       else { mk("RIMUOVI DAL DISPOSITIVO", () => removeGame(g)); mk("RIMUOVI DAL CLOUD", () => removeFromCloud(gid, g.title), "mini danger"); }
       if (inCloud || cfiles.heads.has(gid)) mk("SALVATAGGI", () => openHistory(g, gid));
       if (cfiles.conflicts.has(g.id)) mk("RISOLVI", () => askConflict(cfiles.conflicts.get(g.id)), "mini primary");
@@ -166,6 +195,24 @@ function renderLibrary() {
     }
     sl.append(li);
   }
+  const pl = $("ps1SysList");
+  if (pl) {
+    pl.innerHTML = "";
+    for (const s of PS1_SYS) {
+      const li = document.createElement("li"); li.dataset.key = s.key; const t = document.createElement("span"); t.className = "t"; t.textContent = s.title; const st = document.createElement("small"); const info = sysInfo[s.key];
+      if (!info) st.textContent = "Non presente"; else if (info.ok) { st.textContent = `✓ importato · v${info.version} ${info.date}`; st.className = "ok"; } else { st.textContent = "File non valido"; st.className = "bad"; }
+      t.append(st); li.append(t);
+      if (cl) {
+        const inC = cfiles.system.has(s.file), here = info && info.ok, acts = document.createElement("div"); acts.className = "acts"; li.dataset.cloud = inC ? "1" : "0";
+        const mk = (txt, fn, cls = "mini") => { const b = document.createElement("button"); b.className = cls; b.textContent = txt; b.onclick = fn; acts.append(b); };
+        if (here && !inC) mk("SALVA NEL MIO CLOUD", () => uploadSystemUi(s));
+        if (!here && inC) mk("RECUPERA DAL CLOUD", () => recoverSystemUi(s));
+        if (inC) { const c = document.createElement("small"); c.className = "ok"; c.textContent = "☁ nel tuo Cloud"; acts.append(c); mk("RIMUOVI DAL CLOUD", () => removeSystemFromCloud(s), "mini danger"); }
+        li.append(acts);
+      }
+      pl.append(li);
+    }
+  }
   const rl = document.createElement("li"); rl.dataset.key = "refs";
   const rt = document.createElement("span"); rt.className = "t"; rt.textContent = "Riferimenti schermate (refs.json), solo per ospitare"; const rs = document.createElement("small");
   const rv = refsText ? validateRefs(refsText) : null;
@@ -191,8 +238,14 @@ function romInfo(buf) {
   if (!/^[A-Z0-9]{4}$/.test(code)) return null;
   return { title: ascii(0, 12) || code, code };
 }
+$("ps1BiosFile").onchange = () => importPs1Bios($("ps1BiosFile"));
 $("romFile").onchange = async (e) => {
-  const f = e.target.files[0]; e.target.value = ""; if (!f || !store) return;
+  const picked = [...e.target.files]; e.target.value = ""; if (!picked.length || !store) return;
+  const isDs = (f) => /\.(nds|srl)$/i.test(f.name), ds = picked.filter(isDs), rest = picked.filter((f) => !isDs(f));
+  for (const f of ds) await importNds(f);
+  if (rest.length) await importPs1(rest);
+};
+async function importNds(f) {
   $("libErr").textContent = "Aggiungo il gioco…";
   try {
     const buf = await f.arrayBuffer(); const info = romInfo(buf);
@@ -204,7 +257,62 @@ $("romFile").onchange = async (e) => {
     $("libErr").textContent = ""; await refresh();
     if (autoCloud() && cfiles && cfiles.ready) { const lg = games.find((x) => x.id === id); if (lg) await uploadGameUi(lg); }
   } catch (err) { $("libErr").textContent = "Non riesco a salvare il gioco: " + (err && err.message || err); }
-};
+}
+
+// ---- PlayStation: group the picked files into games, let the core identify every disc, stream the files into the device storage (never a whole disc image in memory)
+let importing = false;
+async function importPs1(picked) {
+  if (importing) return; importing = true;
+  const err = $("libErr"); const say = (m) => { err.textContent = m; };
+  try {
+    const sel = resolveRuntime({ platform: PLATFORMS.PS1 }, deviceCapabilities(caps));
+    if (!sel.ok) { say(sel.reason); return; }
+    say("Leggo i file…");
+    const { games: groups, errors } = await groupFiles(picked);
+    if (errors.length && !groups.length) { say(errors[0]); return; }
+    const done = [];
+    for (const grp of groups) {
+      say(`Controllo il disco di «${grp.title}»…`);
+      const all = new Map(); for (const d of grp.discs) for (const f of d.files) all.set(f.name, f);
+      const gen = grp.discs.filter((d) => d.generated).map((d) => ({ name: d.generated.name, blob: new Blob([d.generated.text], { type: "text/plain" }) }));
+      const mounts = [...[...all.values()].map((f) => ({ name: f.name, blob: f })), ...gen];
+      let probe; try { probe = await probeDiscs(mounts, grp.discs.map((d) => d.main)); } catch (e) { say("Non riesco a leggere il disco: " + (e && e.message || e)); continue; }
+      const bad = grp.discs.map((d) => probe[d.main]).find((r) => !r || !r.ok);
+      if (bad) { say(`«${grp.title}»: ` + (IMPORT_ERR[bad && bad.error] || "disco non valido") + (errors.length ? " " + errors[0] : "")); continue; }
+      const first = probe[grp.discs[0].main], serial = first.serial || "";
+      const id = await contentId(grp, sha256Hex), total = [...all.values()].reduce((n, f) => n + f.size, 0);
+      try {
+        let copied = 0;
+        for (const f of all.values()) { let last = 0; await store.putBlob(`library/${id}/disc/${f.name}`, f, (n) => { copied += n - last; last = n; say(`Copio «${grp.title}»… ${Math.floor((copied / total) * 100)}%`); }); }
+        for (const g of gen) await store.putBlob(`library/${id}/disc/${g.name}`, g.blob);
+      } catch (e) {
+        for (const f of [...all.keys(), ...gen.map((g) => g.name)]) await store.del(`library/${id}/disc/${f}`).catch(() => {});
+        say(e && e.name === "QuotaExceededError" ? "Spazio del browser esaurito su questo dispositivo. Libera spazio e riprova." : "Non riesco a salvare il gioco: " + (e && e.message || e)); continue;
+      }
+      const meta = { id, platform: PLATFORMS.PS1, title: grp.title, serial, cid: id, format: first.format, region: "", size: total, added: Date.now(), analog: false,
+        files: [...all.values()].map((f) => ({ name: f.name, size: f.size })).concat(gen.map((g) => ({ name: g.name, size: g.blob.size }))),
+        discs: grp.discs.map((d, i) => ({ file: d.main, label: grp.discs.length > 1 ? `Disco ${i + 1}` : "Disco 1", serial: (probe[d.main] || {}).serial || "" })) };
+      meta.region = profileOfMeta(meta).region;
+      await store.put(`library/${id}/meta.json`, new TextEncoder().encode(JSON.stringify(meta)).buffer); done.push(meta.title);
+    }
+    say(done.length ? "" : err.textContent); await refresh();
+    if (done.length) { say(""); if (autoCloud() && cfiles && cfiles.ready) for (const g of games.filter((x) => x.platform === PLATFORMS.PS1)) pushPs1Save(g).catch(() => {}); }
+  } finally { importing = false; }
+}
+/** PlayStation BIOS: recognised by content, stored under its region */
+async function importPs1Bios(inp) {
+  const f = inp.files[0]; inp.value = ""; if (!f || !store) return;
+  const buf = await f.arrayBuffer(), r = inspectBios(buf);
+  if (!r.ok) { $("libErr").textContent = BIOS_ERR[r.error]; return; }
+  $("libErr").textContent = ""; await store.put("system/" + r.slot.file, buf); await refresh();
+  if (autoCloud() && cfiles && cfiles.ready) await uploadSystemUi(PS1_SYS.find((x) => x.key === r.slot.key));
+}
+/** the first push of a PlayStation game's memory card to the account's Cloud (the user's choice, or "salva nel Cloud" automatically); after that it syncs like every other save */
+async function pushPs1Save(g) {
+  const gid = gameIdOf(g); if (!gid || !cfiles || !cfiles.ready) return { ok: false };
+  const r = await cfiles.syncSave(g.id, gid); if (r.action === "conflict") await askConflict(r.conflict);
+  await cfiles.refresh(); renderLibrary(); updateUsage(); toast(r.action === "none" ? "Nessun salvataggio da inviare ancora" : "Salvataggio nel Cloud"); return r;
+}
 async function importSystem(s, inp) {
   const f = inp.files[0]; inp.value = ""; if (!f || !store) return;
   const buf = await f.arrayBuffer();
@@ -223,13 +331,14 @@ async function removeGame(g) {
   const gid = gameIdOf(g), inC = cfiles && cfiles.ready && gid && cfiles.inCloud(gid);
   if (!store || !confirm(inC ? `Rimuovere "${g.title}" da questo dispositivo? Resta nel tuo Cloud: potrai scaricarlo di nuovo.` : `Rimuovere "${g.title}" e il suo salvataggio da questo dispositivo?`)) return;
   if (cfiles && cfiles.ready && gid && !inC && cfiles.heads.has(gid)) await cfiles.syncSave(g.id, gid).catch(() => {});      // the Cloud keeps this game's save: make sure it has the latest before the local copy goes
-  for (const n of ["rom.nds", "meta.json", "save", "save.meta.json", "sync.json", "save.bak", "save.conflict"]) await store.del(`library/${g.id}/${n}`);
+  const extra = g.platform === PLATFORMS.PS1 ? [...(g.files || []).map((f) => "disc/" + f.name), ...[1, 2, 3, 4, 5].flatMap((n) => [`state${n}`, `state${n}.json`])] : [];
+  for (const n of ["rom.nds", "meta.json", "save", "save.meta.json", "sync.json", "save.bak", "save.conflict", ...extra]) await store.del(`library/${g.id}/${n}`);
   await refresh();
 }
 
 // ---------------------------------------------------------------- play
-const KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", z: "b", x: "a", a: "y", s: "x", q: "l", w: "r", Enter: "start", Shift: "select" };
-const onKey = (d) => (e) => { const k = KEYS[e.key]; if (k && player) { player.btn(k, d); e.preventDefault(); } };
+const KEYS_DS = inputProfileFor({ platform: PLATFORMS.NDS }).keys;
+const onKey = (d) => (e) => { const k = (currentProfile ? inputProfileFor(currentProfile).keys : KEYS_DS)[e.key]; if (k && player) { player.btn(k, d); e.preventDefault(); } };
 const kd = onKey(true), ku = onKey(false);
 
 async function playGame(id, session) {
@@ -237,7 +346,12 @@ async function playGame(id, session) {
   const dlGuest = id === null;                           // Download Play guest: NO cartridge, the console boots its own firmware menu
   const g = dlGuest ? { id: "dl-guest", title: "Download Play" } : games.find((x) => x.id === id); if (!g) return;
   id = g.id; current = id;
-  player = new Player({
+  const profile = dlGuest ? null : profileOfMeta(g);
+  currentProfile = profile || { platform: PLATFORMS.NDS, inputProfile: "NDS_STANDARD" };
+  const sel = dlGuest ? { ok: true, coreId: "melonds" } : resolveRuntime(profile, deviceCapabilities(caps));      // the user never picks a core: the platform decides
+  if (!sel.ok) { fail(sel.reason); return; }
+  player = createGameSession(sel, {
+    onRumble: (strong, weak) => { if (gamepad) gamepad.rumble(strong, weak); },
     canvas: document.createElement("canvas"),
     onSram: (gid, data) => { saveChain = saveChain.then(() => store.put(`library/${gid}/save`, data)).then(() => { savesWritten++; if (cfiles) cfiles.markLocalSave(gid); }).catch(() => { $("libErr").textContent = "Salvataggio non riuscito"; }); },
     onError: (msg) => fail(msg),
@@ -248,8 +362,15 @@ async function playGame(id, session) {
   player.prepare();                       // the tap's gesture creates the AudioContext
   $("loadingNote").textContent = "Carico " + (g.title || "il gioco") + "…"; show("loading");
   try {
-    const rom = dlGuest ? null : await store.get(`library/${id}/rom.nds`); if (!dlGuest && !rom) throw new Error("Gioco non trovato nell'archivio");
-    const system = {}; for (const s of SYS) { const b = await store.get("system/" + s.file); if (b && s.sizes.includes(b.byteLength)) system[s.file] = b; }
+    const isPs1 = g.platform === PLATFORMS.PS1; let rom = null, system = {}, extra;
+    if (isPs1) {
+      const pr = await preparePs1(g);
+      if (!pr) { const p = player; player = null; if (p) await p.stop(); current = null; currentProfile = null; show("library"); return; }        // the user chose not to continue
+      system = pr.system; extra = pr.extra;
+    } else {
+      rom = dlGuest ? null : await store.get(`library/${id}/rom.nds`); if (!dlGuest && !rom) throw new Error("Gioco non trovato nell'archivio");
+      for (const s of SYS) { const b = await store.get("system/" + s.file); if (b && s.sizes.includes(b.byteLength)) system[s.file] = b; }
+    }
     if (!dlGuest && cfiles && cfiles.ready) {                           // latest save from the account's other devices (short, best effort: offline or slow never blocks the game)
       const gidc = gameIdOf(g);
       if (gidc && (cfiles.inCloud(gidc) || cfiles.heads.has(gidc))) {
@@ -259,7 +380,8 @@ async function playGame(id, session) {
     }
     const sram = dlGuest ? null : await store.get(`library/${id}/save`);
     buildGame();
-    await player.start({ id, rom, system, sram, radio: session ? { role: session.role === "host" ? 1 : 2, peer: session.peer } : undefined });
+    await player.start({ id, rom, system, sram, extra, radio: session ? { role: session.role === "host" ? 1 : 2, peer: session.peer } : undefined });
+    if (gamepad) gamepad.start();
     if (session) session.playing();
     if (duckLevel < 1) player.duck(duckLevel);                                  // a party member is speaking right now
     if (cloud) { cloud.setActivity("game", gameIdOf(g)); if (!dlGuest) cloud.markPlayed(gameIdOf(g)).catch(() => {}); }
@@ -269,6 +391,26 @@ async function playGame(id, session) {
     addEventListener("keydown", kd); addEventListener("keyup", ku);
     if (player.audioBlocked()) $("resumeHint").hidden = false;
   } catch (e) { fail(e && e.message || String(e)); }
+}
+
+// PlayStation: the disc files are lazy File objects from the device storage, the BIOS comes from the user's files. A BIOS is required; the built-in HLE BIOS is NOT used silently:
+// without one the user is told and must explicitly choose the reduced compatibility mode.
+async function preparePs1(g) {
+  const files = [];
+  for (const f of g.files || []) { const blob = await store.getFile(`library/${g.id}/disc/${f.name}`); if (!blob) throw new Error("File del disco non trovato: " + f.name); files.push({ name: f.name, blob }); }
+  const have = new Map(); for (const s of BIOS_SLOTS) { const b = await store.get("system/" + s.file); if (b && inspectBios(b).ok) have.set(s.key, b); }
+  const prof = profileOfMeta(g), bios = biosForGame(prof.region, have); let mode = "bios";
+  if (bios.status === "none") { if (!(await askHle())) return null; mode = "hle"; }
+  else if (bios.status === "other") toast("Non c'è un BIOS per la regione di questo gioco: uso un altro BIOS PlayStation");
+  const region = prof.region === "PAL" ? "PAL" : prof.region === "NTSC-U" || prof.region === "NTSC-J" ? "NTSC" : "auto";
+  window.__ps1Start = { bios: mode, region, biosStatus: bios.status };                                              // read-only diagnostics for the tests
+  return { system: bios.files, extra: { files, discs: (g.discs || []).map((d) => d.file), options: { bios: mode, region, analog: !!g.analog } } };
+}
+function askHle() {
+  return new Promise((resolve) => {
+    const done = (v) => { $("hleBox").hidden = true; resolve(v); };
+    $("btnHleGo").onclick = () => done(true); $("btnHleNo").onclick = () => done(false); $("hleBox").hidden = false;
+  });
 }
 
 // Download Play assistant: the host's game menus / the guest's DS menu are driven automatically (see dlassist.js)
@@ -283,8 +425,13 @@ function stopAssist() { if (assist) { assist.stop(); assist = null; } $("assistS
 function buildGame() {
   const root = $("game"); root.innerHTML = ""; root.hidden = false;
   const canvas = player.canvas; let down = false;
-  const sink = { btn: (k, d) => player.btn(k, !!d), stylus: (x, y, d, m) => { if (!m) down = !!d; player.touch(x, y, m ? down : !!d); }, ui() {} };
-  controls = mountControls({ container: root, video: canvas, platform: "nds", persist: true, onLeave: () => askLeave(), sink });
+  const ip = inputProfileFor(currentProfile), ps1 = currentProfile.platform === PLATFORMS.PS1;
+  const sink = { btn: (k, d) => player.btn(k, !!d), stylus: (x, y, d, m) => { if (!m) down = !!d; player.touch(x, y, m ? down : !!d); }, ui(name) { if (ps1 && name === "menu" && ps1x) ps1x.onMenu(); } };
+  controls = mountControls({ container: root, video: canvas, platform: ip.touchLayout, persist: true, onLeave: () => askLeave(), sink });     // "nds" or "ps1": both layouts are the approved ones
+  if (ps1) ps1x = mountPs1Extras({ container: root, controls, session: player, store, gameId: current, profile: currentProfile, toast, pad: () => (gamepad && gamepad.info) || null,
+    setAnalogPref: (on) => { const g = games.find((x) => x.id === current); if (g) { g.analog = on; store.put(`library/${g.id}/meta.json`, new TextEncoder().encode(JSON.stringify(g)).buffer).catch(() => {}); } if (ps1x) ps1x.showSticks(on); } });
+  // physical controllers (Gamepad API): one internal mapping for every core; a second pad is player 2 where the system has one (PlayStation)
+  gamepad = new GamepadInput({ btn: (n, d, port) => { if (port === 0 || ps1) player.btn(n, d, port); }, analog: ps1 ? (lx, ly, rx, ry, port) => player.analog(lx, ly, rx, ry, port) : undefined }, () => !!(player && player.analogOn));
 }
 function askLeave() { $("confirm").hidden = false; }
 $("confirmNo").onclick = () => { $("confirm").hidden = true; };
@@ -298,9 +445,10 @@ async function leave(fromCore) {
   const p = player; player = null; if (p) await p.stop();
   await saveChain;                                         // the last save is on disk before the library shows again
   const leftId = current;
+  if (gamepad) { gamepad.stop(); gamepad = null; } if (ps1x) { ps1x.destroy(); ps1x = null; }
   if (controls) { controls.destroy(); controls = null; }
   $("game").hidden = true; $("game").innerHTML = ""; $("app").style.display = ""; $("resumeHint").hidden = true;
-  current = null; show("library"); if (cloud) cloud.setActivity("menu");
+  current = null; currentProfile = null; show("library"); if (cloud) cloud.setActivity("menu");
   afterGame(leftId);
   showUpdateBar();
 }
@@ -308,8 +456,9 @@ function fail(msg) {
   stopAssist();
   if (friends) friends.endSession().catch(() => {});
   const p = player; player = null; if (p) p.stop().catch(() => {});
+  if (gamepad) { gamepad.stop(); gamepad = null; } if (ps1x) { ps1x.destroy(); ps1x = null; }
   if (controls) { controls.destroy(); controls = null; }
-  $("game").hidden = true; $("game").innerHTML = ""; $("app").style.display = ""; current = null;
+  $("game").hidden = true; $("game").innerHTML = ""; $("app").style.display = ""; current = null; currentProfile = null;
   $("errorNote").textContent = msg; show("error"); if (cloud) cloud.setActivity("menu");
 }
 $("btnErrBack").onclick = () => show("library");
@@ -385,7 +534,7 @@ async function playCloudOnly(gid) { const id = await downloadInstall(gid); if (i
 async function cloudStart() {                                // after login / session restore
   if (!cfiles) return;
   await cfiles.refresh();
-  const got = await cfiles.pullSystem(SYS);                  // BIOS / firmware from the account's Cloud, if this device lacks them
+  const got = await cfiles.pullSystem(SYS_ALL);              // BIOS / firmware from the account's Cloud, if this device lacks them
   if (got.length) await refresh();
   renderLibrary(); updateUsage();
   await syncEverything(false);
@@ -395,7 +544,7 @@ async function syncEverything(manual) {
   if (!cfiles || !cfiles.ready || syncing) return; syncing = true; $("syncNote").textContent = "Sincronizzo…";
   try {
     const out = await cfiles.syncAll(games, gameIdOf);
-    const got = await cfiles.pullSystem(SYS); if (got.length) await refresh();
+    const got = await cfiles.pullSystem(SYS_ALL); if (got.length) await refresh();
     const bad = out.find((x) => x.action === "offline" || x.action === "error");
     $("syncNote").textContent = bad ? "Sincronizzazione non riuscita: riprovo appena possibile." : "Sincronizzato " + new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
     const c = [...cfiles.conflicts.values()][0]; if (c && !current) askConflict(c);
@@ -473,7 +622,9 @@ function showUpdateBar() { $("updateBar").hidden = !(waitingSW && !current); }  
 function devTick() {
   if (!player) { $("devOverlay").textContent = [`DSLink dev · ${store ? store.kind : "-"} · ${Object.entries(caps || {}).filter(([, v]) => v === true).map(([k]) => k).join(" ")}`, ...voiceLines()].join("\n"); return; }
   const s = player.stats, a = s.audio, f = (n, d = 1) => (n || 0).toFixed(d);
+  const core = s.core ? `${s.core.name} ${s.core.version}` : "melonDS DS", ps = s.ps1;
   $("devOverlay").textContent = [
+    `CORE   ${core}  ${currentProfile ? currentProfile.platform : "-"}  video ${s.video}${ps ? `  ${ps.w}x${ps.h} @ ${f(ps.fps, 2)} Hz  disc ${ps.disc + 1}/${ps.discs}` : ""}  gamepad ${gamepad && gamepad.info ? "sì" : "no"}`,
     `EMU    ${f(s.emuFps)} fps  frame ${f(s.frameMsAvg, 2)}/${f(s.frameMsMax)} ms  late ${f(s.tickLateAvgMs, 2)}/${f(s.tickLateMaxMs)} ms`,
     `VIDEO  submit ${s.submitted}  recv ${s.received}  drawn ${s.rendered}  drop(src ${s.droppedAtSource} / render ${s.droppedRender})  q ${s.queued}`,
     `RENDER ${f(s.renderFps)} fps (${s.video})  upload ${f(s.uploadMsAvg, 2)}/${f(s.uploadMsMax)} ms  draw ${f(s.drawMsAvg, 2)}/${f(s.drawMsMax)} ms  main ${f(s.mainFrameMsAvg, 2)}/${f(s.mainFrameMsMax)} ms`,
@@ -506,7 +657,7 @@ function radioLines(s) {
 
 // ---------------------------------------------------------------- test/diagnostic surface (read-only state of THIS page)
 function api() {
-  return { get player() { return player; }, get friends() { return friends; }, get cloud() { return cloud; }, get cfiles() { return cfiles; }, get party() { return partyVoice; }, get partyUi() { return partyUi; }, get games() { return games; }, askConflict, syncEverything, get cloudUi() { return cloudUi; }, get assist() { return assist; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
+  return { get profile() { return currentProfile; }, get gamepad() { return gamepad; }, get ps1x() { return ps1x; }, resolve: (platform) => resolveRuntime({ platform }, deviceCapabilities(caps)), importPs1, get store() { return store; }, get player() { return player; }, get friends() { return friends; }, get cloud() { return cloud; }, get cfiles() { return cfiles; }, get party() { return partyVoice; }, get partyUi() { return partyUi; }, get games() { return games; }, askConflict, syncEverything, get cloudUi() { return cloudUi; }, get assist() { return assist; }, get session() { return friends && friends.session; }, get controls() { return controls; }, get store() { return store; }, get caps() { return caps; }, get games() { return games; }, get savesWritten() { return savesWritten; },
     stats: () => (player ? player.stats : null), grab: () => player && player.grab(), isPlaying: () => !!current && !!player && player.running, whenSaved: () => saveChain };
 }
 boot();

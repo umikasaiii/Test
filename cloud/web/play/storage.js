@@ -1,6 +1,8 @@
 // DSLink PWA storage: everything the user imports (ROMs, BIOS, firmware) and every save lives ONLY in this browser.
 // Preferred backend: OPFS (Origin Private File System). Fallback: IndexedDB (Safari/iOS before OPFS writable streams, private windows, old browsers).
 // Logical paths:  system/bios7.bin  system/bios9.bin  system/firmware.bin  library/<rom-id>/rom.nds  library/<rom-id>/meta.json  library/<rom-id>/save
+//                 PlayStation: system/ps1-bios-na.bin  library/<id>/disc/<file>  (cue, bin, chd: streamed in, read back lazily)  library/<id>/state<N>  library/<id>/state<N>.json
+// Big files (disc images, hundreds of MB) never pass through an ArrayBuffer: putBlob() streams a File into the store, getFile() hands back a lazy File/Blob.
 // Nothing here ever touches the network, and no function logs file contents.
 
 const DB = "dslink-files", STORE = "files";
@@ -22,8 +24,11 @@ async function idbBackend() {
   const db = await idbOpen();
   return {
     kind: "idb",
-    async get(path) { const row = await idbReq(db, "readonly", (s) => s.get(path)); return row ? row.data : null; },
+    async get(path) { const row = await idbReq(db, "readonly", (s) => s.get(path)); if (!row) return null; return row.data instanceof Blob ? await row.data.arrayBuffer() : row.data; },
     async put(path, data) { await idbReq(db, "readwrite", (s) => s.put({ path, data, size: data.byteLength, t: Date.now() })); },
+    async putBlob(path, blob) { await idbReq(db, "readwrite", (s) => s.put({ path, data: blob, size: blob.size, t: Date.now() })); },
+    async getFile(path) { const row = await idbReq(db, "readonly", (s) => s.get(path)); if (!row) return null; return row.data instanceof Blob ? row.data : new Blob([row.data]); },
+    async size(path) { const row = await idbReq(db, "readonly", (s) => s.get(path)); return row ? (row.size || 0) : -1; },
     async del(path) { await idbReq(db, "readwrite", (s) => s.delete(path)); },
     async list(prefix) { const keys = await idbReq(db, "readonly", (s) => s.getAllKeys()); return keys.filter((k) => k.startsWith(prefix)); },
   };
@@ -43,6 +48,21 @@ async function opfsBackend() {
       const [dirs, name] = split(path); const d = await dirOf(dirs, true); const fh = await d.getFileHandle(name, { create: true });
       const w = await fh.createWritable(); await w.write(data); await w.close();
     },
+    async putBlob(path, blob, onProgress) {                                       // streamed: a 700 MB image is copied chunk by chunk, never held in memory
+      const [dirs, name] = split(path); const d = await dirOf(dirs, true); const fh = await d.getFileHandle(name, { create: true });
+      const w = await fh.createWritable();
+      try {
+        if (blob.stream) {
+          let n = 0; const count = new TransformStream({ transform(chunk, ctl) { n += chunk.byteLength; if (onProgress) onProgress(n); ctl.enqueue(chunk); } });
+          await blob.stream().pipeThrough(count).pipeTo(w);
+        } else { await w.write(blob); await w.close(); }
+      } catch (e) { try { await w.abort(); } catch { /* closed */ } try { await d.removeEntry(name); } catch { /* none */ } throw e; }
+    },
+    async getFile(path) {
+      try { const [dirs, name] = split(path); const d = await dirOf(dirs, false); return await (await d.getFileHandle(name)).getFile(); }
+      catch (e) { if (e && (e.name === "NotFoundError" || e.name === "TypeMismatchError")) return null; throw e; }
+    },
+    async size(path) { const f = await be.getFile(path); return f ? f.size : -1; },
     async del(path) {
       try { const [dirs, name] = split(path); const d = await dirOf(dirs, false); await d.removeEntry(name); } catch (e) { if (!(e && e.name === "NotFoundError")) throw e; }
     },
