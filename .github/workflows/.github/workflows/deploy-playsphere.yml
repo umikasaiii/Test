@@ -1,0 +1,363 @@
+name: deploy-cloudflare
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_public_e2e:
+        description: Run the public browser test after deploying
+        type: boolean
+        default: true
+
+concurrency: deploy-cloudflare
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      DSLINK_EXTRA_ORIGINS: ${{ vars.DSLINK_EXTRA_ORIGINS }}
+
+      # TURN opzionale.
+      # Se queste variabili restano vuote, PlaySphere usa solo STUN/direct P2P.
+      TURN_PROVIDER: ${{ vars.TURN_PROVIDER }}
+      TURN_URL: ${{ vars.TURN_URL }}
+      TURN_SECRET: ${{ secrets.TURN_SECRET }}
+
+      # STUN custom opzionale.
+      # Se vuoto, il progetto usa il default già previsto.
+      DSLINK_STUN_URLS: ${{ vars.DSLINK_STUN_URLS }}
+
+    outputs:
+      url: ${{ steps.prep.outputs.URL }}
+
+    steps:
+      - name: Credentials present
+        run: |
+          [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || {
+            echo "::error::add the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID"
+            exit 1
+          }
+
+      - name: Checkout PlaySphere branch
+        uses: actions/checkout@v4
+        with:
+          ref: ccr-e6bc84be-j939ke
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Private file guard
+        run: python3 scripts/check_no_private.py
+
+      - name: Worker checks before touching production
+        run: |
+          cd cloud/worker
+          npm ci --legacy-peer-deps
+          npx tsc --noEmit
+          npx vitest run
+
+      - name: Pinned upstream
+        run: git submodule update --init upstream/melonds-ds
+
+      - name: Cache Emscripten SDK
+        uses: actions/cache@v4
+        with:
+          path: build/emsdk
+          key: emsdk-${{ hashFiles('upstream/versions.env') }}
+
+      - name: Build WASM and package PWA
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            pkg-config \
+            python3
+
+          scripts/build_wasm.sh
+          scripts/package_pwa.sh
+
+      - name: Provision D1, private R2 and production Wrangler config
+        id: prep
+        run: python3 scripts/cf_prepare.py | tee -a "$GITHUB_OUTPUT"
+
+      - name: Apply D1 migrations
+        run: |
+          cd cloud/worker
+          npx wrangler d1 migrations apply dslink \
+            --remote \
+            -c wrangler.prod.jsonc
+
+      - name: Deploy Worker, PWA assets and Durable Objects
+        run: |
+          cd cloud/worker
+
+          vars=()
+
+          [ -n "$TURN_URL" ] && \
+            vars+=(--var "DSLINK_TURN_URLS:$TURN_URL")
+
+          [ -n "$TURN_PROVIDER" ] && \
+            vars+=(--var "DSLINK_TURN_PROVIDER:$TURN_PROVIDER")
+
+          [ -n "$DSLINK_STUN_URLS" ] && \
+            vars+=(--var "DSLINK_STUN_URLS:$DSLINK_STUN_URLS")
+
+          npx wrangler deploy \
+            -c wrangler.prod.jsonc \
+            "${vars[@]}"
+
+      - name: Set TURN secret only when TURN is configured
+        if: env.TURN_SECRET != '' && env.TURN_URL != ''
+        working-directory: cloud/worker
+        run: |
+          printf '%s' "$TURN_SECRET" | \
+            npx wrangler secret put \
+            DSLINK_TURN_SECRET \
+            -c wrangler.prod.jsonc >/dev/null
+
+          echo "set DSLINK_TURN_SECRET"
+
+      - name: Ensure INTERNAL_TOKEN exists
+        working-directory: cloud/worker
+        run: |
+          have=$(
+            npx wrangler secret list \
+              -c wrangler.prod.jsonc \
+              --format json |
+            python3 -c '
+          import sys,json
+          print(" ".join(s["name"] for s in json.load(sys.stdin)))
+          '
+          )
+
+          case " $have " in
+            *" INTERNAL_TOKEN "*)
+              ;;
+            *)
+              openssl rand -hex 32 | \
+                npx wrangler secret put \
+                INTERNAL_TOKEN \
+                -c wrangler.prod.jsonc >/dev/null
+
+              echo "set INTERNAL_TOKEN"
+              ;;
+          esac
+
+      - name: Smoke test public deployment
+        run: |
+          url="${{ steps.prep.outputs.URL }}"
+
+          echo "Testing $url"
+
+          for i in $(seq 1 30); do
+            curl -sf "$url/api/health" && break
+            sleep 4
+          done
+
+          curl -sf "$url/api/health"
+          echo
+
+          curl -sf -o /dev/null "$url/play/" && \
+            echo "PWA served"
+
+          curl -sf \
+            -X POST \
+            "$url/signal/create" \
+            -H 'content-type: application/json' \
+            -d '{}' |
+            head -c 120
+
+          echo
+
+          # Authenticated private-storage smoke test
+          u=smoke$RANDOM$RANDOM
+          H=(-H "origin: $url")
+
+          tok=$(
+            curl -sf \
+              -X POST \
+              "$url/api/auth/register" \
+              "${H[@]}" \
+              -H 'content-type: application/json' \
+              -d "{\"username\":\"$u\",\"password\":\"correct horse battery staple\"}" |
+            python3 -c '
+          import sys,json
+          print(json.load(sys.stdin)["token"])
+          '
+          )
+
+          head -c 4096 /dev/urandom > /tmp/s1.bin
+
+          curl -sf \
+            -X PUT \
+            "$url/api/saves/nds-smok?base=0&device=smoke-device-1&name=CI" \
+            "${H[@]}" \
+            -H "authorization: Bearer $tok" \
+            --data-binary @/tmp/s1.bin \
+            > /dev/null
+
+          curl -sf \
+            "$url/api/saves/nds-smok/data" \
+            "${H[@]}" \
+            -H "authorization: Bearer $tok" \
+            -o /tmp/s2.bin
+
+          cmp /tmp/s1.bin /tmp/s2.bin && \
+            echo "R2 round trip OK"
+
+          [ "$(
+            curl -s \
+              -o /dev/null \
+              -w '%{http_code}' \
+              "$url/api/saves/nds-smok/data"
+          )" = 401 ] && \
+            echo "anonymous refused (401)"
+
+          ice=$(
+            curl -sf \
+              "$url/api/realtime/ice" \
+              "${H[@]}" \
+              -H "authorization: Bearer $tok"
+          )
+
+          echo "$ice" | \
+            python3 -c '
+          import sys,json
+          d=json.load(sys.stdin)
+          p=d["policy"]
+          print(
+            "ICE:",
+            "TURN relay available" if p["relayAvailable"]
+            else "STUN only (relay NOT available)",
+            "- ttl",
+            d["ttlSeconds"],
+            "s"
+          )
+          '
+
+          [ "$(
+            curl -s \
+              -o /dev/null \
+              -w '%{http_code}' \
+              "$url/api/realtime/ice"
+          )" = 401 ] && \
+            echo "ICE endpoint refuses anonymous callers (401)"
+
+          curl -sf \
+            -X DELETE \
+            "$url/api/account" \
+            "${H[@]}" \
+            -H "authorization: Bearer $tok" \
+            -H 'content-type: application/json' \
+            -d "{\"confirm\":\"$u\"}" \
+            > /dev/null && \
+            echo "smoke account deleted"
+
+          echo "CLOUD API URL: $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "SIGNALING URL: $url/signal" >> "$GITHUB_STEP_SUMMARY"
+          echo "PWA URL: $url/play/" >> "$GITHUB_STEP_SUMMARY"
+
+  public-e2e:
+    needs: deploy
+    if: ${{ inputs.run_public_e2e }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout PlaySphere branch
+        uses: actions/checkout@v4
+        with:
+          ref: ccr-e6bc84be-j939ke
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Dependencies and homebrew test ROMs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi \
+            binutils-arm-none-eabi \
+            python3
+
+          mkdir -p build/rom
+          tests/rom/build.sh "$PWD/build/rom"
+
+          cd cloud/tests
+          npm install
+          npx playwright install --with-deps chrome
+
+      - name: Build large legal homebrew ROM for multipart upload test
+        run: |
+          python3 - <<'PY'
+          import struct
+
+          b = bytearray(
+              open("build/rom/dslink_test_1.nds", "rb").read()
+          )
+
+          b[12:16] = b"BIGG"
+
+          def crc16(d):
+              c = 0xffff
+              for x in d:
+                  c ^= x
+                  for _ in range(8):
+                      c = (c >> 1) ^ 0xa001 if c & 1 else c >> 1
+              return c
+
+          struct.pack_into(
+              "<H",
+              b,
+              0x15e,
+              crc16(bytes(b[:0x15e]))
+          )
+
+          pad = bytearray(
+              17 * 1024 * 1024 - len(b)
+          )
+
+          for i in range(0, len(pad), 4093):
+              pad[i] = (i // 4093) & 255
+
+          open(
+              "build/rom/dslink_big.nds",
+              "wb"
+          ).write(bytes(b) + bytes(pad))
+          PY
+
+      - name: PUBLIC private-library end to end
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: |
+          cd cloud/tests
+
+          node play_cloud_files_e2e.mjs \
+            "${{ needs.deploy.outputs.url }}" \
+            "$PWD/../../build/rom/dslink_test_1.nds" \
+            "$PWD/../../build/rom/dslink_big.nds" \
+            /tmp/playcloudfiles
+
+      - name: PUBLIC account/social/WebRTC end to end
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: |
+          cd cloud/tests
+
+          node play_cloud_e2e.mjs \
+            "${{ needs.deploy.outputs.url }}" \
+            "$PWD/../../build/rom/dslink_test_1.nds" \
+            "$PWD/../../build/rom/dslink_test_2.nds" \
+            /tmp/playcloud
