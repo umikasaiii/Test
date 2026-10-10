@@ -80,6 +80,9 @@ await until(async () => (await screen(P2.A)) === 'library', 20000);
 
 // ICE restart after the relay really dies (coturn killed, then back: allocations are gone, only a restart can recover)
 await inviteToGame(P2.A, P2.B, 'nds-dltt'); await measured(P2.A);
+// the relay may only be killed once the link is really open on BOTH sides (a slow runner can still be negotiating: then the test would measure the setup, not the recovery)
+const linkUp = await until(async () => { const a = await sess(P2.A), b = await sess(P2.B); return a && b && a.peer === 'open' && b.peer === 'open' ? a : null; }, 60000);
+check('PRECONDITION for the relay-loss test: the link is open on both sides before the relay is stopped', !!linkUp);
 const s0 = await sess(P2.A); turn('stop'); const trace = []; for (let i = 0; i < 18; i++) { await sleep(500); trace.push(await P2.A.evaluate(() => { const s = window.dslinkPlay.friends.session; return document.body.dataset.screen + '/' + (s ? s.state + '/' + (s.peer ? s.peer.state + '/' + s.peer.pc.connectionState : 'nopeer') : 'nosession'); }).catch((e) => 'err')); } console.log('TRACE', [...new Set(trace)].join(' > '));
 const mid = await sess(P2.A); turn('start');
 const healed = await until(async () => { const a = await sess(P2.A), b = await sess(P2.B); return a && b && a.peer === 'open' && b.peer === 'open' && a.m.restarts >= 1 && a.m.reconnects >= 1 ? [a, b] : null; }, 90000);
