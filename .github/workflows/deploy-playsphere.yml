@@ -1,5 +1,8 @@
 name: deploy-cloudflare
 
+# Bridge workflow: runs the PlaySphere branch. R2 is OPTIONAL: if it is not enabled on the Cloudflare account (error 10042) the deployment continues
+# without it ("R2 disabled - local storage mode"); the R2 smoke test and play_cloud_files_e2e run only when R2_ENABLED=true.
+
 on:
   workflow_dispatch:
     inputs:
@@ -24,6 +27,9 @@ jobs:
 
       DSLINK_EXTRA_ORIGINS: ${{ vars.DSLINK_EXTRA_ORIGINS }}
 
+      # R2 opzionale: "off" = non usare mai R2 (local storage mode).
+      DSLINK_R2: ${{ vars.DSLINK_R2 }}
+
       # TURN opzionale.
       # Se queste variabili restano vuote, PlaySphere usa solo STUN/direct P2P.
       TURN_PROVIDER: ${{ vars.TURN_PROVIDER }}
@@ -36,6 +42,7 @@ jobs:
 
     outputs:
       url: ${{ steps.prep.outputs.URL }}
+      r2: ${{ steps.prep.outputs.R2_ENABLED }}
 
     steps:
       - name: Credentials present
@@ -65,6 +72,9 @@ jobs:
           npx tsc --noEmit
           npx vitest run
 
+      - name: Provisioning script tests (mock Cloudflare API, R2 enabled and R2 not enabled)
+        run: python3 scripts/test_cf_prepare.py
+
       - name: Pinned upstream
         run: git submodule update --init upstream/melonds-ds
 
@@ -86,9 +96,16 @@ jobs:
           scripts/build_wasm.sh
           scripts/package_pwa.sh
 
-      - name: Provision D1, private R2 and production Wrangler config
+      - name: Provision D1, private R2 (only if the account has it) and production Wrangler config
         id: prep
-        run: python3 scripts/cf_prepare.py | tee -a "$GITHUB_OUTPUT"
+        run: |
+          python3 scripts/cf_prepare.py | tee -a "$GITHUB_OUTPUT"
+          if grep -q '^R2_ENABLED=true' "$GITHUB_OUTPUT"; then
+            echo "R2 enabled - private Cloud storage on"
+          else
+            echo "R2 disabled — local storage mode"
+            echo "R2 disabled — local storage mode" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Apply D1 migrations
         run: |
@@ -179,7 +196,7 @@ jobs:
 
           echo
 
-          # Authenticated private-storage smoke test
+          # Authenticated smoke test (private storage only when R2 is enabled)
           u=smoke$RANDOM$RANDOM
           H=(-H "origin: $url")
 
@@ -196,32 +213,55 @@ jobs:
           '
           )
 
-          head -c 4096 /dev/urandom > /tmp/s1.bin
+          R2="${{ steps.prep.outputs.R2_ENABLED }}"
 
-          curl -sf \
-            -X PUT \
-            "$url/api/saves/nds-smok?base=0&device=smoke-device-1&name=CI" \
-            "${H[@]}" \
-            -H "authorization: Bearer $tok" \
-            --data-binary @/tmp/s1.bin \
-            > /dev/null
+          if [ "$R2" = "true" ]; then
+            head -c 4096 /dev/urandom > /tmp/s1.bin
 
-          curl -sf \
-            "$url/api/saves/nds-smok/data" \
-            "${H[@]}" \
-            -H "authorization: Bearer $tok" \
-            -o /tmp/s2.bin
+            curl -sf \
+              -X PUT \
+              "$url/api/saves/nds-smok?base=0&device=smoke-device-1&name=CI" \
+              "${H[@]}" \
+              -H "authorization: Bearer $tok" \
+              --data-binary @/tmp/s1.bin \
+              > /dev/null
 
-          cmp /tmp/s1.bin /tmp/s2.bin && \
-            echo "R2 round trip OK"
+            curl -sf \
+              "$url/api/saves/nds-smok/data" \
+              "${H[@]}" \
+              -H "authorization: Bearer $tok" \
+              -o /tmp/s2.bin
 
-          [ "$(
-            curl -s \
-              -o /dev/null \
-              -w '%{http_code}' \
-              "$url/api/saves/nds-smok/data"
-          )" = 401 ] && \
-            echo "anonymous refused (401)"
+            cmp /tmp/s1.bin /tmp/s2.bin && \
+              echo "R2 round trip OK"
+
+            [ "$(
+              curl -s \
+                -o /dev/null \
+                -w '%{http_code}' \
+                "$url/api/saves/nds-smok/data"
+            )" = 401 ] && \
+              echo "anonymous refused (401)"
+          else
+            echo "R2 disabled — local storage mode"
+
+            [ "$(curl -sf "$url/api/config" | python3 -c 'import sys,json;print(json.load(sys.stdin)["storage"])')" = none ] || {
+              echo "::error::/api/config should report storage=none"; exit 1; }
+            echo "config reports storage=none"
+
+            code=$(curl -s -o /tmp/nr2.json -w '%{http_code}' "$url/api/saves/nds-smok" "${H[@]}" -H "authorization: Bearer $tok")
+            { [ "$code" = 503 ] && grep -q STORAGE_NOT_CONFIGURED /tmp/nr2.json; } || {
+              echo "::error::file routes should answer 503 STORAGE_NOT_CONFIGURED (got $code)"; exit 1; }
+            echo "file routes answer 503 STORAGE_NOT_CONFIGURED (no crash)"
+          fi
+
+          curl -sf "$url/api/friends" "${H[@]}" -H "authorization: Bearer $tok" > /dev/null && \
+            echo "account / friends OK"
+
+          [ "$(curl -s -X POST -o /dev/null -w '%{http_code}' "$url/api/party" "${H[@]}" -H "authorization: Bearer $tok")" = 201 ] || {
+            echo "::error::Party Voice signaling should answer 201"; exit 1; }
+          echo "Party Voice signaling OK"
+          curl -s -X POST -o /dev/null "$url/api/party/leave" "${H[@]}" -H "authorization: Bearer $tok"
 
           ice=$(
             curl -sf \
@@ -338,7 +378,12 @@ jobs:
           ).write(bytes(b) + bytes(pad))
           PY
 
-      - name: PUBLIC private-library end to end
+      - name: R2 disabled - local storage mode (the private-library test is skipped)
+        if: ${{ needs.deploy.outputs.r2 != 'true' }}
+        run: echo "R2 disabled — local storage mode; play_cloud_files_e2e skipped" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: PUBLIC private-library end to end (only when R2 is enabled)
+        if: ${{ needs.deploy.outputs.r2 == 'true' }}
         env:
           CHROME: /opt/google/chrome/chrome
         run: |
@@ -349,6 +394,16 @@ jobs:
             "$PWD/../../build/rom/dslink_test_1.nds" \
             "$PWD/../../build/rom/dslink_big.nds" \
             /tmp/playcloudfiles
+
+      - name: PUBLIC storage mode (what the user sees with and without private Cloud storage)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: |
+          cd cloud/tests
+
+          node play_storage_modes_e2e.mjs \
+            "${{ needs.deploy.outputs.url }}" \
+            "$PWD/../../build/rom/dslink_test_1.nds"
 
       - name: PUBLIC account/social/WebRTC end to end
         env:
