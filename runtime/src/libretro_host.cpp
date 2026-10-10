@@ -10,6 +10,17 @@
 #include <fstream>
 #include <sstream>
 
+// commands newer than the libretro.h pinned for the melonDS DS build; only answered for cores that use the extended environment
+#ifndef RETRO_ENVIRONMENT_SET_MINIMUM_AUDIO_LATENCY
+#define RETRO_ENVIRONMENT_SET_MINIMUM_AUDIO_LATENCY 63
+#endif
+#ifndef RETRO_ENVIRONMENT_SET_AUDIO_BUFFER_STATUS_CALLBACK
+#define RETRO_ENVIRONMENT_SET_AUDIO_BUFFER_STATUS_CALLBACK 62
+#endif
+#ifndef RETRO_ENVIRONMENT_SET_SAVE_STATE_DISABLE_UNDO
+#define RETRO_ENVIRONMENT_SET_SAVE_STATE_DISABLE_UNDO 0x800005
+#endif
+
 namespace dsrt {
 namespace {
 LibretroHost* g_host = nullptr;  // libretro callbacks carry no user pointer
@@ -32,7 +43,17 @@ void RETRO_CALLCONV cb_log(enum retro_log_level level, const char* fmt, ...) {
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
     if (g_host && g_host->onLog) g_host->onLog(int(level), s);
 }
+bool RETRO_CALLCONV cb_rumble(unsigned port, enum retro_rumble_effect effect, uint16_t strength) {
+    if (g_host && port < unsigned(LibretroHost::kPorts) && (effect == RETRO_RUMBLE_STRONG || effect == RETRO_RUMBLE_WEAK)) { g_host->rumble[port][effect == RETRO_RUMBLE_STRONG ? 0 : 1] = strength; return true; }
+    return false;
+}
 }  // namespace
+
+bool LibretroHost::diskReplace(unsigned i, const std::string& path) {
+    if (!disk_.replace_image_index) return false;
+    retro_game_info gi{}; gi.path = path.c_str();
+    return disk_.replace_image_index(i, &gi);
+}
 
 LibretroHost::LibretroHost() { g_host = this; }
 LibretroHost::~LibretroHost() { stop(); if (g_host == this) g_host = nullptr; }
@@ -45,12 +66,14 @@ void retro_set_audio_sample_batch(retro_audio_sample_batch_t); void retro_set_in
 void retro_init(void); void retro_deinit(void); unsigned retro_api_version(void); void retro_get_system_info(struct retro_system_info*);
 void retro_get_system_av_info(struct retro_system_av_info*); bool retro_load_game(const struct retro_game_info*); void retro_unload_game(void); void retro_run(void);
 void* retro_get_memory_data(unsigned); size_t retro_get_memory_size(unsigned);
+void retro_set_controller_port_device(unsigned, unsigned); size_t retro_serialize_size(void); bool retro_serialize(void*, size_t); bool retro_unserialize(const void*, size_t);
 }
 bool LibretroHost::loadCore(const std::string&, std::string& err) {
     p_set_environment = retro_set_environment; p_set_video_refresh = retro_set_video_refresh; p_set_audio_sample = retro_set_audio_sample;
     p_set_audio_batch = retro_set_audio_sample_batch; p_set_input_poll = retro_set_input_poll; p_set_input_state = retro_set_input_state;
     p_init = retro_init; p_deinit = retro_deinit; p_api_version = retro_api_version; p_get_system_info = retro_get_system_info; p_get_av_info = retro_get_system_av_info;
     p_load_game = retro_load_game; p_unload_game = retro_unload_game; p_run = retro_run; p_mem_data = retro_get_memory_data; p_mem_size = retro_get_memory_size;
+    p_set_controller = retro_set_controller_port_device; p_ser_size = retro_serialize_size; p_ser = retro_serialize; p_unser = retro_unserialize;
     if (p_api_version() != RETRO_API_VERSION) { err = "unsupported libretro API version " + std::to_string(p_api_version()); return false; }
     return true;
 }
@@ -71,6 +94,8 @@ bool LibretroHost::loadCore(const std::string& path, std::string& err) {
               sym(lib_, "retro_load_game", p_load_game) && sym(lib_, "retro_unload_game", p_unload_game) && sym(lib_, "retro_run", p_run);
     sym(lib_, "retro_get_memory_data", p_mem_data);
     sym(lib_, "retro_get_memory_size", p_mem_size);
+    sym(lib_, "retro_set_controller_port_device", p_set_controller);
+    sym(lib_, "retro_serialize_size", p_ser_size); sym(lib_, "retro_serialize", p_ser); sym(lib_, "retro_unserialize", p_unser);
     if (!ok) { err = "core is missing mandatory libretro symbols"; dlclose(lib_); lib_ = nullptr; return false; }
     if (p_api_version() != RETRO_API_VERSION) { err = "unsupported libretro API version " + std::to_string(p_api_version()); return false; }
     return true;
@@ -196,6 +221,18 @@ void LibretroHost::videoRefresh(const void* data, unsigned w, unsigned h, size_t
     metrics.width = w;
     metrics.height = h;
     if (pixfmt_ == RETRO_PIXEL_FORMAT_XRGB8888 && onVideo) onVideo(static_cast<const uint8_t*>(data), w, h, pitch);
+    else if (cfg_.extendedEnv && onVideo && (pixfmt_ == RETRO_PIXEL_FORMAT_RGB565 || pixfmt_ == RETRO_PIXEL_FORMAT_0RGB1555)) {
+        // The page expects B,G,R,X bytes (it uploads them as RGBA and swaps the channels on the GPU): expand 16 bit pictures here, one tight loop (auto-vectorised in the WebAssembly build)
+        convBuf_.resize(size_t(w) * h * 4);
+        const bool r565 = pixfmt_ == RETRO_PIXEL_FORMAT_RGB565;
+        for (unsigned y = 0; y < h; ++y) {
+            const uint16_t* s = reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(data) + y * pitch);
+            uint8_t* d = convBuf_.data() + size_t(y) * w * 4;
+            if (r565) for (unsigned x = 0; x < w; ++x) { const uint32_t p = s[x], r = (p >> 11) & 31, g = (p >> 5) & 63, b = p & 31; d[4 * x] = uint8_t((b << 3) | (b >> 2)); d[4 * x + 1] = uint8_t((g << 2) | (g >> 4)); d[4 * x + 2] = uint8_t((r << 3) | (r >> 2)); d[4 * x + 3] = 0; }
+            else for (unsigned x = 0; x < w; ++x) { const uint32_t p = s[x], r = (p >> 10) & 31, g = (p >> 5) & 31, b = p & 31; d[4 * x] = uint8_t((b << 3) | (b >> 2)); d[4 * x + 1] = uint8_t((g << 3) | (g >> 2)); d[4 * x + 2] = uint8_t((r << 3) | (r >> 2)); d[4 * x + 3] = 0; }
+        }
+        onVideo(convBuf_.data(), w, h, size_t(w) * 4);
+    }
 }
 
 size_t LibretroHost::audioBatch(const int16_t* d, size_t frames) {
@@ -213,6 +250,13 @@ int16_t LibretroHost::inputState(unsigned port, unsigned device, unsigned index,
             if (id == RETRO_DEVICE_ID_JOYPAD_MASK) return int16_t(b & 0xFFFF);
             return id < 16 ? int16_t((b >> id) & 1) : 0;
         }
+        case RETRO_DEVICE_ANALOG:
+            if (!cfg_.extendedEnv) return 0;
+            if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT || index == RETRO_DEVICE_INDEX_ANALOG_RIGHT) {
+                if (id > RETRO_DEVICE_ID_ANALOG_Y) return 0;
+                return int16_t(in.analog[(index == RETRO_DEVICE_INDEX_ANALOG_RIGHT ? 2 : 0) + id].load());
+            }
+            return 0;
         case RETRO_DEVICE_POINTER:
             if (index != 0) return 0;
             switch (id) {
@@ -245,7 +289,7 @@ bool LibretroHost::environment(unsigned cmd, void* data) {
             return true;
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
             auto f = *static_cast<retro_pixel_format*>(data);
-            if (f != RETRO_PIXEL_FORMAT_XRGB8888) return false;  // only what the encoder consumes
+            if (f != RETRO_PIXEL_FORMAT_XRGB8888 && !(cfg_.extendedEnv && (f == RETRO_PIXEL_FORMAT_RGB565 || f == RETRO_PIXEL_FORMAT_0RGB1555))) return false;  // only what the encoder consumes
             pixfmt_ = f;
             return true;
         }
@@ -261,10 +305,20 @@ bool LibretroHost::environment(unsigned cmd, void* data) {
             for (auto* d = o->definitions; d && d->key; ++d) defaults_[d->key] = d->default_value ? d->default_value : (d->values[0].value ? d->values[0].value : "");
             return true;
         }
+        case RETRO_ENVIRONMENT_SET_VARIABLES:
+            if (cfg_.extendedEnv) {          // V1 options: "Description; first|second|..." -> the first value is the default
+                std::lock_guard<std::mutex> l(optMu_);
+                for (auto* v = static_cast<const retro_variable*>(data); v && v->key; ++v) {
+                    std::string s = v->value ? v->value : ""; auto semi = s.find("; ");
+                    if (semi == std::string::npos) continue;
+                    std::string vals = s.substr(semi + 2); auto bar = vals.find('|');
+                    defaults_[v->key] = bar == std::string::npos ? vals : vals.substr(0, bar);
+                }
+            }
+            return true;
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS:
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL:
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL:
-        case RETRO_ENVIRONMENT_SET_VARIABLES:
             return true;  // options come from the file/defaults of V2; nothing else needed
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY:
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK:
@@ -343,13 +397,40 @@ bool LibretroHost::environment(unsigned cmd, void* data) {
             return true;
         }
         case RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES:
-            *static_cast<uint64_t*>(data) = (1ull << RETRO_DEVICE_JOYPAD) | (1ull << RETRO_DEVICE_POINTER);
+            *static_cast<uint64_t*>(data) = (1ull << RETRO_DEVICE_JOYPAD) | (1ull << RETRO_DEVICE_POINTER) | (cfg_.extendedEnv ? (1ull << RETRO_DEVICE_ANALOG) : 0);
             return true;
         case RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE:
             netpacket_ = *static_cast<const retro_netpacket_callback*>(data);
             return true;
         case RETRO_ENVIRONMENT_SHUTDOWN:
             shutdown_ = true;
+            return true;
+        case RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION:
+            if (!cfg_.extendedEnv) { ++metrics.envUnhandled; return false; }
+            *static_cast<unsigned*>(data) = 1;
+            return true;
+        case RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE:
+            if (!cfg_.extendedEnv) { ++metrics.envUnhandled; return false; }
+            disk_ = *static_cast<const retro_disk_control_callback*>(data);
+            return true;
+        case RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE:
+            if (!cfg_.extendedEnv) { ++metrics.envUnhandled; return false; }
+            diskExt_ = *static_cast<const retro_disk_control_ext_callback*>(data);
+            disk_ = { diskExt_.set_eject_state, diskExt_.get_eject_state, diskExt_.get_image_index, diskExt_.set_image_index, diskExt_.get_num_images, diskExt_.replace_image_index, diskExt_.add_image_index };
+            return true;
+        case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
+            if (!cfg_.extendedEnv) { ++metrics.envUnhandled; return false; }
+            static_cast<retro_rumble_interface*>(data)->set_rumble_state = cb_rumble;
+            return true;
+        case RETRO_ENVIRONMENT_SET_SAVE_STATE_DISABLE_UNDO:
+        case RETRO_ENVIRONMENT_SET_MINIMUM_AUDIO_LATENCY:
+        case RETRO_ENVIRONMENT_SET_AUDIO_BUFFER_STATUS_CALLBACK:
+        case RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL:
+            if (!cfg_.extendedEnv) { ++metrics.envUnhandled; return false; }
+            return true;
+        case RETRO_ENVIRONMENT_GET_CAN_DUPE:
+            if (!cfg_.extendedEnv) { ++metrics.envUnhandled; return false; }
+            *static_cast<bool*>(data) = true;
             return true;
         // Deliberately not provided (the core falls back, verified against RetroArch's identical log lines):
         // VFS (core uses libretro-common defaults), HW render (software renderer), rumble, sensors, microphone (silence),

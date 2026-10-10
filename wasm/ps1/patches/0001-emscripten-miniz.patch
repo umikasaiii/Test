@@ -1,0 +1,13 @@
+--- a/Makefile.libretro	2026-10-10 07:19:04.050690620 +0000
++++ b/Makefile.libretro	2026-10-10 07:12:32.207828530 +0000
+@@ -603,9 +603,7 @@
+    NO_MMAP = 1
+    # use emscripten's built-in zlib port instead of miniz, it has to be requested
+    # explicitly with -sUSE_ZLIB=1 (just like RetroArch's Makefile.emscripten does)
+-   USE_MINIZ = 0
+-   CFLAGS += -sUSE_ZLIB=1
+-   EXTRA_LDFLAGS += -sUSE_ZLIB=1
++   USE_MINIZ = 1
+    CFLAGS_OPT = -O2
+    CFLAGS += -DNO_DYLIB -DNO_SOCKET
+    CFLAGS += -msimd128 -ftree-vectorize
