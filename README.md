@@ -5,6 +5,11 @@
 > only** (parity baseline, not in the production image). Native Android/iOS apps are frozen (baseline `2e5ed1d`).
 > Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/CLOUD.md](docs/CLOUD.md) (status table, how to run, what is NOT done).
 
+> **PlaySphere (FASE 8):** the PWA is now multi-core — one library, DS (melonDS) and PlayStation 1 (PCSX-ReARMed), both in WebAssembly, the core is chosen
+> from the game, never by the user. See [docs/PLAYSPHERE_MULTICORE_ARCHITECTURE.md](docs/PLAYSPHERE_MULTICORE_ARCHITECTURE.md),
+> [docs/PLAYSPHERE_PS1.md](docs/PLAYSPHERE_PS1.md), [docs/PLAYSPHERE_PS1_CORE_DECISION.md](docs/PLAYSPHERE_PS1_CORE_DECISION.md) and
+> [docs/PLAYSPHERE_COMPATIBILITY.md](docs/PLAYSPHERE_COMPATIBILITY.md). Technical identifiers keep the historical `dslink` name (`LEGACY_DSLINK_IDENTIFIER`).
+
 Nintendo DS emulator for **Android and iOS** focused on **simple local multiplayer** (same Wi-Fi / hotspot), first target:
 **Mario Party DS** through the real *DS Download Play* flow. It is built on RetroArch 1.22.2 and the melonDS DS 1.4.0 libretro
 core; DSLink adds a layer that hides cores, Netplay, IPs, ports and MACs.

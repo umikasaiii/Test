@@ -3,8 +3,8 @@
 banned names/extensions, exact BIOS/firmware sizes with those names, or any file whose first 0x200 bytes form a valid NDS header."""
 import os, struct, subprocess, sys
 
-BAN_EXT = (".nds", ".srl", ".dsi", ".gba", ".chd", ".cue", ".srm", ".sav", ".dsv", ".ppm")
-BAN_NAME = ("bios7.bin", "bios9.bin", "firmware.bin", "bios.bin", "scph")
+BAN_EXT = (".nds", ".srl", ".dsi", ".gba", ".chd", ".cue", ".pbp", ".srm", ".sav", ".dsv", ".ppm", ".mcr", ".mcd")
+BAN_NAME = ("bios7.bin", "bios9.bin", "firmware.bin", "bios.bin", "scph", "psxonpsp", "ps1-bios")
 def crc16(b):
     c = 0xFFFF
     for x in b:

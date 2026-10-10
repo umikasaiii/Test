@@ -185,6 +185,15 @@ check('DISC SWAP: MENU -> CAMBIA DISCO goes through the core\'s disc control (ej
 await p.screenshot({ path: `${shots}/ps1_disc2.png` });
 await leave(p);
 
+// =================================================================================== 10. PAL: 50 Hz, never forced to 60
+await importGame(p, 'Pal Game.cue', 'Pal Game.bin');
+const palId = await p.evaluate(async () => { const g = window.dslinkPlay.games.find((x) => /Pal Game/.test(x.title)); g.region = 'PAL'; await window.dslinkPlay.store.put(`library/${g.id}/meta.json`, new TextEncoder().encode(JSON.stringify(g)).buffer); return g.id; });
+await p.reload(); await p.waitForFunction(() => window.dslinkPlay && document.body.dataset.screen === 'library');
+const upPal = await play(p, { id: palId }); await sleep(4000); const fp = await grab(p);
+const palSt = await p.evaluate(() => { const s = window.dslinkPlay.stats(); return { fps: s.ps1.fps, emu: s.emuFps, render: s.renderFps, w: s.ps1.w, h: s.ps1.h, region: window.__ps1Start.region }; });
+check('PAL: a PAL game runs at 50 Hz (not forced to 60): the core reports 50 fps, the emulation and the renderer follow it', upPal && palSt.region === 'PAL' && Math.abs(palSt.fps - 50) < 0.6 && palSt.emu > 45 && palSt.emu < 52.5 && palSt.render < 52.5 && near(pix(fp, ...LAYOUT.header), [0, 121, 57]), JSON.stringify(palSt));
+await leave(p);
+
 check('NO SCRIPT ERRORS on the page', p.errors.length === 0, p.errors.join(' | ').slice(0, 300));
 await browser.close(); srv.close();
 process.exit(R.done() ? 0 : 1);

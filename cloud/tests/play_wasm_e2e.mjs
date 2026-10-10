@@ -143,7 +143,7 @@ await page.setInputFiles('li[data-key=bios7] input', `${shots}/bad.bin`); await 
 check('system files: a wrong file is refused (not stored)', (await page.evaluate(async () => await window.dslinkPlay.store.get('system/bios7.bin'))) === null);
 fs.writeFileSync(`${shots}/fake7.bin`, Buffer.alloc(16384, 1));
 await page.setInputFiles('li[data-key=bios7] input', `${shots}/fake7.bin`); await sleep(400);
-check('system files: a right-sized file is kept in the browser storage only', (await page.evaluate(async () => (await window.dslinkPlay.store.get('system/bios7.bin')).byteLength)) === 16384 && log.every((l) => !l.includes('bios')));
+check('system files: a right-sized file is kept in the browser storage only', (await page.evaluate(async () => (await window.dslinkPlay.store.get('system/bios7.bin')).byteLength)) === 16384 && log.every((l) => !/bios[79]|firmware/.test(l)));
 await page.evaluate(async () => { await window.dslinkPlay.store.del('system/bios7.bin'); });
 
 check('WASM MEMORY (desktop)', mem > 0 && mem < 600, `${mem.toFixed(0)} MB`);

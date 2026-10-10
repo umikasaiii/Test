@@ -21,7 +21,7 @@ jobs:
         with: { node-version: "22" }
       - name: Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3 gcc-arm-none-eabi binutils-arm-none-eabi
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3 gcc-arm-none-eabi binutils-arm-none-eabi clang lld mame-tools
           cd cloud/tests && npm install && npx playwright install --with-deps chrome
       - name: Homebrew test ROMs (own code)
         run: mkdir -p build/rom && tests/rom/build.sh "$PWD/build/rom"
@@ -32,6 +32,15 @@ jobs:
           key: emsdk-${{ hashFiles('upstream/versions.env') }}
       - name: WASM BUILD (melonDS DS core + DSLink Runtime for WebAssembly)
         run: scripts/build_wasm.sh
+      - name: PLAYSPHERE PS1 core build (PCSX-ReARMed pinned in upstream/versions.env -> WebAssembly; no BIOS, no disc in the repository)
+        run: scripts/build_ps1_wasm.sh
+      - name: PLAYSPHERE PS1 + multi-core end to end in Chrome (redistributable test discs built from tools/ps1; boot, video NTSC/PAL, audio, digital + analog input, gamepad, memory card + reload, bin/cue, chd, multi-disc, disc swap, save states, DS -> PS1 -> DS switch without leaks)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: |
+          cd cloud/tests
+          node play_ps1_e2e.mjs
+          node play_multicore_e2e.mjs "$PWD/../../build/rom/dslink_test_1.nds"
       - name: AUDIO RING unit test (adaptive buffer, drift controller, underrun events, overrun guard)
         run: node cloud/tests/audio_ring_unit.mjs
       - name: PWA end to end in Chrome (load, core init, homebrew boot, video, audio pipeline, input, touch, save, save reload, OPFS + IndexedDB, offline, no network emulation)
@@ -75,6 +84,7 @@ jobs:
           cd ../tests
           node signal_contract.mjs http://localhost:8787
           node play_cloud_e2e.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_test_2.nds" /tmp/playcloud
+          node play_ps1_cloud_e2e.mjs http://localhost:8787
           node play_cloud_static.mjs http://localhost:8787 "$PWD/../../build/rom/dslink_test_1.nds"
           python3 - <<'PY'
           import struct
@@ -100,6 +110,10 @@ jobs:
         env:
           CHROME: /opt/google/chrome/chrome
         run: cd cloud/tests && node play_sw_update.mjs ../../build/pwa "$PWD/../../build/rom/dslink_test_1.nds"
+      - name: PLAYSPHERE PS1 offline (lazy core cached atomically by the service worker, game starts without network)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_ps1_offline.mjs ../../build/pwa
       - name: The PWA package carries the code and no private content
         run: |
           python3 - <<'PY'
@@ -108,7 +122,7 @@ jobs:
           for d, _, fs in os.walk("build/pwa"):
               for f in fs:
                   low = f.lower()
-                  if low.endswith((".nds", ".srl", ".srm", ".sav")) or low.startswith(("bios", "firmware", "refs")):
+                  if low.endswith((".nds", ".srl", ".srm", ".sav", ".chd", ".cue", ".mcr", ".pbp")) or low.startswith(("bios", "firmware", "refs", "scph", "psxonpsp")):
                       bad.append(os.path.join(d, f))
           print("PWA package guard:", "clean" if not bad else bad)
           sys.exit(1 if bad else 0)
