@@ -41,7 +41,7 @@ describe.each([true, false])("R2_ENABLED=%s", (R2) => {
 
   it("accounts, friends, presence, ICE (Internet multiplayer) and Party Voice work either way", async () => {
     const a = await newAccount(), b = await newAccount();
-    expect((await via(R2, a.token, "GET", "/api/me")).status).toBe(200);
+    const me = await via(R2, a.token, "GET", "/api/me"); expect(me.status).toBe(200); expect((await j(me)).storage).toBe(R2 ? "r2" : "none");
     expect((await via(R2, null, "GET", "/api/health")).status).toBe(200);
     await befriend(a, b);
     const fr = await j(await via(R2, a.token, "GET", "/api/friends"));
