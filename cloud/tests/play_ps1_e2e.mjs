@@ -159,8 +159,14 @@ await openMenu(p); await p.evaluate(() => document.querySelector('[data-act=stat
 await p.evaluate(() => window.dslinkPlay.player.btn('start', false)); await sleep(400);
 check('LOAD STATE: restoring the state keeps the game running (video continues, program alive)', pressedBefore && (await p.evaluate(() => window.dslinkPlay.isPlaying())) && near(pix(await grab(p), ...LAYOUT.header), [0, 121, 57]));
 await p.evaluate(async () => { const g = window.dslinkPlay.games.find((x) => x.discs.length === 1 && /Test Game/.test(x.title)); const m = JSON.parse(new TextDecoder().decode(await window.dslinkPlay.store.get(`library/${g.id}/state1.json`))); m.coreVersion = 'other'; await window.dslinkPlay.store.put(`library/${g.id}/state1.json`, new TextEncoder().encode(JSON.stringify(m)).buffer); });
-await openMenu(p); await p.evaluate(() => document.querySelector('[data-act=state-load][data-slot="1"]').click()); const refusedMsg = await until(async () => { const t = await p.innerText('#cloudToast'); return /altra versione del core/.test(t) ? t : null; }, 8000, 50);   // polled: a slow runner shows the message later, and it fades
-check('SAVE STATE VERSIONING: a state from another core version is refused with a message, never loaded silently', !!refusedMsg && await p.evaluate(() => window.dslinkPlay.isPlaying()));
+// the menu fills its slot rows asynchronously: on a slow runner the first click can land on a row that is being rebuilt, so click again until the refusal appears
+await openMenu(p);
+const refusedMsg = await until(async () => {
+  await p.evaluate(() => { const b = document.querySelector('[data-act=state-load][data-slot="1"]'); if (b) b.click(); });
+  await sleep(250);
+  const t = await p.innerText('#cloudToast'); return /altra versione del core/.test(t) ? t : null;
+}, 12000, 100);
+check('SAVE STATE VERSIONING: a state from another core version is refused with a message, never loaded silently', !!refusedMsg && await p.evaluate(() => window.dslinkPlay.isPlaying()), refusedMsg ? '' : 'toast: ' + JSON.stringify(await p.innerText('#cloudToast')) + ' menu: ' + (await p.evaluate(() => !!document.querySelector('[data-act=state-load]'))));
 await resume(p);
 
 // =================================================================================== 8. leave, come back: the memory card persists
