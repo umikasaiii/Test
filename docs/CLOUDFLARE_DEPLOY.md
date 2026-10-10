@@ -13,7 +13,7 @@ that can be proven locally are proven (see "What is verified"). Nothing here cla
    Optional (presigned direct-to-R2 uploads for files > 95 MiB): an R2 API token (Object Read & Write on `dslink-private`) as
    `R2_ACCESS_KEY_ID` + `R2_SECRET_ACCESS_KEY`.
 3. Run the workflow **deploy-cloudflare** (Actions → Run workflow). It: type-checks + unit-tests the Worker, provisions D1 `dslink` and the
-   private R2 bucket `dslink-private` (`scripts/cf_prepare.py`, idempotent), applies D1 migrations, deploys Worker + PWA assets +
+   private R2 bucket `dslink-private` when the account has R2 (OPTIONAL: without R2 the deploy carries on in local storage mode, see CLOUD_STORAGE.md) (`scripts/cf_prepare.py`, idempotent), applies D1 migrations, deploys Worker + PWA assets +
    Durable Objects + the Container image (`cloud/Dockerfile.runtime`: DSLink Runtime + melonDS DS + gateway — **no RetroArch, no ROM/BIOS/firmware**),
    creates the Realtime TURN key and the internal secret if missing, smoke-tests the public URL, then runs the **public end-to-end**
    (`pwa_e2e.mjs`: two accounts, friends, presence, invite, cloud session in a real Container, WebRTC) and `r2_real.mjs` (real R2).

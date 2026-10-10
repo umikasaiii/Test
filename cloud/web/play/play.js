@@ -155,7 +155,7 @@ function detailOf(g) {
   const fileActions = fileActionsFor(g, ps1, inCloud, gid).filter((a) => a.label !== "SALVATAGGI");
   fileActions.push(...(inCloud ? [] : [{ label: "RIMUOVI DAL DISPOSITIVO", fn: () => removeGame(g), cls: "mini danger" }]));
   return { game: g, title: g.title || g.id, platform: g.platform || PLATFORMS.NDS, sub: ps1 ? g.serial || "PlayStation" : g.code || "", size: g.size, discs: (g.discs || []).length,
-    state: inCloud ? "both" : "local", saveText: inCloud || (cl && cfiles.heads.has(gid)) ? "Sul dispositivo e nel Cloud" : "Su questo dispositivo", canMp: !!(prof.multiplayerCapabilities && prof.multiplayerCapabilities.mode !== "none"),
+    state: inCloud ? "both" : "local", saveText: inCloud || (cl && cfiles.heads.has(gid)) ? "Sul dispositivo e nel Cloud" : cfiles && cfiles.storageOff && cloud.state === "user" ? "Su questo dispositivo (Cloud storage non configurato)" : "Su questo dispositivo", canMp: !!(prof.multiplayerCapabilities && prof.multiplayerCapabilities.mode !== "none"),
     onPlay: () => playGame(g.id), fileActions, onHistory: cl && (inCloud || cfiles.heads.has(gid)) ? () => openHistory(g, gid) : null, friendsPlaying: fr };
 }
 /** everything the app shell (shell.js) needs from this module, as getters so the order of start-up does not matter */

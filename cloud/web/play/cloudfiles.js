@@ -12,7 +12,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export const ERR_TEXT = {
   cloud_quota_exceeded: "Spazio Cloud esaurito. Il file resta sul dispositivo.", file_too_large: "File troppo grande per il Cloud.", save_too_large: "Il salvataggio è troppo grande per il Cloud.",
-  storage_unavailable: "Il Cloud non riesce ad accedere ai file adesso. Riprova più tardi: nulla è andato perso.", network: "Cloud non raggiungibile. Il gioco in locale funziona comunque.", hash_mismatch: "Il file non è arrivato integro. Riprova.",
+  STORAGE_NOT_CONFIGURED: "Cloud storage non configurato. Il gioco in locale funziona comunque.", storage_unavailable: "Il Cloud non riesce ad accedere ai file adesso. Riprova più tardi: nulla è andato perso.", network: "Cloud non raggiungibile. Il gioco in locale funziona comunque.", hash_mismatch: "Il file non è arrivato integro. Riprova.",
   invalid_file: "Il Cloud non riconosce questo file.", game_id_mismatch: "Il file non corrisponde a questo gioco.", rate_limited: "Troppe richieste. Riprova tra poco.", too_many_uploads: "Ci sono troppi caricamenti in corso.",
   unauthenticated: "Accedi al tuo account per usare il Cloud.", file_not_found: "Il file non è più nel Cloud.", local_quota: "Spazio del browser esaurito su questo dispositivo. Libera spazio e riprova.", cancelled: "Operazione annullata.",
 };
@@ -39,7 +39,8 @@ export class CloudFiles {
   }
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit(ev) { for (const f of this.listeners) { try { f(ev, this); } catch { /* a listener never breaks sync */ } } }
-  get ready() { return this.cloud.state === "user"; }
+  get ready() { return this.cloud.state === "user" && this.cloud.storage !== "none"; }
+  get storageOff() { return this.cloud.storage === "none"; }
   url(path) { return this.cloud.cfg.api + path; }
 
   // ---------------------------------------------------------------- identity of this device (not secret, only tells the user which device wrote a save)

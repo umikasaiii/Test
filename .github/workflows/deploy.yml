@@ -1,7 +1,9 @@
 name: deploy-cloudflare
 
-# DSLink Cloud: Worker (API + signaling) + Durable Objects + D1 + a PRIVATE R2 bucket + the PWA as static assets, all on ONE origin (https://<worker>/play/). No Containers, no TURN, no Netlify.
-# Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (token: Workers Scripts:Edit, D1:Edit, Workers R2 Storage:Edit, Account Settings:Read). R2 must be enabled once in the dashboard.
+# DSLink Cloud: Worker (API + signaling) + Durable Objects + D1 + (optionally) a PRIVATE R2 bucket + the PWA as static assets, all on ONE origin (https://<worker>/play/). No Containers, no Netlify. TURN is optional.
+# Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (token: Workers Scripts:Edit, D1:Edit, Account Settings:Read, and Workers R2 Storage:Edit if you use R2).
+# R2 is OPTIONAL: if it is not enabled on the account (Cloudflare error 10042 "Please enable R2", which needs a payment method) the deployment carries on WITHOUT it ("R2 disabled - local storage mode"):
+# games, BIOS and saves stay on the devices, the file routes answer 503 STORAGE_NOT_CONFIGURED, and accounts, friends, rooms, signaling, Internet multiplayer and Party Voice work as usual. Set the variable DSLINK_R2=off to skip R2 on purpose.
 # Every run replaces the PWA and the Worker at the SAME URL; D1, R2 and Durable Object data are never deleted. See docs/CLOUD_STORAGE.md.
 # Optional repository variable DSLINK_EXTRA_ORIGINS: comma separated exact origins of a static host (e.g. a Netlify test site) allowed to call the API.
 on:
@@ -23,6 +25,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       DSLINK_EXTRA_ORIGINS: ${{ vars.DSLINK_EXTRA_ORIGINS }}
+      DSLINK_R2: ${{ vars.DSLINK_R2 }}                  # optional: "off" = never use R2 (local storage mode)
       # Internet multiplayer (optional): without them the Worker hands out public STUN only and the app says that a relay is unavailable
       TURN_PROVIDER: ${{ vars.TURN_PROVIDER }}          # label only (e.g. coturn, cloudflare, twilio-nts)
       TURN_URL: ${{ vars.TURN_URL }}                    # comma separated turn:/turns: URLs of your TURN server, e.g. turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349?transport=tcp
@@ -30,6 +33,7 @@ jobs:
       DSLINK_STUN_URLS: ${{ vars.DSLINK_STUN_URLS }}    # optional: your own STUN servers (default: public Google STUN)
     outputs:
       url: ${{ steps.prep.outputs.URL }}
+      r2: ${{ steps.prep.outputs.R2_ENABLED }}
     steps:
       - name: Credentials present
         run: |
@@ -40,8 +44,10 @@ jobs:
           node-version: "22"
       - name: Private file guard
         run: python3 scripts/check_no_private.py
-      - name: Worker checks (types and tests) before touching production
+      - name: Worker checks (types and tests, with and without R2) before touching production
         run: cd cloud/worker && npm ci --legacy-peer-deps && npx tsc --noEmit && npx vitest run
+      - name: Provisioning script tests (mock Cloudflare API, R2 enabled and R2 not enabled)
+        run: python3 scripts/test_cf_prepare.py
       - name: Pinned upstream
         run: git submodule update --init upstream/melonds-ds
       - name: Emscripten SDK (pinned)
@@ -54,9 +60,11 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config python3
           scripts/build_wasm.sh
           scripts/package_pwa.sh
-      - name: Provision D1 + the private R2 bucket and write wrangler.prod.jsonc
+      - name: Provision D1 + (when the account has R2) the private R2 bucket, and write wrangler.prod.jsonc
         id: prep
-        run: python3 scripts/cf_prepare.py | tee -a "$GITHUB_OUTPUT"
+        run: |
+          python3 scripts/cf_prepare.py | tee -a "$GITHUB_OUTPUT"
+          if grep -q '^R2_ENABLED=true' "$GITHUB_OUTPUT"; then echo "R2 enabled - private Cloud storage on"; else echo "R2 disabled - local storage mode"; echo "R2 disabled — local storage mode" >> "$GITHUB_STEP_SUMMARY"; fi
       - name: D1 migrations (remote)
         run: cd cloud/worker && npx wrangler d1 migrations apply dslink --remote -c wrangler.prod.jsonc
       - name: Deploy Worker, assets and Durable Objects
@@ -83,13 +91,26 @@ jobs:
           curl -sf "$url/api/health"; echo
           curl -sf -o /dev/null "$url/play/" && echo "PWA served"
           curl -sf -X POST "$url/signal/create" -H 'content-type: application/json' -d '{}' | head -c 120; echo
-          # authenticated private-storage smoke test: a throw-away account stores a save in R2, reads it back, an anonymous caller is refused, then the account (and its data) is deleted
-          u=smoke$RANDOM$RANDOM; H=(-H "origin: $url")
+          # authenticated smoke test with a throw-away account (deleted at the end)
+          u=smoke$RANDOM$RANDOM; H=(-H "origin: $url"); R2="${{ steps.prep.outputs.R2_ENABLED }}"
           tok=$(curl -sf -X POST "$url/api/auth/register" "${H[@]}" -H 'content-type: application/json' -d "{\"username\":\"$u\",\"password\":\"correct horse battery staple\"}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-          head -c 4096 /dev/urandom > /tmp/s1.bin
-          curl -sf -X PUT "$url/api/saves/nds-smok?base=0&device=smoke-device-1&name=CI" "${H[@]}" -H "authorization: Bearer $tok" --data-binary @/tmp/s1.bin > /dev/null
-          curl -sf "$url/api/saves/nds-smok/data" "${H[@]}" -H "authorization: Bearer $tok" -o /tmp/s2.bin && cmp /tmp/s1.bin /tmp/s2.bin && echo "R2 round trip OK"
-          [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/api/saves/nds-smok/data")" = 401 ] && echo "anonymous refused (401)"
+          if [ "$R2" = "true" ]; then
+            # private storage: the account stores a save in R2, reads it back, an anonymous caller is refused
+            head -c 4096 /dev/urandom > /tmp/s1.bin
+            curl -sf -X PUT "$url/api/saves/nds-smok?base=0&device=smoke-device-1&name=CI" "${H[@]}" -H "authorization: Bearer $tok" --data-binary @/tmp/s1.bin > /dev/null
+            curl -sf "$url/api/saves/nds-smok/data" "${H[@]}" -H "authorization: Bearer $tok" -o /tmp/s2.bin && cmp /tmp/s1.bin /tmp/s2.bin && echo "R2 round trip OK"
+            [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/api/saves/nds-smok/data")" = 401 ] && echo "anonymous refused (401)"
+          else
+            echo "R2 disabled — local storage mode"
+            [ "$(curl -sf "$url/api/config" | python3 -c 'import sys,json;print(json.load(sys.stdin)["storage"])')" = none ] || { echo "::error::/api/config should report storage=none"; exit 1; }
+            echo "config reports storage=none"
+            code=$(curl -s -o /tmp/nr2.json -w '%{http_code}' "$url/api/saves/nds-smok" "${H[@]}" -H "authorization: Bearer $tok")
+            { [ "$code" = 503 ] && grep -q STORAGE_NOT_CONFIGURED /tmp/nr2.json; } || { echo "::error::file routes should answer 503 STORAGE_NOT_CONFIGURED (got $code)"; exit 1; }
+            echo "file routes answer 503 STORAGE_NOT_CONFIGURED (no crash)"
+          fi
+          curl -sf "$url/api/friends" "${H[@]}" -H "authorization: Bearer $tok" > /dev/null && echo "account / friends OK"
+          [ "$(curl -s -X POST -o /dev/null -w '%{http_code}' "$url/api/party" "${H[@]}" -H "authorization: Bearer $tok")" = 201 ] || { echo "::error::Party Voice signaling should answer 201"; exit 1; }
+          echo "Party Voice signaling OK"; curl -s -X POST -o /dev/null "$url/api/party/leave" "${H[@]}" -H "authorization: Bearer $tok"
           ice=$(curl -sf "$url/api/realtime/ice" "${H[@]}" -H "authorization: Bearer $tok"); echo "$ice" | python3 -c 'import sys,json;d=json.load(sys.stdin);p=d["policy"];print("ICE:", "TURN relay available" if p["relayAvailable"] else "STUN only (relay NOT available)", "- ttl", d["ttlSeconds"], "s")'
           [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/api/realtime/ice")" = 401 ] && echo "ICE endpoint refuses anonymous callers (401)"
           curl -sf -X DELETE "$url/api/account" "${H[@]}" -H "authorization: Bearer $tok" -H 'content-type: application/json' -d "{\"confirm\":\"$u\"}" > /dev/null && echo "smoke account deleted"
@@ -128,10 +149,19 @@ jobs:
           for i in range(0, len(pad), 4093): pad[i] = (i // 4093) & 255
           open("build/rom/dslink_big.nds", "wb").write(bytes(b) + bytes(pad))
           PY
-      - name: PUBLIC private-library end to end (ROM and BIOS in R2, new device, saves, conflicts, offline, big upload, interrupted download)
+      - name: R2 disabled - local storage mode (the private-library test is skipped)
+        if: ${{ needs.deploy.outputs.r2 != 'true' }}
+        run: |
+          echo "R2 disabled — local storage mode: play_cloud_files_e2e skipped" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: PUBLIC private-library end to end (ROM and BIOS in R2, new device, saves, conflicts, offline, big upload, interrupted download) - only when R2 is enabled
+        if: ${{ needs.deploy.outputs.r2 == 'true' }}
         env:
           CHROME: /opt/google/chrome/chrome
         run: cd cloud/tests && node play_cloud_files_e2e.mjs "${{ needs.deploy.outputs.url }}" "$PWD/../../build/rom/dslink_test_1.nds" "$PWD/../../build/rom/dslink_big.nds" /tmp/playcloudfiles
+      - name: PUBLIC storage mode (what the user sees with and without private Cloud storage; the local game plays either way)
+        env:
+          CHROME: /opt/google/chrome/chrome
+        run: cd cloud/tests && node play_storage_modes_e2e.mjs "${{ needs.deploy.outputs.url }}" "$PWD/../../build/rom/dslink_test_1.nds"
       - name: PUBLIC end to end (accounts, friends, presence, invite, create room, code join, WebRTC)
         env:
           CHROME: /opt/google/chrome/chrome

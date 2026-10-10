@@ -86,3 +86,18 @@ The Worker serves `/play/sw.js` with `no-cache` and the rest with ETags, so a de
 
 ## Not in this phase
 Cloud saves for PS1 / other cores, TURN, party voice, SFU, final redesign. BIOS/firmware/ROM of the user are never shipped by DSLink: they only travel between the user's devices and the user's own private space.
+
+## R2 is optional (PlaySphere V1): deploying without it
+
+R2 needs a payment method on the Cloudflare account (error `10042 Please enable R2`). The deployment does **not** require it.
+
+| | R2 enabled (`R2_ENABLED=true`) | R2 not available (`R2_ENABLED=false`) |
+|---|---|---|
+| `scripts/cf_prepare.py` | creates / checks the private bucket `dslink-private` | does not fail; leaves the `STORE` binding out of `wrangler.prod.jsonc` and prints `R2_ENABLED=false` (+ `R2_REASON`) |
+| Worker | file / save routes work | `/api/files*`, `/api/saves*`, `/api/storage` and the upload / save / delete routes of `/api/library` answer **503 `STORAGE_NOT_CONFIGURED`** (an application error, never a crash); `/api/config` reports `"storage": "none"` |
+| Unchanged either way | D1, Durable Objects, accounts, friends, presence, rooms, signaling, STUN, Internet multiplayer, Party Voice, library metadata, account deletion | |
+| PWA | "SALVA NEL MIO CLOUD", Cloud bar, save sync | no Cloud upload for ROM / BIOS, Cloud save shows "Cloud storage non configurato", games and saves stay on the device; no Cloudflare wording is shown |
+| Deploy workflow | R2 smoke test (round trip, anonymous refused) + `play_cloud_files_e2e` | prints "R2 disabled — local storage mode", checks the 503, skips `play_cloud_files_e2e`; every other smoke / public test still runs |
+
+Force local storage mode with the repository variable `DSLINK_R2=off`. To turn R2 on later: enable it in the dashboard and run the workflow again (no data to migrate: nothing was ever stored there). TURN stays optional and unconfigured.
+Tests: `cloud/worker/test/r2optional.test.ts` (both configurations), `scripts/test_cf_prepare.py` (mock Cloudflare API), `cloud/tests/play_storage_modes_e2e.mjs` (UI, run against a Worker with and without R2; `wrangler.cloud.dev.nor2.jsonc`).

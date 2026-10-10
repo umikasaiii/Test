@@ -173,12 +173,12 @@ describe("Cloud files: private ROM / system storage", () => {
     expect(last).toBe(429);
   });
 
-  it("reports R2 problems as 'storage_unavailable' without leaking anything", async () => {
+  it("reports R2 problems (no binding: STORAGE_NOT_CONFIGURED; R2 failing: storage_unavailable) without leaking anything", async () => {
     const a = await newAccount(); const d = rom("DOWN", 5000);
     const req = (e: any, method: string, path: string, body?: any) => worker.fetch(new Request(ORIGIN + path, { method, headers: { authorization: `Bearer ${a.token}`, origin: ORIGIN, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }), e);
     const noBucket = { ...env, STORE: undefined } as any;
     const r1 = await req(noBucket, "POST", "/api/files/uploads", { kind: "game", name: "nds-down", size: d.length, sha256: await hex(d), header: b64url(d.subarray(0, 512)) });
-    expect(r1.status).toBe(503); expect((await r1.json() as any).error).toBe("storage_unavailable");
+    expect(r1.status).toBe(503); expect((await r1.json() as any).error).toBe("STORAGE_NOT_CONFIGURED");
     const broken = { ...env, STORE: { put: async () => { throw new Error("R2 exploded for u/secret/cf/game/abc"); }, get: async () => { throw new Error("boom"); }, head: async () => { throw new Error("boom"); }, delete: async () => { throw new Error("boom"); } } } as any;
     await upload(a.token, "game", "nds-down", d);
     const r2 = await req(broken, "GET", "/api/files/game/nds-down");

@@ -190,6 +190,7 @@ export function initShell(ctx) {
   function syncInfo() {
     if (!ctx.loggedIn()) return ["local", "Solo locale", "cloud"];
     if (!navigator.onLine || ctx.cloud.state === "offline") return ["offline", "Offline", "wifi-off"];
+    if (ctx.cfiles && ctx.cfiles.storageOff) return ["local", "Cloud storage non configurato", "cloud"];
     if (ctx.cfiles && ctx.cfiles.conflicts && ctx.cfiles.conflicts.size) return ["conflict", "Conflitto da risolvere", "sync"];
     if (ctx.syncing()) return ["syncing", "Sincronizzazione…", "sync"];
     return ["synced", "Sincronizzato", "check"];
@@ -266,7 +267,10 @@ export function initShell(ctx) {
   function renderVersion() {
     const s = `PlaySphere ${version.version}${version.commit ? " · " + String(version.commit).slice(0, 7) : ""}`; $("verLine").textContent = s; $("abVersion").textContent = s + (version.build && version.build !== "dev" ? " · build " + String(version.build).slice(0, 8) : "");
   }
-  function renderSettings() { $("cloudOff").hidden = ctx.loggedIn(); ctx.updateUsage && ctx.updateUsage(); }
+  function renderSettings() {
+    const off = ctx.cfiles && ctx.cfiles.storageOff, co = $("cloudOff");
+    co.hidden = ctx.loggedIn() && !off; co.textContent = off && ctx.loggedIn() ? "Cloud storage non configurato. Giochi, file di sistema e salvataggi restano su questo dispositivo; account, amici e multiplayer funzionano." : "Accedi per sincronizzare giochi, file di sistema e salvataggi nel tuo Cloud privato.";
+    ctx.updateUsage && ctx.updateUsage(); }
   function bindSettings() {
     $("btnSettings").onclick = () => { go("settings", { push: true }); };
     $("btnAbout").onclick = () => { $("aboutBox").hidden = false; body.classList.add("ps-lock"); $("abClose").focus(); };

@@ -58,6 +58,7 @@ async function internal(env: Env, req: Request, path: string): Promise<Response>
   if (!ok || !ticket) throw new HttpError(401, "unauthorized");   // BOTH the shared secret and a live one-time ticket
   const m = path.match(/^\/internal\/sessions\/([\w-]+)\/(files\/([\w-]+)|slot\/([12])\/system\/([\w.-]+)|save\/(\w+))$/);
   if (!m) throw new HttpError(404, "not_found");
+  if (!env.STORE) throw new HttpError(503, STORAGE_NOT_CONFIGURED);
   const stub = sessionStub(env, m[1]);
   let key: string | null;
   if (m[3]) key = (await stub.authorize(ticket, { kind: "file", id: m[3] }))?.key ?? null;
@@ -80,14 +81,25 @@ async function internal(env: Env, req: Request, path: string): Promise<Response>
   return new Response(o.body, { headers: { "content-type": "application/octet-stream", "cache-control": "no-store", "content-length": String(o.size) } });
 }
 
+/** Private Cloud storage (R2) is OPTIONAL: without the STORE binding the routes that read or write files answer 503 STORAGE_NOT_CONFIGURED (an application error, never a crash);
+ *  accounts, friends, presence, rooms, signaling, Internet multiplayer, Party Voice and the library metadata do not use it. */
+const STORAGE_NOT_CONFIGURED = "STORAGE_NOT_CONFIGURED";
+function needsStorage(method: string, path: string): boolean {
+  if (/^\/api\/(files|saves|storage)(\/|$)/.test(path)) return true;
+  if (!path.startsWith("/api/library")) return false;
+  if (method === "GET" && path === "/api/library") return false;                                   // metadata list (D1)
+  if (method === "PATCH" && /^\/api\/library\/games\/[\w-]+$/.test(path)) return false;               // rename (D1)
+  return true;                                                                                       // create / upload / complete / save / system files / delete (R2)
+}
+
 async function route(env: Env, req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   if (path.startsWith("/internal/")) return await internal(env, req, path);
   checkOrigin(env, req);
   if (path === "/api/health") return json({ ok: true });
-  if (path === "/api/config") {   // WebRTC ICE servers for the game screen (TURN credentials come from the environment, never from code)
-    return json({ iceServers: await browserIce(env), ...(env.ICE_POLICY === "relay" ? { iceTransportPolicy: "relay" } : {}) }, 200, { "cache-control": "no-store" });
+  if (path === "/api/config") {   // WebRTC ICE servers for the game screen (TURN credentials come from the environment, never from code); "storage" tells the app whether private Cloud storage exists
+    return json({ storage: env.STORE ? "r2" : "none", iceServers: await browserIce(env), ...(env.ICE_POLICY === "relay" ? { iceTransportPolicy: "relay" } : {}) }, 200, { "cache-control": "no-store" });
   }
 
   if ((path === "/api/ws" || path === "/api/party/ws") && req.headers.get("upgrade") === "websocket") {
@@ -149,6 +161,7 @@ async function route(env: Env, req: Request): Promise<Response> {
   if (rt) return rt;
   const pt = await handleParty(env, req, path, user);
   if (pt) return pt;
+  if (!env.STORE && needsStorage(req.method, path)) throw new HttpError(503, STORAGE_NOT_CONFIGURED, "Cloud storage is not configured on this deployment");
   const fl = await handleFiles(env, req, path, user);
   if (fl) return fl;
   const lib = await handleLibrary(env, req, path, user);

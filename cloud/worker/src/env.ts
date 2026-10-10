@@ -5,7 +5,7 @@ import type { PartyRoom } from "./partyroom";
 
 export interface Env {
   DB: D1Database;
-  STORE: R2Bucket;                    // PRIVATE bucket: never public, never behind a custom domain
+  STORE: R2Bucket;                    // PRIVATE bucket: never public, never behind a custom domain. OPTIONAL at runtime: absent when R2 is not enabled on the account (see needsStorage in index.ts)
   PRESENCE: DurableObjectNamespace<Presence>;
   SESSION: DurableObjectNamespace<GameSession>;
   SIGNAL: DurableObjectNamespace<SignalRoom>;   // PWA <-> PWA signaling rooms (ephemeral)

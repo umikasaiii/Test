@@ -28,6 +28,7 @@ export class Cloud {
     this.listeners = new Set(); this.ws = null; this.wsTimer = 0; this.pingTimer = 0; this.wantPresence = false; this.myState = { state: "online", gameId: "" };
     this.friends = []; this.requests = { incoming: [], outgoing: [] }; this.invites = { incoming: [], outgoing: [] }; this.library = []; this.blocked = [];
     this.presence = "OFFLINE"; this.rt = new Set();
+    this.storage = null;                                        // null = not asked yet | "r2" | "none": private Cloud storage (R2) is optional on a deployment; accounts, friends, rooms and Party never depend on it
   }
   /** raw realtime events (party invites, kicks, ...): the party layer listens here */
   onRealtime(fn) { this.rt.add(fn); return () => this.rt.delete(fn); }
@@ -40,12 +41,18 @@ export class Cloud {
       r = await fetch(this.cfg.api + path, { method, credentials: "include", headers: body !== undefined ? { "content-type": "application/json" } : undefined, body: body !== undefined ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : undefined });
     } catch { if (this.state !== "anon") this.state = this.user ? "user" : "offline"; return { ok: false, status: 0, error: "network", body: {} }; }
     let j = {}; try { j = await r.json(); } catch { /* empty */ }
+    if (j && j.error === "STORAGE_NOT_CONFIGURED") this.setStorage("none");
     return { ok: r.ok, status: r.status, error: r.ok ? "" : (j.error || "http_" + r.status), body: j };
   }
+
+  /** is the private Cloud storage configured on this deployment? (public, anonymous, cheap); anything unclear keeps the default: available */
+  setStorage(v) { if (this.storage !== v) { this.storage = v; this.emit("data"); } }
+  async probeStorage() { const r = await this.api("GET", "/api/config"); if (r.ok && r.body && r.body.storage) this.setStorage(r.body.storage === "none" ? "none" : "r2"); return this.storage; }
 
   // ---------------------------------------------------------------- session
   /** restore the session at startup (the cookie is HttpOnly: this is the only way to know). Never throws, never blocks the app. */
   async restore() {
+    this.probeStorage().catch(() => {});
     const r = await this.api("GET", "/api/me");
     if (r.ok) { this.user = r.body.user; this.passkeys = r.body.passkeys; this.avatars = r.body.avatars; this.state = "user"; this.emit("login"); this.startPresence(); await this.refreshAll(); }
     else if (r.status === 401) { this.user = null; this.state = "anon"; this.emit("anon"); }

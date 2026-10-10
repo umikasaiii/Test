@@ -10,6 +10,8 @@ import path from 'node:path';
 const [BASE, rom1, bigRom, shots = '/tmp/playcloudfiles'] = process.argv.slice(2);
 fs.mkdirSync(shots, { recursive: true });
 const results = [];
+// Private Cloud storage (R2) is OPTIONAL: on a deployment without it this suite does not apply (play_storage_modes_e2e covers that mode).
+{ const c = await fetch(BASE + '/api/config').then((r) => r.json()).catch(() => ({})); if (c.storage === 'none') { console.log('SKIPPED: R2 disabled - local storage mode (no private Cloud storage on this deployment)'); process.exit(0); } }
 const check = (name, ok, detail = '') => { results.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  -> ' + detail : ''}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 20000, step = 150) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await f(); if (v) return v; } catch { /* retry */ } await sleep(step); } return false; };
